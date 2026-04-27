@@ -216,4 +216,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Cited references from afi cli cite (regenerate locally; never committed)
 .afi/
+
+# Per-user Claude Code config
+.claude/settings.local.json
