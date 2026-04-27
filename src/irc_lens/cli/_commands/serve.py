@@ -218,16 +218,20 @@ def register(sub: argparse._SubParsersAction) -> None:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
+    # `%(default)s` lets argparse render the actual default at help-time,
+    # so the rendered "(default: …)" string can never drift from the
+    # `default=` value. Guarded by
+    # tests/test_serve_cli.py::test_serve_help_renders_defaults_from_argparse.
     p.add_argument(
         "--host",
         default="127.0.0.1",
-        help="AgentIRC server host (default: 127.0.0.1).",
+        help="AgentIRC server host (default: %(default)s).",
     )
     p.add_argument(
         "--port",
         type=int,
         default=6667,
-        help="AgentIRC server port (default: 6667).",
+        help="AgentIRC server port (default: %(default)s).",
     )
     p.add_argument(
         "--nick",
@@ -238,13 +242,13 @@ def register(sub: argparse._SubParsersAction) -> None:
         "--web-port",
         type=int,
         default=8765,
-        help="Local HTTP port for the lens UI (default: 8765).",
+        help="Local HTTP port for the lens UI (default: %(default)s).",
     )
     p.add_argument(
         "--bind",
         default="127.0.0.1",
         help=(
-            "Bind address for the local web app (default: 127.0.0.1). "
+            "Bind address for the local web app (default: %(default)s). "
             "Using 0.0.0.0 prints a warning — there is no auth in v1."
         ),
     )
