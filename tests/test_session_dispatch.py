@@ -344,3 +344,35 @@ def test_view_event_payload_is_spec_strict(session: Session) -> None:
     payload = json.loads(view.data)
     assert set(payload.keys()) == {"view"}
     assert payload["view"] in ("chat", "help", "overview", "status")
+
+
+def test_back_to_back_view_switches_publish_one_event_each(session: Session) -> None:
+    """Sequence /help → /overview → /status: each switch must emit
+    exactly one `view` event + one `info` event. Regression guard
+    against `_publish_view` ever drifting to multi-publish behaviour
+    (or a stale spec line 162 fix being undone)."""
+    sub_box: list[SessionEvent] = []
+
+    async def collect() -> None:
+        sub = session.event_bus.subscribe()
+        try:
+            for verb in (CommandType.HELP, CommandType.OVERVIEW, CommandType.STATUS):
+                await session.execute(ParsedCommand(type=verb))
+            await asyncio.sleep(0)
+            while not sub._sub.queue.empty():
+                sub_box.append(sub._sub.queue.get_nowait())
+        finally:
+            sub.close()
+
+    asyncio.run(collect())
+    names = [e.name for e in sub_box]
+    assert names.count("view") == 3, (
+        f"expected 3 view events (one per switch), got {names.count('view')}: {names}"
+    )
+    assert names.count("info") == 3, (
+        f"expected 3 info events (one per switch), got {names.count('info')}: {names}"
+    )
+    # Each view event payload reflects the active view at publish time.
+    view_payloads = [json.loads(e.data) for e in sub_box if e.name == "view"]
+    assert [p["view"] for p in view_payloads] == ["help", "overview", "status"]
+    assert session.view == "status"
