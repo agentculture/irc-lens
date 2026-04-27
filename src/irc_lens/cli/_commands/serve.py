@@ -128,10 +128,13 @@ async def _serve_async(args: argparse.Namespace) -> None:
         # connection cleanup runs on every failure path — leaking a
         # connected IRC session past process exit would orphan state
         # in the AgentIRC server. BaseException (KeyboardInterrupt,
-        # SystemExit) still propagates untouched.
-        from irc_lens.seed import apply_seed  # see module top comment
-
+        # SystemExit) still propagates untouched. The function-local
+        # import lives INSIDE the try so an import-time failure on
+        # `irc_lens.seed` (or any module it loads) also triggers the
+        # disconnect cleanup branch.
         try:
+            from irc_lens.seed import apply_seed  # see module top comment
+
             apply_seed(session, Path(args.seed))
         except Exception:
             await session.disconnect()

@@ -30,6 +30,12 @@ from playwright.async_api import async_playwright, expect
 
 pytestmark = pytest.mark.playwright
 
+# Per-locator timeout. Local runs assert in <2s; CI runners can be
+# noticeably slower under cold-cache chromium starts or hot
+# parallel jobs, so leave generous margin. Single constant so the
+# next adjustment is one edit.
+_LOCATOR_TIMEOUT_MS = 5000
+
 
 def _url(client: TestClient, path: str = "/") -> str:
     """Resolve an absolute URL the headless browser can navigate to.
@@ -50,7 +56,7 @@ async def test_seeded_chat_lines_render(seeded_lens_client: TestClient) -> None:
             page = await browser.new_page()
             await page.goto(_url(seeded_lens_client))
             await expect(page.locator('[data-testid="chat-line"]')).to_have_count(
-                2, timeout=2000
+                2, timeout=_LOCATOR_TIMEOUT_MS
             )
         finally:
             await browser.close()
@@ -68,10 +74,10 @@ async def test_typing_chat_input_appends_chat_line(
             page = await browser.new_page()
             await page.goto(_url(seeded_lens_client))
             chat_lines = page.locator('[data-testid="chat-line"]')
-            await expect(chat_lines).to_have_count(2, timeout=2000)
+            await expect(chat_lines).to_have_count(2, timeout=_LOCATOR_TIMEOUT_MS)
             await page.locator('[data-testid="chat-input"]').fill("browser hello")
             await page.locator('[data-testid="chat-input"]').press("Enter")
-            await expect(chat_lines).to_have_count(3, timeout=2000)
+            await expect(chat_lines).to_have_count(3, timeout=_LOCATOR_TIMEOUT_MS)
             await expect(chat_lines.last).to_contain_text("browser hello")
         finally:
             await browser.close()
@@ -95,7 +101,7 @@ async def test_active_channel_renders_with_active_class(
                 '[data-testid="sidebar-channel"][data-channel="#general"]'
             )
             await expect(active).to_have_class(
-                "lens-channel lens-channel--active", timeout=2000
+                "lens-channel lens-channel--active", timeout=_LOCATOR_TIMEOUT_MS
             )
         finally:
             await browser.close()
@@ -111,9 +117,9 @@ async def test_view_switch_via_help_command(seeded_lens_client: TestClient) -> N
             page = await browser.new_page()
             await page.goto(_url(seeded_lens_client))
             indicator = page.locator('[data-testid="view-indicator"]')
-            await expect(indicator).to_have_attribute("data-view", "chat", timeout=2000)
+            await expect(indicator).to_have_attribute("data-view", "chat", timeout=_LOCATOR_TIMEOUT_MS)
             await page.locator('[data-testid="chat-input"]').fill("/help")
             await page.locator('[data-testid="chat-input"]').press("Enter")
-            await expect(indicator).to_have_attribute("data-view", "help", timeout=2000)
+            await expect(indicator).to_have_attribute("data-view", "help", timeout=_LOCATOR_TIMEOUT_MS)
         finally:
             await browser.close()

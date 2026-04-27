@@ -11,20 +11,40 @@ dep.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
 
 import pytest_asyncio
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
-from pathlib import Path
-
-from irc_lens.seed import apply_seed
 from irc_lens.session import Session
 from irc_lens.web import make_app
 
 from _agentirc_server import AgentIRCTestServer
 
+# `irc_lens.seed` is imported function-locally inside
+# `seeded_lens_client` to avoid eagerly loading the cli package
+# (seed.py -> cli._errors -> cli/__init__.py) for every test.
+# Tests that don't use the seeded fixture skip the cost.
+
 _BASIC_SEED = Path(__file__).parent / "fixtures" / "basic.yaml"
+
+
+async def _serve_lens(session: Session) -> AsyncIterator[TestClient]:
+    """Spin up an aiohttp ``TestClient`` against ``session``.
+
+    Helper that ``lens_client`` and ``seeded_lens_client`` share so
+    the start/teardown shape lives in one place — no drift if either
+    fixture grows new behaviour.
+    """
+    app: web.Application = make_app(session)
+    test_server = TestServer(app)
+    client = TestClient(test_server)
+    await client.start_server()
+    try:
+        yield client
+    finally:
+        await client.close()
 
 
 @pytest_asyncio.fixture
@@ -65,14 +85,8 @@ async def lens_client(lens_session: Session) -> AsyncIterator[TestClient]:
     streaming via ``client.get('/events')`` — the same handlers
     production traffic hits, just without binding a real port.
     """
-    app: web.Application = make_app(lens_session)
-    test_server = TestServer(app)
-    client = TestClient(test_server)
-    await client.start_server()
-    try:
+    async for client in _serve_lens(lens_session):
         yield client
-    finally:
-        await client.close()
 
 
 @pytest_asyncio.fixture
@@ -82,12 +96,8 @@ async def seeded_lens_client(lens_session: Session) -> AsyncIterator[TestClient]
     deterministic DOM. ``apply_seed`` is pure state mutation, so the
     SSE bus has nothing to publish; the initial ``GET /`` render
     reads the seeded state directly."""
+    from irc_lens.seed import apply_seed  # see module top comment
+
     apply_seed(lens_session, _BASIC_SEED)
-    app: web.Application = make_app(lens_session)
-    test_server = TestServer(app)
-    client = TestClient(test_server)
-    await client.start_server()
-    try:
+    async for client in _serve_lens(lens_session):
         yield client
-    finally:
-        await client.close()
