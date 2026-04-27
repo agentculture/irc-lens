@@ -1,6 +1,8 @@
 """Cited from culture@57d3ba8: packages/agent-harness/message_buffer.py.
 
-Byte-faithful copy. No adaptation required.
+Diverged: `MessageBuffer.add` accepts an optional ``timestamp`` so the
+Phase 8 ``--seed`` loader can preload messages with a fixed clock
+without reaching into private state. See CITATION.md.
 """
 
 from __future__ import annotations
@@ -28,7 +30,13 @@ class MessageBuffer:
         self._cursors: dict[str, int] = {}
         self._totals: dict[str, int] = {}
 
-    def add(self, channel: str, nick: str, text: str) -> None:
+    def add(
+        self,
+        channel: str,
+        nick: str,
+        text: str,
+        timestamp: float | None = None,
+    ) -> None:
         if channel not in self._buffers:
             self._buffers[channel] = deque(maxlen=self.max_per_channel)
             self._totals[channel] = 0
@@ -37,8 +45,9 @@ class MessageBuffer:
         m = _THREAD_PREFIX_RE.match(text)
         if m:
             thread = m.group(1)
+        ts = time.time() if timestamp is None else float(timestamp)
         self._buffers[channel].append(
-            BufferedMessage(nick=nick, text=text, timestamp=time.time(), thread=thread)
+            BufferedMessage(nick=nick, text=text, timestamp=ts, thread=thread)
         )
         self._totals[channel] += 1
 

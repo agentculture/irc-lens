@@ -1,0 +1,15 @@
+# Phase 8 / Phase 9c canonical seed.
+# Mirrors the spec example at
+# docs/superpowers/specs/2026-04-27-irc-lens-handover-design.md lines 237–259.
+# Two preload_messages are deliberate — the Phase 8 verification gate
+# `curl / | grep chat-line | wc -l` requires ≥ 2 to pass.
+joined_channels:
+  - "#general"
+  - "#ops"
+preload_messages:
+  - {channel: "#general", nick: "alice", text: "hello world", timestamp: 1714000000}
+  - {channel: "#general", nick: "bob",   text: "hi alice",    timestamp: 1714000005}
+roster:
+  - {nick: "alice", type: "human", online: true}
+  - {nick: "bob",   type: "agent", online: true}
+current_channel: "#general"
