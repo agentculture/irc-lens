@@ -233,21 +233,50 @@ def test_serve_displays_bind_url_for_localhost(
     assert "http://127.0.0.1:65011/" in err
 
 
-def test_serve_seed_logs_deferred_diagnostic(
+def test_serve_seed_loads_yaml_fixture(
     capsys: pytest.CaptureFixture[str],
     stub_aiohttp_runtime,
     successful_connect,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """`--seed <path>` is accepted now, loader lands in Phase 8."""
+    """Phase 8: `--seed <path>` overlays YAML state onto Session before
+    `make_app` runs. Verify by spying on the loader."""
+    captured: dict[str, object] = {}
+
+    def fake_apply(session, path):
+        captured["session"] = session
+        captured["path"] = path
+
+    monkeypatch.setattr("irc_lens.cli._commands.serve.apply_seed", fake_apply)
     rc = main(
         [
             "serve",
             "--host", "x", "--port", "1", "--nick", "lens",
-            "--seed", "tests/fixtures/example.yaml",
+            "--seed", "tests/fixtures/basic.yaml",
             "--web-port", "65001",
         ]
     )
     assert rc == 0
+    assert str(captured["path"]).endswith("tests/fixtures/basic.yaml")
+
+
+def test_serve_seed_missing_file_exits_user_error(
+    capsys: pytest.CaptureFixture[str],
+    stub_aiohttp_runtime,
+    successful_connect,
+) -> None:
+    """A bad --seed path surfaces as `error:`/`hint:` per the rubric;
+    no aiohttp bind, no traceback."""
+    rc = main(
+        [
+            "serve",
+            "--host", "x", "--port", "1", "--nick", "lens",
+            "--seed", "tests/fixtures/does_not_exist.yaml",
+            "--web-port", "65001",
+        ]
+    )
+    assert rc == 1
     err = capsys.readouterr().err
-    assert "seed" in err.lower()
-    assert "deferred" in err.lower()
+    assert "error:" in err
+    assert "hint:" in err
+    assert "Traceback" not in err

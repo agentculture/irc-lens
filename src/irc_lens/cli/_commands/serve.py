@@ -13,8 +13,8 @@ Spec contract enforced:
   aiohttp never binds.
 * Web port already in use → exit 2 (env error per the policy in
   ``CLAUDE.md``).
-* ``--seed`` is accepted but deferred to Phase 8 (logged as a
-  diagnostic); the path isn't read here.
+* ``--seed`` overlays a YAML fixture onto Session state after
+  ``connect()`` — see :mod:`irc_lens.seed` for the schema.
 * ``--log-json`` switches stderr logging to one JSON object per line.
 """
 
@@ -26,11 +26,13 @@ import json
 import logging
 import sys
 import webbrowser
+from pathlib import Path
 
 from aiohttp import web
 
 from irc_lens.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
 from irc_lens.cli._output import emit_diagnostic
+from irc_lens.seed import apply_seed
 from irc_lens.session import LensConnectionLost, Session
 from irc_lens.web import make_app
 
@@ -112,6 +114,16 @@ async def _serve_async(args: argparse.Namespace) -> None:
             ),
         ) from exc
 
+    if args.seed:
+        # Spec line 261: connection is real; seed only overlays UI
+        # state. apply_seed raises AfiError on shape errors which the
+        # dispatcher renders as `error:` + `hint:`.
+        try:
+            apply_seed(session, Path(args.seed))
+        except AfiError:
+            await session.disconnect()
+            raise
+
     app = make_app(session)
     runner = web.AppRunner(app, handle_signals=True)
     await runner.setup()
@@ -158,12 +170,6 @@ def cmd_serve(args: argparse.Namespace) -> int:
 
     _configure_logging(args.log_json)
 
-    if args.seed:
-        emit_diagnostic(
-            f"--seed {args.seed}: deferred to a later phase; flag accepted, "
-            "no fixture loaded yet."
-        )
-
     try:
         asyncio.run(_serve_async(args))
     except KeyboardInterrupt:
@@ -204,8 +210,8 @@ def register(sub: argparse._SubParsersAction) -> None:
         "--seed",
         default=None,
         help=(
-            "Path to a YAML fixture preloading view state for tests "
-            "(loader lands in a later phase; flag accepted now)."
+            "Path to a YAML fixture preloading view state for tests. "
+            "See irc_lens/seed.py for the schema."
         ),
     )
     p.add_argument(
