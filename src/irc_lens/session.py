@@ -487,15 +487,15 @@ class Session:
         self._publish_info()
 
     async def _exec_help(self, _parsed: ParsedCommand) -> None:
-        await self._switch_view("help")
+        self._switch_view("help")
 
     async def _exec_overview(self, _parsed: ParsedCommand) -> None:
-        await self._switch_view("overview")
+        self._switch_view("overview")
 
     async def _exec_status(self, _parsed: ParsedCommand) -> None:
-        await self._switch_view("status")
+        self._switch_view("status")
 
-    async def _switch_view(self, name: ViewName) -> None:
+    def _switch_view(self, name: ViewName) -> None:
         """Common body for the three view-switch verbs.
 
         Sets `view`, then publishes the spec-strict `view` event
@@ -503,6 +503,12 @@ class Session:
         re-rendered pane for the new view. Two events because they
         target different DOM regions in Phase 7's lens.js: `view`
         toggles `<body data-view>` classes; `info` swaps `#info`.
+
+        Sync because every body call here (set_view, _publish_view,
+        _publish_info) is sync. The three `_exec_*` callers must
+        stay `async def` (dispatch-table contract — `await
+        handler(parsed)` in `Session.execute`) and call this
+        without `await`.
         """
         self.set_view(name)
         self._publish_view()
