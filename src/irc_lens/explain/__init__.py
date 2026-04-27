@@ -9,16 +9,17 @@ from irc_lens.cli._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.explain.catalog import ENTRIES
 
 
+def known_paths() -> list[tuple[str, ...]]:
+    return list(ENTRIES.keys())
+
+
 def resolve(path: tuple[str, ...]) -> str:
     if path in ENTRIES:
         return ENTRIES[path]
     display = " ".join(path) if path else "<root>"
+    known = ", ".join(" ".join(p) for p in known_paths() if p) or "(none)"
     raise AfiError(
         code=EXIT_USER_ERROR,
         message=f"no explain entry for: {display}",
-        remediation="list known entries with: irc-lens explain irc-lens",
+        remediation=f"known paths: {known}",
     )
-
-
-def known_paths() -> list[tuple[str, ...]]:
-    return list(ENTRIES.keys())

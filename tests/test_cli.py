@@ -90,3 +90,74 @@ def test_cli_noun_overview_json(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["cli", "overview", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["subject"] == "cli"
+
+
+def test_learn_text_lists_overview(capsys: pytest.CaptureFixture[str]) -> None:
+    """Regression: learn TEXT must mention every registered global verb."""
+    assert main(["learn"]) == 0
+    out = capsys.readouterr().out
+    assert "irc-lens overview" in out
+    assert "irc-lens cli overview" in out
+
+
+def test_learn_json_lists_overview(capsys: pytest.CaptureFixture[str]) -> None:
+    """Regression: learn JSON commands must include overview + cli overview."""
+    assert main(["learn", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    paths = [tuple(c["path"]) for c in payload["commands"]]
+    assert ("overview",) in paths
+    assert ("cli", "overview") in paths
+
+
+def test_cli_noun_no_subcommand_prints_help(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`irc-lens cli` (no verb) must print help and return 0, not AttributeError."""
+    rc = main(["cli"])
+    assert rc == 0
+    out, err = capsys.readouterr()
+    assert "overview" in out  # cli noun's help mentions its only verb
+    assert "Traceback" not in err
+    assert "unexpected" not in err.lower()
+
+
+def test_argparse_error_in_json_mode(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Parse-time errors must respect --json so machine consumers can parse."""
+    with pytest.raises(SystemExit):
+        main(["--json", "nope-not-a-verb"])
+    err = capsys.readouterr().err
+    payload = json.loads(err)  # JSON-mode errors emit to stderr per the rubric
+    assert payload["code"] != 0
+    assert "remediation" in payload
+
+
+def test_cli_overview_extra_path_warns(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`cli overview <bogus>` has no sub-subjects, so it must warn (still exit 0)."""
+    rc = main(["cli", "overview", "definitely-not-a-real-subpath"])
+    out, err = capsys.readouterr()
+    assert rc == 0, f"cli overview must exit 0 on unknown sub-path; stderr={err!r}"
+    assert "warning" in out.lower()
+
+
+def test_explain_cli_overview_resolves(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The `cli overview` noun-verb is registered, so it must be explainable."""
+    assert main(["explain", "cli", "overview"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("# irc-lens cli overview")
+
+
+def test_explain_unknown_remediation_lists_known_paths(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The remediation must enumerate real catalog paths, not point at the root page."""
+    rc = main(["explain", "zzz-not-a-real-noun"])
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "known paths:" in err
+    assert "irc-lens" in err  # at least the root noun should be listed

@@ -98,17 +98,27 @@ def _build_payload(path_tokens: tuple[str, ...]) -> dict[str, object]:
         return {"subject": "all", "path": None, "sections": _SECTIONS["all"]}
     raw_path = " ".join(path_tokens)
     head = path_tokens[0]
-    if head in _SECTIONS:
+    # Subjects are modelled as flat keys today; any path deeper than one
+    # token is necessarily an unknown sub-subject and must warn.
+    if len(path_tokens) == 1 and head in _SECTIONS:
         return {
             "subject": head,
             "path": raw_path,
             "sections": _SECTIONS[head],
         }
-    # Graceful: zero-target report + warning, exit 0.
+    # Graceful: zero-target report + warning, exit 0. If the head is a
+    # known subject, anchor the rollup there so the warning sits next to
+    # the section the user was probably trying to drill into.
+    if head in _SECTIONS:
+        subject = head
+        anchor_sections = _SECTIONS[head]
+    else:
+        subject = "all"
+        anchor_sections = _SECTIONS["all"]
     return {
-        "subject": "all",
+        "subject": subject,
         "path": raw_path,
-        "sections": [_bad_path_section(raw_path), *_SECTIONS["all"]],
+        "sections": [_bad_path_section(raw_path), *anchor_sections],
     }
 
 
@@ -163,9 +173,8 @@ def register_cli_noun_overview(sub: argparse._SubParsersAction) -> None:
     p.add_argument("--json", action="store_true", help="Emit structured JSON.")
 
     def _cmd(args: argparse.Namespace) -> int:
-        # Force subject to "cli" regardless of args.path[0].
-        forced = ["cli", *(args.path or [])]
-        args.path = forced
+        # Anchor on the `cli` subject; `_build_payload` warns on extras.
+        args.path = ["cli", *(args.path or [])]
         return cmd_overview(args)
 
     p.set_defaults(func=_cmd)

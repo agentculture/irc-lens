@@ -27,6 +27,9 @@ Commands
   irc-lens learn              Print this self-teaching prompt. Supports --json.
   irc-lens explain <path>...  Print markdown docs for any noun/verb path.
                               Supports --json.
+  irc-lens overview [path]    Descriptive rollup across interface surfaces.
+                              Unknown paths warn and exit 0. Supports --json.
+  irc-lens cli overview       Same rollup, scoped to the cli noun.
   irc-lens serve              (lands in a later phase) Launch the web console.
 
 Machine-readable output
@@ -60,6 +63,17 @@ def _as_json_payload() -> dict[str, object]:
         "commands": [
             {"path": ["learn"], "summary": "Self-teaching prompt."},
             {"path": ["explain"], "summary": "Markdown docs by path."},
+            {
+                "path": ["overview"],
+                "summary": (
+                    "Descriptive rollup across interface surfaces; unknown "
+                    "paths warn and exit 0."
+                ),
+            },
+            {
+                "path": ["cli", "overview"],
+                "summary": "Same rollup, scoped to the cli noun.",
+            },
             {
                 "path": ["serve"],
                 "summary": "Launch the web console (lands in a later phase).",

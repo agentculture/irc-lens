@@ -93,6 +93,21 @@ a single verb:
   global `overview` with subject pinned to `cli`).
 """
 
+_CLI_OVERVIEW = """\
+# irc-lens cli overview
+
+Rollup of the irc-lens CLI surface, equivalent to `irc-lens overview cli`
+but reachable through the `cli` noun. Honours the same contract as the
+global `overview`: descriptive, never hard-fails — any extra path tokens
+after `cli overview` are treated as unknown sub-subjects and produce a
+warning section, not an error.
+
+## Usage
+
+    irc-lens cli overview
+    irc-lens cli overview --json
+"""
+
 
 ENTRIES: dict[tuple[str, ...], str] = {
     (): _ROOT,
@@ -101,4 +116,5 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("explain",): _EXPLAIN,
     ("overview",): _OVERVIEW,
     ("cli",): _CLI,
+    ("cli", "overview"): _CLI_OVERVIEW,
 }
