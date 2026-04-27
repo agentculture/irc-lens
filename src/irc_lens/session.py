@@ -157,6 +157,19 @@ class Subscription:
         """Direct publish — used by the bus and exposed for tests."""
         self._sub.publish(event)
 
+    def drain_nowait(self) -> list["SessionEvent"]:
+        """Pop every queued event without awaiting. Test-only helper —
+        production code uses ``events()`` instead. Exists so tests
+        can snapshot publish output without reaching into the private
+        ``_sub.queue``."""
+        out: list[SessionEvent] = []
+        while True:
+            try:
+                out.append(self._sub.queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        return out
+
     async def events(self) -> AsyncIterator[SessionEvent]:
         try:
             async for event in self._sub.iter():
