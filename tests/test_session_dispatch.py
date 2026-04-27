@@ -54,7 +54,11 @@ def _run(coro):
 # ---------------------------------------------------------------------------
 
 
-def test_execute_join_publishes_roster_and_view(session: Session) -> None:
+def test_execute_join_publishes_roster_and_info(session: Session) -> None:
+    """JOIN changes channel context — publishes `roster` (channel list
+    changed) and `info` (channel context changed). Per spec line 162
+    the `view` event is reserved for /help/overview/status switches,
+    so it must NOT fire here."""
     sub = session.event_bus.subscribe()
     asyncio.run(session.execute(ParsedCommand(type=CommandType.JOIN, args=["#ops"])))
     events = []
@@ -66,14 +70,19 @@ def test_execute_join_publishes_roster_and_view(session: Session) -> None:
     assert session.current_channel == "#ops"
     names = [e.name for e in events]
     assert "roster" in names
-    assert "view" in names
+    assert "info" in names
+    assert "view" not in names, (
+        "JOIN must not publish a `view` event — that's reserved for "
+        "/help/overview/status (spec line 162)."
+    )
     # The roster fragment carries the channel testid + data attribute.
     roster = next(e for e in events if e.name == "roster")
     assert 'data-testid="sidebar-channel"' in roster.data
     assert 'data-channel="#ops"' in roster.data
-    # View payload is JSON with current_channel set.
-    view = next(e for e in events if e.name == "view")
-    assert json.loads(view.data)["current_channel"] == "#ops"
+    # The info fragment carries the view-indicator and the new channel.
+    info = next(e for e in events if e.name == "info")
+    assert 'data-testid="view-indicator"' in info.data
+    assert "#ops" in info.data
 
 
 def test_execute_join_without_args_publishes_error(session: Session) -> None:
@@ -273,3 +282,65 @@ def test_dispatch_join_publishes_roster(session: Session) -> None:
         events.append(sub._sub.queue.get_nowait())
     sub.close()
     assert any(e.name == "roster" for e in events)
+
+
+# ---------------------------------------------------------------------------
+# Phase 6: view-switch verbs (/help, /overview, /status)
+# ---------------------------------------------------------------------------
+
+
+def _events_after(session: Session, parsed: ParsedCommand) -> list[SessionEvent]:
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.execute(parsed))
+    out: list[SessionEvent] = []
+    while not sub._sub.queue.empty():
+        out.append(sub._sub.queue.get_nowait())
+    sub.close()
+    return out
+
+
+def test_execute_help_switches_view_and_publishes_info(session: Session) -> None:
+    events = _events_after(session, ParsedCommand(type=CommandType.HELP))
+    assert session.view == "help"
+    names = [e.name for e in events]
+    assert names.count("view") == 1
+    assert names.count("info") == 1
+    view = next(e for e in events if e.name == "view")
+    payload = json.loads(view.data)
+    assert payload == {"view": "help"}, (
+        "spec line 162 defines the view payload as `{view: <name>}` only"
+    )
+    info = next(e for e in events if e.name == "info")
+    assert "Slash commands" in info.data
+    assert 'data-testid="view-indicator"' in info.data
+    assert 'data-view="help"' in info.data
+
+
+def test_execute_overview_switches_view(session: Session) -> None:
+    session.joined_channels.add("#ops")
+    session.joined_channels.add("#dev")
+    session.set_current_channel("#ops")
+    events = _events_after(session, ParsedCommand(type=CommandType.OVERVIEW))
+    assert session.view == "overview"
+    info = next(e for e in events if e.name == "info")
+    assert "Joined channels" in info.data
+    assert "#dev" in info.data
+    assert "#ops" in info.data
+
+
+def test_execute_status_switches_view(session: Session) -> None:
+    events = _events_after(session, ParsedCommand(type=CommandType.STATUS))
+    assert session.view == "status"
+    info = next(e for e in events if e.name == "info")
+    assert "Session status" in info.data
+    # Status pane shows nick/server.
+    assert "lens-test" in info.data
+
+
+def test_view_event_payload_is_spec_strict(session: Session) -> None:
+    """`view` payload must be exactly {view: <name>} — nothing else."""
+    events = _events_after(session, ParsedCommand(type=CommandType.HELP))
+    view = next(e for e in events if e.name == "view")
+    payload = json.loads(view.data)
+    assert set(payload.keys()) == {"view"}
+    assert payload["view"] in ("chat", "help", "overview", "status")

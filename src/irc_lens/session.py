@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
@@ -422,6 +423,9 @@ class Session:
             CommandType.SEND: self._exec_send,
             CommandType.JOIN: self._exec_join,
             CommandType.PART: self._exec_part,
+            CommandType.HELP: self._exec_help,
+            CommandType.OVERVIEW: self._exec_overview,
+            CommandType.STATUS: self._exec_status,
             CommandType.UNKNOWN: self._exec_unknown,
         }
 
@@ -464,7 +468,11 @@ class Session:
         await self.join(channel)
         self.set_current_channel(channel)
         self._publish_roster()
-        self._publish_view()
+        # JOIN/PART change channel context, not the named view —
+        # publish `info` (per spec line 161, "channel info refreshed"),
+        # not `view` (which is reserved for /help/overview/status switches
+        # per spec line 162).
+        self._publish_info()
 
     async def _exec_part(self, parsed: ParsedCommand) -> None:
         if not parsed.args:
@@ -476,15 +484,44 @@ class Session:
             return
         await self.part(channel)
         self._publish_roster()
+        self._publish_info()
+
+    async def _exec_help(self, _parsed: ParsedCommand) -> None:
+        self._switch_view("help")
+
+    async def _exec_overview(self, _parsed: ParsedCommand) -> None:
+        self._switch_view("overview")
+
+    async def _exec_status(self, _parsed: ParsedCommand) -> None:
+        self._switch_view("status")
+
+    def _switch_view(self, name: ViewName) -> None:
+        """Common body for the three view-switch verbs.
+
+        Sets `view`, then publishes the spec-strict `view` event
+        (`{view: <name>}`) followed by an `info` event with the
+        re-rendered pane for the new view. Two events because they
+        target different DOM regions in Phase 7's lens.js: `view`
+        toggles `<body data-view>` classes; `info` swaps `#info`.
+
+        Sync because every body call here (set_view, _publish_view,
+        _publish_info) is sync. The three `_exec_*` callers must
+        stay `async def` (dispatch-table contract — `await
+        handler(parsed)` in `Session.execute`) and call this
+        without `await`.
+        """
+        self.set_view(name)
         self._publish_view()
+        self._publish_info()
 
     async def _exec_unknown(self, parsed: ParsedCommand) -> None:
         self._publish_error(f"unknown command: {parsed.text}")
 
     async def _exec_unsupported(self, parsed: ParsedCommand) -> None:
         # Slash commands defined in commands.py but not yet wired
-        # (TOPIC/WHO/HISTORY/QUIT/HELP/...). Surface a non-fatal error
-        # event rather than 503ing the browser.
+        # (CHANNELS/WHO/READ/AGENTS/START/STOP/RESTART/ICON/TOPIC/
+        # KICK/INVITE/SERVER/QUIT). Surface a non-fatal error event
+        # rather than 503ing the browser.
         self._publish_error(f"{parsed.type.name.lower()}: not yet supported")
 
     async def dispatch(self, msg: Message) -> None:
@@ -530,8 +567,14 @@ class Session:
     def _publish_chat(self, nick: str, text: str) -> None:
         from irc_lens.web.render import render_fragment
 
+        # Pre-format the timestamp so the SSE payload is byte-stable
+        # (the initial-render path goes through a Jinja2 strftime
+        # filter on `BufferedMessage.timestamp`; live publishes use
+        # the wall clock here).
+        ts_display = time.strftime("%H:%M:%S", time.localtime(time.time()))
         fragment = render_fragment(
-            "_chat_line.html.j2", msg={"nick": nick, "text": text}
+            "_chat_line.html.j2",
+            msg={"nick": nick, "text": text, "ts_display": ts_display},
         )
         self.event_bus.publish(SessionEvent(name="chat", data=fragment))
 
@@ -541,10 +584,22 @@ class Session:
         fragment = render_fragment("_sidebar.html.j2", session=self)
         self.event_bus.publish(SessionEvent(name="roster", data=fragment))
 
+    def _publish_info(self) -> None:
+        """Re-render and publish the info pane for the current view.
+
+        Triggered by JOIN/PART (channel context changed) and by view
+        switches (HELP/OVERVIEW/STATUS) — the template branches on
+        ``session.view`` to pick the right per-view content.
+        """
+        from irc_lens.web.render import render_fragment
+
+        fragment = render_fragment("_info.html.j2", session=self)
+        self.event_bus.publish(SessionEvent(name="info", data=fragment))
+
     def _publish_view(self) -> None:
-        payload = json.dumps(
-            {"view": self.view, "current_channel": self.current_channel}
-        )
+        # Spec line 162 defines the payload as `{view: <name>}` only —
+        # nothing else. Channel context belongs in the `info` event.
+        payload = json.dumps({"view": self.view})
         self.event_bus.publish(SessionEvent(name="view", data=payload))
 
     def _publish_error(self, message: str) -> None:
