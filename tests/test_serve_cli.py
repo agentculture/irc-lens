@@ -56,10 +56,10 @@ class _BoomSite(_FakeSite):
 
 
 class _ImmediateEvent:
-    """`asyncio.Event` replacement whose `wait()` returns immediately."""
+    """`asyncio.Event` replacement whose `wait()` returns immediately.
 
-    def __init__(self) -> None:
-        pass
+    Python's default constructor is sufficient — no instance state needed.
+    """
 
     async def wait(self) -> None:
         return None
