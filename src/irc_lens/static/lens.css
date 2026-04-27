@@ -1,0 +1,106 @@
+/* irc-lens placeholder styles — Phase 4 ships the three-pane grid only.
+   Phase 7 fills in typography, colours, focus states, etc. */
+
+:root {
+  --lens-fg: #e0e0e0;
+  --lens-bg: #1a1a1a;
+  --lens-accent: #f5a623;
+  --lens-muted: #666;
+  --lens-border: #333;
+  --lens-down: #c44;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: var(--lens-bg);
+  color: var(--lens-fg);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto 1fr;
+}
+
+.lens-header {
+  display: flex;
+  gap: 1ch;
+  align-items: center;
+  padding: 0.4em 0.8em;
+  border-bottom: 1px solid var(--lens-border);
+}
+
+.lens-conn--healthy { color: var(--lens-accent); }
+.lens-conn--down    { color: var(--lens-down); }
+.lens-identity      { color: var(--lens-muted); margin-left: auto; }
+
+.lens-grid {
+  display: grid;
+  grid-template-columns: 18ch 1fr 24ch;
+  min-height: 0; /* let children scroll */
+}
+
+.lens-sidebar,
+.lens-info {
+  border-right: 1px solid var(--lens-border);
+  padding: 0.5em;
+  overflow-y: auto;
+}
+.lens-info { border-right: 0; border-left: 1px solid var(--lens-border); }
+
+.lens-chat {
+  display: grid;
+  grid-template-rows: 1fr auto;
+  min-width: 0;
+}
+
+.lens-log {
+  overflow-y: auto;
+  padding: 0.5em;
+}
+
+.lens-form {
+  display: flex;
+  gap: 0.5ch;
+  padding: 0.4em;
+  border-top: 1px solid var(--lens-border);
+}
+.lens-form input[type="text"] {
+  flex: 1;
+  background: var(--lens-bg);
+  color: var(--lens-fg);
+  border: 1px solid var(--lens-border);
+  padding: 0.3em 0.5em;
+  font: inherit;
+}
+.lens-form button {
+  background: var(--lens-accent);
+  color: var(--lens-bg);
+  border: 0;
+  padding: 0.3em 1em;
+  font: inherit;
+  cursor: pointer;
+}
+
+.lens-chat-line { padding: 0.1em 0; }
+.lens-chat-nick { color: var(--lens-accent); margin-right: 0.5ch; }
+
+.lens-sidebar-heading { font-size: 0.85em; color: var(--lens-muted); text-transform: uppercase; margin: 0.5em 0 0.25em; }
+.lens-channel-list,
+.lens-roster { list-style: none; margin: 0; padding: 0; }
+.lens-channel--active { color: var(--lens-accent); }
+.lens-entity--offline { color: var(--lens-muted); }
+
+#toast-region {
+  position: fixed;
+  bottom: 1em;
+  right: 1em;
+  display: grid;
+  gap: 0.5em;
+}
