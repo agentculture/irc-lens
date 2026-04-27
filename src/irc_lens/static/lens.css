@@ -1,5 +1,6 @@
-/* irc-lens placeholder styles — Phase 4 ships the three-pane grid only.
-   Phase 7 fills in typography, colours, focus states, etc. */
+/* irc-lens styles. Phase 7 fills in typography, view-state cues,
+   chat-line timestamp, and toast styling on top of Phase 4's
+   three-pane grid. Goal is "demoable", not "designed". */
 
 :root {
   --lens-fg: #e0e0e0;
@@ -8,6 +9,7 @@
   --lens-muted: #666;
   --lens-border: #333;
   --lens-down: #c44;
+  --lens-ok:   #5a5;
 }
 
 * { box-sizing: border-box; }
@@ -89,6 +91,7 @@ body {
 }
 
 .lens-chat-line { padding: 0.1em 0; }
+.lens-chat-ts   { color: var(--lens-muted); margin-right: 0.6ch; }
 .lens-chat-nick { color: var(--lens-accent); margin-right: 0.5ch; }
 
 .lens-sidebar-heading { font-size: 0.85em; color: var(--lens-muted); text-transform: uppercase; margin: 0.5em 0 0.25em; }
@@ -97,10 +100,43 @@ body {
 .lens-channel--active { color: var(--lens-accent); }
 .lens-entity--offline { color: var(--lens-muted); }
 
+/* Info-pane typography (Phase 6 added per-view branches). */
+.lens-info h2 { font-size: 0.9em; color: var(--lens-muted); text-transform: uppercase; margin: 0.5em 0 0.25em; }
+.lens-info dl { margin: 0; display: grid; grid-template-columns: max-content 1fr; gap: 0.2em 0.8ch; }
+.lens-info dt { color: var(--lens-muted); }
+.lens-info dd { margin: 0; }
+.lens-info code { color: var(--lens-accent); }
+.lens-info ul { margin: 0; padding-left: 1.2em; }
+.lens-info-empty { color: var(--lens-muted); font-style: italic; }
+.lens-view { display: block; font-size: 0.8em; color: var(--lens-muted); margin-bottom: 0.5em; }
+
+/* `view` event sets `data-view` on <body>; tint the view-indicator
+   so the user sees the active view at a glance. */
+body[data-view="help"]     .lens-view { color: var(--lens-accent); }
+body[data-view="overview"] .lens-view { color: var(--lens-accent); }
+body[data-view="status"]   .lens-view { color: var(--lens-accent); }
+
+/* `lens.js` sets data-conn="down" on SSE failure. Visual cue, no
+   layout shift. */
+body[data-conn="down"] .lens-conn { color: var(--lens-down); }
+
 #toast-region {
   position: fixed;
   bottom: 1em;
   right: 1em;
   display: grid;
   gap: 0.5em;
+  z-index: 10;
+  pointer-events: none;
 }
+.lens-toast {
+  background: var(--lens-bg);
+  color: var(--lens-fg);
+  border: 1px solid var(--lens-border);
+  padding: 0.4em 0.8em;
+  font-size: 0.9em;
+  max-width: 32ch;
+  pointer-events: auto;
+}
+.lens-toast--error { border-color: var(--lens-down); color: var(--lens-down); }
+.lens-toast--info  { border-color: var(--lens-ok);   color: var(--lens-ok); }
