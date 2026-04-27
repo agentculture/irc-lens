@@ -91,18 +91,26 @@ def successful_connect(monkeypatch: pytest.MonkeyPatch):
 # ---------------------------------------------------------------------------
 
 
-def test_serve_requires_host_port_nick(
+def test_serve_requires_only_nick(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Missing required flags must error via the AfiError + hint contract,
-    not an argparse traceback."""
+    """``--host`` / ``--port`` default to a local AgentIRC, so only ``--nick``
+    is required. The bare ``irc-lens serve`` invocation still must error via
+    the AfiError + hint contract (no argparse traceback) and the hint must
+    point at the concrete fix — supplying ``--nick``."""
     with pytest.raises(SystemExit) as exc:
         main(["serve"])
     assert exc.value.code != 0
     err = capsys.readouterr().err
     assert "error:" in err
     assert "hint:" in err
+    assert "--nick" in err
     assert "Traceback" not in err
+    # The argparse "required" complaint must mention nick and ONLY nick now
+    # that host/port have defaults — guards against silent regression of the
+    # defaults.
+    assert "--host" not in err
+    assert "--port" not in err
 
 
 def test_serve_help_lists_all_flags(capsys: pytest.CaptureFixture[str]) -> None:

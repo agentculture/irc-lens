@@ -7,7 +7,10 @@ fail-fast on connect, then ``aiohttp.web.run_app``. The Phase 5 wiring
 
 Spec contract enforced:
 
-* ``--host`` / ``--port`` / ``--nick`` are required.
+* ``--nick`` is required (identity is the user's choice — no safe default).
+* ``--host`` / ``--port`` default to ``127.0.0.1`` / ``6667`` so a bare
+  ``irc-lens serve --nick <name>`` reaches a local AgentIRC out of the
+  box. Override either flag to point at a remote server.
 * ``--bind 0.0.0.0`` prints a loud stderr warning (no auth in v1).
 * AgentIRC unreachable → ``error:`` + ``hint:`` on stderr, exit 1,
   aiohttp never binds.
@@ -198,10 +201,39 @@ def register(sub: argparse._SubParsersAction) -> None:
     p = sub.add_parser(
         "serve",
         help="Launch the aiohttp web console against an AgentIRC server.",
+        description=(
+            "Launch the aiohttp web console against an AgentIRC server. "
+            "Defaults target a local culture server on 127.0.0.1:6667 — only "
+            "--nick is required for the common case."
+        ),
+        epilog=(
+            "examples:\n"
+            "  irc-lens serve --nick lens\n"
+            "      Connect to a local AgentIRC (127.0.0.1:6667) and serve the\n"
+            "      web console on http://127.0.0.1:8765/.\n"
+            "  irc-lens serve --nick lens --open\n"
+            "      Same, and auto-launch your default browser at the URL.\n"
+            "  irc-lens serve --host irc.example.org --port 6667 --nick ops\n"
+            "      Point at a remote AgentIRC server.\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    p.add_argument("--host", required=True, help="AgentIRC server host.")
-    p.add_argument("--port", required=True, type=int, help="AgentIRC server port.")
-    p.add_argument("--nick", required=True, help="Nick to register on AgentIRC.")
+    p.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="AgentIRC server host (default: 127.0.0.1).",
+    )
+    p.add_argument(
+        "--port",
+        type=int,
+        default=6667,
+        help="AgentIRC server port (default: 6667).",
+    )
+    p.add_argument(
+        "--nick",
+        required=True,
+        help="Nick to register on AgentIRC (e.g. --nick lens).",
+    )
     p.add_argument(
         "--web-port",
         type=int,
