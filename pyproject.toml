@@ -52,6 +52,11 @@ packages = ["src/irc_lens"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Default-exclude the `playwright` marker: a bare `pytest` run skips
+# browser tests so local dev / the existing CI `test` job stays fast
+# (no chromium download, no per-test browser spin-up). The Playwright
+# CI job overrides via `pytest -m playwright`.
+addopts = "-m 'not playwright'"
 markers = [
     "playwright: opt-in browser end-to-end tests (requires `playwright install chromium`).",
 ]

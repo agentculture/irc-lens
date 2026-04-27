@@ -247,7 +247,10 @@ def test_serve_seed_loads_yaml_fixture(
         captured["session"] = session
         captured["path"] = path
 
-    monkeypatch.setattr("irc_lens.cli._commands.serve.apply_seed", fake_apply)
+    # Patch at the definition site since serve.py imports
+    # `apply_seed` function-locally (see serve.py module top comment
+    # — there's a real production-code import cycle to avoid).
+    monkeypatch.setattr("irc_lens.seed.apply_seed", fake_apply)
     rc = main(
         [
             "serve",

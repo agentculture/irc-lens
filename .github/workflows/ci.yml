@@ -24,3 +24,24 @@ jobs:
 
       - name: pytest
         run: uv run pytest -v
+
+  playwright:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - run: uv python install 3.12
+
+      - run: uv venv
+
+      - run: uv pip install -e ".[dev]"
+
+      - name: Install chromium for pytest-playwright
+        run: uv run playwright install --with-deps chromium
+
+      - name: pytest -m playwright
+        run: uv run pytest -m playwright -v
