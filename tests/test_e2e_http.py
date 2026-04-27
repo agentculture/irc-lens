@@ -16,10 +16,10 @@ transport to write JOIN #x within 100 ms" are a single
 from __future__ import annotations
 
 import asyncio
-import json
 
-import pytest
 from aiohttp.test_utils import TestClient
+
+from irc_lens.session import Session
 
 from _agentirc_server import AgentIRCTestServer, _ReceivedLine
 
@@ -32,21 +32,26 @@ async def _wait_for_received(
 ) -> _ReceivedLine:
     """Poll ``server.received`` until a matching line appears.
 
-    Cheaper and easier to reason about than wiring an asyncio.Event
-    on every line — tests run on localhost loopback and the lens
-    flushes ``send_raw`` through ``writer.drain``, so the line
-    typically lands within a few ms.
+    Wraps the poll loop in :func:`asyncio.timeout` (Python 3.11+) so
+    a stuck wire shows up as a clean ``AssertionError`` with the
+    received history rather than as a runtime hang.
     """
-    deadline = asyncio.get_event_loop().time() + timeout
-    while asyncio.get_event_loop().time() < deadline:
-        for line in server.received:
-            if line.command == command and list(params) == line.params[: len(params)]:
-                return line
-        await asyncio.sleep(0.01)
-    raise AssertionError(
-        f"timed out after {timeout}s waiting for {command} {list(params)} — "
-        f"server received: {[(line.command, line.params) for line in server.received]}"
-    )
+
+    async def _poll() -> _ReceivedLine:
+        while True:
+            for line in server.received:
+                if line.command == command and list(params) == line.params[: len(params)]:
+                    return line
+            await asyncio.sleep(0.01)
+
+    try:
+        async with asyncio.timeout(timeout):
+            return await _poll()
+    except TimeoutError as exc:
+        raise AssertionError(
+            f"timed out after {timeout}s waiting for {command} {list(params)} — "
+            f"server received: {[(line.command, line.params) for line in server.received]}"
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -130,33 +135,41 @@ async def test_post_input_413_on_oversize_body(lens_client: TestClient) -> None:
 
 
 async def test_get_events_streams_roster_after_join(
-    lens_client: TestClient, agentirc_server: AgentIRCTestServer
+    lens_client: TestClient,
+    agentirc_server: AgentIRCTestServer,
+    lens_session: Session,
 ) -> None:
     """Open SSE, then trigger a /join via POST /input. The roster
-    event should land on the stream within ~1 s."""
+    event should land on the stream within ~1 s.
+
+    Race-free: instead of sleeping a fixed amount to "ensure" the
+    subscriber registered, we wait on
+    ``lens_session.event_bus.subscriber_count`` so the JOIN cannot
+    publish before the SSE handler is in the bus."""
 
     async def collect_event() -> bytes:
         resp = await lens_client.get("/events")
         assert resp.status == 200
         assert resp.headers["Content-Type"].startswith("text/event-stream")
-        # Read until we see a `roster` event, with a hard cap so a
-        # broken bus doesn't hang the test runner.
         buf = b""
-        deadline = asyncio.get_event_loop().time() + 2.0
-        while asyncio.get_event_loop().time() < deadline:
-            chunk = await asyncio.wait_for(resp.content.read(1024), timeout=2.0)
-            if not chunk:
-                break
-            buf += chunk
-            if b"event: roster" in buf:
-                resp.close()
-                return buf
-        resp.close()
-        raise AssertionError(f"no roster event in {buf!r}")
+        try:
+            async with asyncio.timeout(2.0):
+                while b"event: roster" not in buf:
+                    chunk = await resp.content.read(1024)
+                    if not chunk:
+                        break
+                    buf += chunk
+        finally:
+            resp.close()
+        return buf
 
     collector = asyncio.create_task(collect_event())
-    # Tiny delay so the SSE subscriber registers before we publish.
-    await asyncio.sleep(0.05)
+    # Wait for the SSE handler to actually register on the bus
+    # before publishing — closes the race the previous fixed-sleep
+    # version had.
+    async with asyncio.timeout(1.0):
+        while lens_session.event_bus.subscriber_count == 0:
+            await asyncio.sleep(0.005)
     join_resp = await lens_client.post("/input", json={"text": "/join #ops"})
     assert join_resp.status == 204
     await _wait_for_received(agentirc_server, "JOIN", "#ops")
@@ -189,15 +202,18 @@ async def test_post_input_error_response_uses_error_hint_shape(
 # ---------------------------------------------------------------------------
 
 
-async def test_test_server_recorded_nick_user_handshake(
+async def test_fixture_wires_handshake_and_serves_http(
     lens_client: TestClient, agentirc_server: AgentIRCTestServer
 ) -> None:
-    """The lens's connect path sends NICK + USER immediately. The
-    test server should have recorded both before the first test
-    request runs (the `lens_session` fixture awaited connect)."""
+    """End-to-end fixture sanity: the lens's connect path sent
+    NICK + USER to the test server (proves `Session.connect` ran),
+    and the aiohttp Application is serving requests (proves
+    `make_app` + `TestClient` are wired up)."""
     commands = [line.command for line in agentirc_server.received]
     assert "NICK" in commands
     assert "USER" in commands
+    resp = await lens_client.get("/")
+    assert resp.status == 200
 
 
 async def test_post_input_form_encoded_body_also_works(lens_client: TestClient) -> None:

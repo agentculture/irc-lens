@@ -80,14 +80,21 @@ class AgentIRCTestServer:
         self.port = self._server.sockets[0].getsockname()[1]
 
     async def stop(self) -> None:
-        # Close client writers first so per-connection coroutines
-        # exit cleanly; then close the listening socket.
-        for w in self._client_writers:
+        # Close client writers and AWAIT wait_closed so transports
+        # don't end up half-closed (which trips "unclosed transport"
+        # ResourceWarnings in pytest-asyncio teardown).
+        writers = list(self._client_writers)
+        self._client_writers.clear()
+        for w in writers:
             try:
                 w.close()
             except Exception as exc:
                 logger.debug("test server: writer close ignored: %s", exc)
-        self._client_writers.clear()
+        if writers:
+            await asyncio.gather(
+                *(w.wait_closed() for w in writers),
+                return_exceptions=True,
+            )
         if self._server is not None:
             self._server.close()
             await self._server.wait_closed()
@@ -107,8 +114,13 @@ class AgentIRCTestServer:
                     continue
                 self.received.append(line)
                 await self._respond(line, writer)
-        except (ConnectionResetError, asyncio.CancelledError):
+        except ConnectionResetError:
             return
+        except asyncio.CancelledError:
+            # Re-raise so task cancellation semantics propagate
+            # cleanly through fixture teardown — matches the
+            # transport's read-loop pattern.
+            raise
         except Exception as exc:
             # Per-connection error — log and exit, don't take the
             # test server down for the next test.
@@ -136,7 +148,6 @@ class AgentIRCTestServer:
         # PRIVMSG / TOPIC / QUIT etc. — just record, no echo. Real
         # IRC daemons don't echo PRIVMSGs to the sender; the lens
         # publishes its own chat event from the local-echo path.
-        return
 
     async def _echo_membership(
         self, writer: asyncio.StreamWriter, verb: str, channel: str
