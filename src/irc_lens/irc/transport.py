@@ -13,6 +13,11 @@ Adaptations from upstream (every divergence justified):
   traceparent extraction in :meth:`_handle`. ``irc-lens`` has no agent
   loop and the spec explicitly excludes telemetry; carrying the
   scaffolding would be dead code.
+* :meth:`add_listener` added so :class:`~irc_lens.session.Session` can
+  observe inbound PRIVMSG/JOIN/PART without replacing the buffer-add
+  handlers in ``_cmd_handlers``. Listeners are invoked after the
+  primary handler and exceptions are logged + swallowed so a misbehaving
+  observer can't break the read loop.
 """
 
 from __future__ import annotations
@@ -87,6 +92,18 @@ class IRCTransport:
             "331": self._on_numeric_topic,
             "332": self._on_numeric_topic,
         }
+        # Per-command observer lists invoked after the primary handler
+        # runs (see `_handle`). irc-lens divergence — see module docstring.
+        self._listeners: dict[str, list[Callable]] = {}
+
+    def add_listener(self, command: str, cb: Callable) -> None:
+        """Register an extra handler for ``command``.
+
+        Invoked after the entry in ``_cmd_handlers`` runs (which may
+        be the buffer-add path). Listener exceptions are logged and
+        swallowed so one bad observer can't break the read loop.
+        """
+        self._listeners.setdefault(command, []).append(cb)
 
     async def connect(self) -> None:
         self._should_run = True
@@ -245,6 +262,11 @@ class IRCTransport:
         handler = self._cmd_handlers.get(msg.command)
         if handler:
             await _maybe_await(handler(msg))
+        for listener in self._listeners.get(msg.command, ()):
+            try:
+                await _maybe_await(listener(msg))
+            except Exception:  # noqa: BLE001 — by design; see docstring
+                logger.exception("listener for %s raised", msg.command)
 
     async def _on_ping(self, msg: Message) -> None:
         token = msg.params[0] if msg.params else ""
