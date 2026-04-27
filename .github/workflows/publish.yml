@@ -1,0 +1,105 @@
+name: Publish to PyPI
+
+# PR → TestPyPI (`.devN` build, `testpypi` environment).
+# push to main → PyPI (`x.y.z` build, `pypi` environment).
+#
+# The path filter keeps doc-only PRs from churning TestPyPI; bumps to
+# the workflow itself still trigger so changes get validated before
+# they land. Trusted-publishing means no long-lived tokens — both
+# environments are pre-provisioned with PyPI Trusted Publishers
+# pointing at this repo.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "src/**"
+      - ".github/workflows/publish.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "pyproject.toml"
+      - "src/**"
+      - ".github/workflows/publish.yml"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - run: uv python install 3.12
+
+      - run: uv venv
+
+      - run: uv pip install -e ".[dev]"
+
+      - name: pytest
+        run: uv run pytest -v
+
+  test-publish:
+    if: github.event_name == 'pull_request'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - run: uv python install 3.12
+
+      - name: Mint dev version
+        # Trusted-publishing won't accept the same version twice, so
+        # every PR build needs a unique suffix. `github.run_number` is
+        # monotonic per workflow file and survives re-runs of the same
+        # workflow run (those reuse the run_attempt, not run_number).
+        run: |
+          BASE=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          DEV_VERSION="${BASE}.dev${{ github.run_number }}"
+          sed -i "s/^version = .*/version = \"${DEV_VERSION}\"/" pyproject.toml
+          echo "DEV_VERSION=${DEV_VERSION}" >> "$GITHUB_ENV"
+          echo "Publishing ${DEV_VERSION} to TestPyPI"
+
+      - name: Build and publish to TestPyPI
+        run: |
+          uv build
+          uv publish \
+            --publish-url https://test.pypi.org/legacy/ \
+            --trusted-publishing always \
+            --check-url https://test.pypi.org/simple/
+
+      - name: Print install command
+        if: always()
+        run: |
+          echo "::notice::Test with: pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ irc-lens==${DEV_VERSION}"
+
+  publish:
+    if: github.event_name == 'push'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a # v4
+
+      - run: uv python install 3.12
+
+      - name: Build and publish to PyPI
+        run: |
+          uv build
+          uv publish \
+            --trusted-publishing always \
+            --check-url https://pypi.org/simple/
