@@ -117,10 +117,14 @@ async def _serve_async(args: argparse.Namespace) -> None:
     if args.seed:
         # Spec line 261: connection is real; seed only overlays UI
         # state. apply_seed raises AfiError on shape errors which the
-        # dispatcher renders as `error:` + `hint:`.
+        # dispatcher renders as `error:` + `hint:`. Broad except so
+        # connection cleanup runs on every failure path — leaking a
+        # connected IRC session past process exit would orphan state
+        # in the AgentIRC server. BaseException (KeyboardInterrupt,
+        # SystemExit) still propagates untouched.
         try:
             apply_seed(session, Path(args.seed))
-        except AfiError:
+        except Exception:
             await session.disconnect()
             raise
 

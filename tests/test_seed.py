@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from irc_lens.cli._errors import EXIT_USER_ERROR, AfiError
+from irc_lens.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
 from irc_lens.seed import apply_seed, load_seed
 from irc_lens.session import Session
 from irc_lens.web.render import render_index
@@ -137,7 +137,7 @@ def test_load_seed_returns_normalized_dict() -> None:
     Pin the public shape so test code can assert against it."""
     data = load_seed(FIXTURE)
     assert set(data) == {"joined_channels", "preload_messages", "roster", "current_channel"}
-    assert data["preload_messages"][0]["timestamp"] == 1714000000.0
+    assert data["preload_messages"][0]["timestamp"] == pytest.approx(1714000000.0)
 
 
 def test_buffer_add_accepts_explicit_timestamp() -> None:
@@ -147,7 +147,7 @@ def test_buffer_add_accepts_explicit_timestamp() -> None:
     b = MessageBuffer()
     b.add("#x", "alice", "hi", timestamp=1714000000.0)
     [m] = b.read("#x")
-    assert m.timestamp == 1714000000.0
+    assert m.timestamp == pytest.approx(1714000000.0)
 
 
 def test_buffer_add_defaults_to_now_when_timestamp_omitted() -> None:
@@ -163,3 +163,87 @@ def test_buffer_add_defaults_to_now_when_timestamp_omitted() -> None:
     after = time.time()
     [m] = b.read("#x")
     assert before <= m.timestamp <= after
+
+
+# ---------------------------------------------------------------------------
+# PR #10 review fallout: reject malformed timestamps + non-UTF-8 bytes; pin
+# the user-vs-env exit-code split.
+# ---------------------------------------------------------------------------
+
+
+def test_apply_seed_rejects_nan_timestamp(tmp_path: Path) -> None:
+    bad = tmp_path / "nan.yaml"
+    bad.write_text(
+        "joined_channels: ['#x']\n"
+        "preload_messages:\n"
+        "  - {channel: '#x', nick: 'a', text: 'hi', timestamp: .nan}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(AfiError) as ei:
+        apply_seed(_session(), bad)
+    assert ei.value.code == EXIT_USER_ERROR
+    assert "finite" in ei.value.message.lower()
+
+
+def test_apply_seed_rejects_inf_timestamp(tmp_path: Path) -> None:
+    bad = tmp_path / "inf.yaml"
+    bad.write_text(
+        "joined_channels: ['#x']\n"
+        "preload_messages:\n"
+        "  - {channel: '#x', nick: 'a', text: 'hi', timestamp: .inf}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(AfiError) as ei:
+        apply_seed(_session(), bad)
+    assert ei.value.code == EXIT_USER_ERROR
+    assert "finite" in ei.value.message.lower()
+
+
+def test_apply_seed_rejects_out_of_range_timestamp(tmp_path: Path) -> None:
+    """Finite but un-renderable: time.localtime raises OverflowError."""
+    bad = tmp_path / "range.yaml"
+    bad.write_text(
+        "joined_channels: ['#x']\n"
+        "preload_messages:\n"
+        "  - {channel: '#x', nick: 'a', text: 'hi', timestamp: 1.0e+30}\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(AfiError) as ei:
+        apply_seed(_session(), bad)
+    assert ei.value.code == EXIT_USER_ERROR
+    assert "out of range" in ei.value.message
+
+
+def test_apply_seed_rejects_invalid_utf8(tmp_path: Path) -> None:
+    bad = tmp_path / "binary.yaml"
+    bad.write_bytes(b"\xff\xfe\x00binary garbage")
+    with pytest.raises(AfiError) as ei:
+        apply_seed(_session(), bad)
+    assert ei.value.code == EXIT_USER_ERROR
+    assert "UTF-8" in ei.value.message
+
+
+def test_apply_seed_read_failure_uses_env_error_code(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Permission/IO failure on an existing file is environmental,
+    not user-input — mirror serve.py's bind-port branch."""
+    seed = tmp_path / "exists.yaml"
+    seed.write_text("joined_channels: []\n", encoding="utf-8")
+
+    def boom(self, *_a, **_kw):
+        raise PermissionError(13, "permission denied", str(self))
+
+    monkeypatch.setattr(Path, "read_bytes", boom)
+    with pytest.raises(AfiError) as ei:
+        apply_seed(_session(), seed)
+    assert ei.value.code == EXIT_ENV_ERROR
+    assert "cannot read seed file" in ei.value.message
+
+
+def test_apply_seed_missing_file_keeps_user_error_code(tmp_path: Path) -> None:
+    """Pin the precedent: user-supplied missing path is a user
+    error (mirrors LensConnectionLost on a wrong --host)."""
+    with pytest.raises(AfiError) as ei:
+        apply_seed(_session(), tmp_path / "absent.yaml")
+    assert ei.value.code == EXIT_USER_ERROR

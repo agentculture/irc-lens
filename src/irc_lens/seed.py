@@ -8,8 +8,9 @@ seed mode only touches in-memory UI state, not the wire.
 
 Schema (matches the spec verbatim — see
 ``docs/superpowers/specs/2026-04-27-irc-lens-handover-design.md``
-lines 233–261). All five top-level keys are optional; a seed with
-only ``current_channel`` is valid::
+lines 233–261). The four supported top-level keys are all
+optional; ``current_channel`` is only valid when it also appears
+in ``joined_channels``::
 
     joined_channels:
       - "#general"
@@ -29,9 +30,15 @@ Validation discipline:
 * ``current_channel`` must appear in ``joined_channels`` (catches
   the easy mistake of pinning the active view to a channel the UI
   cannot render).
+* Timestamps must be finite and renderable by ``time.localtime`` —
+  ``NaN``/``Inf``/out-of-range values are rejected at seed time
+  rather than crashing the initial HTML render.
 
-All errors raise :class:`AfiError` with ``code = EXIT_USER_ERROR``
-and a remediation hint, satisfying the rubric's stderr contract.
+Errors raise :class:`AfiError`. Exit-code policy mirrors
+``serve.py``: user-supplied bad input → ``EXIT_USER_ERROR (1)``;
+operating-system / environment failure on an existing resource
+(e.g. ``PermissionError`` while reading the file) →
+``EXIT_ENV_ERROR (2)``.
 
 TODO(phase-10): lift this docstring into ``docs/cli.md`` under the
 ``--seed`` schema section so the doc surface is human-readable.
@@ -39,12 +46,14 @@ TODO(phase-10): lift this docstring into ``docs/cli.md`` under the
 
 from __future__ import annotations
 
+import math
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
 
-from irc_lens.cli._errors import EXIT_USER_ERROR, AfiError
+from irc_lens.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
 
 if TYPE_CHECKING:
     from irc_lens.session import Session
@@ -66,6 +75,10 @@ _HINT_SCHEMA = (
 
 def _err(message: str, hint: str = _HINT_SCHEMA) -> AfiError:
     return AfiError(code=EXIT_USER_ERROR, message=message, remediation=hint)
+
+
+def _env_err(message: str, hint: str) -> AfiError:
+    return AfiError(code=EXIT_ENV_ERROR, message=message, remediation=hint)
 
 
 def _require_mapping(value: Any, label: str) -> dict[str, Any]:
@@ -98,6 +111,28 @@ def _require_number(value: Any, label: str) -> float:
     return float(value)
 
 
+def _require_renderable_timestamp(value: Any, label: str) -> float:
+    """Number-typed AND finite AND in the range ``time.localtime``
+    accepts. Out-of-range or NaN/Inf timestamps would crash the
+    initial HTML render; reject them at seed time so the failure
+    surfaces as a clean :class:`AfiError`."""
+    ts = _require_number(value, label)
+    if not math.isfinite(ts):
+        raise _err(
+            f"{label}={value!r}: timestamp must be a finite number "
+            "(NaN/Inf cannot be rendered)"
+        )
+    try:
+        time.localtime(ts)
+    except (OverflowError, ValueError, OSError) as exc:
+        raise _err(
+            f"{label}={ts!r}: timestamp is out of range for the "
+            f"platform clock ({exc})",
+            hint="use a UNIX timestamp within the platform's time_t range",
+        ) from exc
+    return ts
+
+
 def _validate_joined_channels(raw: Any) -> list[str]:
     items = _require_list(raw, "joined_channels")
     out: list[str] = []
@@ -123,7 +158,9 @@ def _validate_preload_messages(raw: Any) -> list[dict[str, Any]]:
                 "nick": _require_str(m["nick"], f"preload_messages[{i}].nick"),
                 "text": _require_str(m["text"], f"preload_messages[{i}].text"),
                 "timestamp": (
-                    _require_number(m["timestamp"], f"preload_messages[{i}].timestamp")
+                    _require_renderable_timestamp(
+                        m["timestamp"], f"preload_messages[{i}].timestamp"
+                    )
                     if "timestamp" in m
                     else None
                 ),
@@ -163,14 +200,31 @@ def load_seed(path: Path) -> dict[str, Any]:
         )
 
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw_bytes = path.read_bytes()
+    except OSError as exc:
+        # The path resolves but the OS can't deliver the bytes
+        # (permission denied, IO error, …). Environment fault, not
+        # user-input fault — mirror serve.py's bind-port branch.
+        raise _env_err(
+            f"cannot read seed file {path}: {exc}",
+            hint="check filesystem permissions and disk health, then retry",
+        ) from exc
+
+    try:
+        text = raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise _err(
+            f"seed file {path} is not valid UTF-8: {exc}",
+            hint="save the seed file as UTF-8 and retry",
+        ) from exc
+
+    try:
+        raw = yaml.safe_load(text)
     except yaml.YAMLError as exc:
         raise _err(
             f"seed file {path} is not valid YAML: {exc}",
             hint="run `python -c \"import yaml; yaml.safe_load(open('<path>'))\"` to localize the parse error",
         ) from exc
-    except OSError as exc:
-        raise _err(f"cannot read seed file {path}: {exc}") from exc
 
     if raw is None:
         raw = {}
