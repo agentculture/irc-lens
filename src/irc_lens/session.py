@@ -269,7 +269,8 @@ class Session:
         message + non-zero exit (Phase 4 wires this into ``serve``)."""
         try:
             await self._transport.connect()
-        except (OSError, ConnectionError) as exc:
+        except OSError as exc:
+            # ConnectionError is an OSError subclass in Python 3.3+.
             self._healthy = False
             raise LensConnectionLost(str(exc)) from exc
 
@@ -300,14 +301,20 @@ class Session:
     async def send_raw(self, line: str) -> None:
         try:
             await self._transport.send_raw(line)
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as exc:
+        except OSError as exc:
+            # Catches BrokenPipeError, ConnectionResetError,
+            # ConnectionAbortedError, and ConnectionError — all OSError
+            # subclasses in Python 3.3+.
             self._healthy = False
             raise LensConnectionLost(str(exc)) from exc
 
     async def send_privmsg(self, target: str, text: str) -> None:
         try:
             await self._transport.send_privmsg(target, text)
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as exc:
+        except OSError as exc:
+            # Catches BrokenPipeError, ConnectionResetError,
+            # ConnectionAbortedError, and ConnectionError — all OSError
+            # subclasses in Python 3.3+.
             self._healthy = False
             raise LensConnectionLost(str(exc)) from exc
 
@@ -319,7 +326,10 @@ class Session:
         # ack will be a no-op via this set (set semantics).
         try:
             await self._transport.join_channel(channel)
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as exc:
+        except OSError as exc:
+            # Catches BrokenPipeError, ConnectionResetError,
+            # ConnectionAbortedError, and ConnectionError — all OSError
+            # subclasses in Python 3.3+.
             self._healthy = False
             raise LensConnectionLost(str(exc)) from exc
         self.joined_channels.add(channel)
@@ -329,7 +339,10 @@ class Session:
             return
         try:
             await self._transport.part_channel(channel)
-        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError) as exc:
+        except OSError as exc:
+            # Catches BrokenPipeError, ConnectionResetError,
+            # ConnectionAbortedError, and ConnectionError — all OSError
+            # subclasses in Python 3.3+.
             self._healthy = False
             raise LensConnectionLost(str(exc)) from exc
         self.joined_channels.discard(channel)
