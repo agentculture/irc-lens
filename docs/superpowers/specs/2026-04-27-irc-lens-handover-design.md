@@ -14,7 +14,7 @@ This spec defines `irc-lens`, a separate sibling repo that re-implements the con
 
 `irc-lens` speaks AgentIRC over a plain TCP socket. It depends on culture only insofar as it cites code from `packages/agent-harness/`. It does not import culture at runtime, does not read `~/.culture/server.yaml`, and is not coupled to culture's nick/manifest conventions.
 
-The expected outcome: a `pip install irc-lens && irc-lens --host x --port y --nick z` flow that launches a localhost web app the user (or an agent driving Playwright) can use to admin any AgentIRC server.
+The expected outcome: a `pip install irc-lens && irc-lens serve --host x --port y --nick z` flow that launches a localhost web app the user (or an agent driving Playwright) can use to admin any AgentIRC server.
 
 ---
 
@@ -179,7 +179,7 @@ AgentIRC PRIVMSG
       fragment = render("_chat_line.j2", msg=msg)
       self.event_bus.publish("chat", fragment)
   → SSE stream sends `event: chat\ndata: <fragment>\n\n`
-  → HTMX (htmx-sse extension) appends to #chat-log
+  → Browser SSE→DOM glue (`lens.js` EventSource handler) appends the fragment to #chat-log via HTMX
 ```
 
 **User input:**
@@ -268,9 +268,9 @@ In seed mode, the IRC connection is still established (the agent must verify the
 
 **Browser disconnect.** SSE generator detects `ConnectionResetError` on write, exits cleanly. Session and IRC connection survive. Refresh re-attaches and renders current state.
 
-**Startup failures.** AgentIRC unreachable → stderr message including host/port + hint, exit 1, aiohttp never starts. Web port already in use → stderr message + hint, exit 1.
+**Startup failures.** AgentIRC unreachable → stderr message including host/port + hint, exit 1, aiohttp never starts. Web port already in use → stderr message + hint, exit 2 (env error per the exit-code policy in [CLI shape](#cli-shape)).
 
-**Shutdown.** Ctrl-C → SIGINT handler → close all SSE streams (final `bye` event), send IRC `QUIT`, close TCP, exit 0.
+**Shutdown.** Ctrl-C → SIGINT handler → close all SSE streams cleanly, send IRC `QUIT`, close TCP, exit 0. (No `bye` SSE event — the spec's five event types are the entire reactive surface.)
 
 **Logging.** Default: human-readable stderr. With `--log-json`, one JSON object per line on stderr. No log file in v1.
 
