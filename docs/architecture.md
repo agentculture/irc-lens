@@ -193,8 +193,11 @@ User-supplied bad input (unreachable AgentIRC endpoint, missing
 seed file, malformed YAML) → `EXIT_USER_ERROR (1)`. Environment
 failure to act on a resource that exists (port collision,
 permission denied while reading a seed file) → `EXIT_ENV_ERROR
-(2)`. Canonical precedents: `serve.py:107` (`LensConnectionLost`
-→ `1`) vs `serve.py:154` (port-bind `OSError` → `2`).
+(2)`. Canonical precedents in
+`src/irc_lens/cli/_commands/serve.py`: the `LensConnectionLost`
+branch in `_serve_async` → `1`; the `TCPSite.start()` `OSError`
+branch → `2`. Symbol references are used here deliberately —
+line numbers rot.
 
 ### Why dispatch-table entries stay `async def`
 

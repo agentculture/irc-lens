@@ -10,9 +10,9 @@ and streamed to subscribers. Each subscriber owns a bounded queue
 
 | Event | Payload | Fragment template | Browser target |
 | --- | --- | --- | --- |
-| `chat` | rendered `_chat_line.html.j2` (HTML) | `templates/_chat_line.html.j2` | append into `#chat-log` |
-| `roster` | rendered `_sidebar.html.j2` (HTML) | `templates/_sidebar.html.j2` | replace `#sidebar` innerHTML |
-| `info` | rendered `_info.html.j2` (HTML) | `templates/_info.html.j2` | replace `#info` innerHTML |
+| `chat` | rendered `_chat_line.html.j2` (HTML) | `src/irc_lens/templates/_chat_line.html.j2` | append into `#chat-log` |
+| `roster` | rendered `_sidebar.html.j2` (HTML) | `src/irc_lens/templates/_sidebar.html.j2` | replace `#sidebar` innerHTML |
+| `info` | rendered `_info.html.j2` (HTML) | `src/irc_lens/templates/_info.html.j2` | replace `#info` innerHTML |
 | `view` | JSON `{"view": "chat" \| "help" \| "overview" \| "status"}` | — | set `<body data-view>` attribute |
 | `error` | JSON `{"message": "..."}` | — | toast region (`#toast-region`) |
 
@@ -49,8 +49,10 @@ data: <line 2>
 ```
 
 Multi-line HTML payloads are split into one `data:` line per source
-line, terminated by a blank line, per the SSE spec. Tests pin the
-round-trip in `tests/test_render.py` and `tests/test_web_events.py`.
+line, terminated by a blank line, per the SSE spec. The wire-format
+round-trip is pinned by `tests/test_web_events.py`; per-fragment
+template testids (the `chat`/`roster`/`info` payload bodies) are
+pinned by `tests/test_render.py`.
 
 ## DOM contract (`data-testid` + IDs)
 
@@ -67,14 +69,16 @@ round-trip in `tests/test_render.py` and `tests/test_web_events.py`.
 | `[data-testid="chat-line"]` | `_chat_line.html.j2` | One rendered chat line (timestamp + nick + text spans). |
 | `[data-testid="chat-line-nick"]` | `_chat_line.html.j2` | Nick span. |
 | `[data-testid="chat-line-text"]` | `_chat_line.html.j2` | Text span. |
-| `[data-testid="chat-input"]` | `index.html.j2` | The input element (id `chat-input`). |
+| `[data-testid="chat-input"]` | `index.html.j2` | The input element (also `id="chat-input"`). |
 | `[data-testid="chat-submit"]` | `index.html.j2` | Submit button. |
 | `[data-testid="info"]` | `index.html.j2` | Info-pane container `#info`. |
 | `[data-testid="view-indicator"]` | `_info.html.j2` | Carries `data-view="chat\|help\|overview\|status"`. |
 
-The form element itself is `id="chat-form"` (no `data-testid`); the
-testid lives on the submit button. Tests assert against the testid
-contract above.
+The `<form>` element itself is addressed by `id="chat-form"` (no
+`data-testid`) — tests submit by clicking
+`[data-testid="chat-submit"]` or pressing Enter on
+`[data-testid="chat-input"]`. Every other element tests need to
+drive carries a stable `data-testid`.
 
 ## Browser glue
 

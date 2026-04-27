@@ -18,7 +18,7 @@ keeps responding.
 | (none) | text | `CHAT` — sends a PRIVMSG to the active channel; publishes a local-echo `chat` event. |
 | `/join` | `#channel` | Joins the channel, sets it active, publishes `roster` + `info`. |
 | `/part` | `#channel` | Parts the channel, publishes `roster` + `info`. |
-| `/send` | `<target> <text…>` | Sends a PRIVMSG to an explicit target (channel or nick); local-echoes a `chat` event. |
+| `/send` | `<target> <text…>` | Sends a PRIVMSG to an explicit target (channel or nick). Local-echoes a `chat` event **only when `target == current_channel`** — sending to a non-active target leaves the chat log untouched (the active pane has no place to render it). |
 | `/help` | — | Switches the info pane to the `help` view; publishes `view` + `info`. |
 | `/overview` | — | Switches the info pane to the `overview` view. |
 | `/status` | — | Switches the info pane to the `status` view. |

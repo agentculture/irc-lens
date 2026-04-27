@@ -2,8 +2,11 @@
 
 `irc-lens` was built so a browser-automation agent (Playwright MCP
 or pytest-playwright) can drive every feature deterministically.
-Every interactive element carries a `data-testid` (catalogued in
-`docs/sse-events.md`); the seed loader (`docs/cli.md` →
+Every element tests need to drive carries a stable selector —
+usually a `data-testid`, occasionally an `id` (the `<form>` is
+`id="chat-form"`); the catalogue is in
+[`docs/sse-events.md`](sse-events.md#dom-contract-data-testid--ids).
+The seed loader (`docs/cli.md` →
 [Seed schema](cli.md#seed-schema)) gives every test a known
 starting DOM without scripting an entire AgentIRC conversation.
 

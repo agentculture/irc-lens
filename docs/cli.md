@@ -24,9 +24,12 @@ on the agent-first CLI shape.
 | `2` | Environment error — failure to act on a resource that exists (port collision on `--web-port`, permission denied while reading a seed file). |
 | `3+` | Reserved. |
 
-The split is mandated by the AFI rubric; precedent: `serve.py:107`
-(`LensConnectionLost` → user error) vs `serve.py:154` (port-bind
-`OSError` → env error).
+The split is mandated by the AFI rubric; precedent in
+`src/irc_lens/cli/_commands/serve.py`: the `LensConnectionLost`
+branch in `_serve_async` raises `AfiError(code=EXIT_USER_ERROR)`,
+while the `TCPSite.start()` `OSError` branch raises
+`AfiError(code=EXIT_ENV_ERROR)`. Symbol references are used here
+deliberately — line numbers rot.
 
 Every failure renders on stderr as:
 
