@@ -1,0 +1,24 @@
+"""Explain catalog — markdown keyed by command-path tuples (stable-contract).
+
+Every noun/verb registered in the CLI should have a catalog entry.
+"""
+
+from __future__ import annotations
+
+from irc_lens.cli._errors import EXIT_USER_ERROR, AfiError
+from irc_lens.explain.catalog import ENTRIES
+
+
+def resolve(path: tuple[str, ...]) -> str:
+    if path in ENTRIES:
+        return ENTRIES[path]
+    display = " ".join(path) if path else "<root>"
+    raise AfiError(
+        code=EXIT_USER_ERROR,
+        message=f"no explain entry for: {display}",
+        remediation="list known entries with: irc-lens explain irc-lens",
+    )
+
+
+def known_paths() -> list[tuple[str, ...]]:
+    return list(ENTRIES.keys())
