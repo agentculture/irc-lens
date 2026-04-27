@@ -32,9 +32,16 @@ from aiohttp import web
 
 from irc_lens.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
 from irc_lens.cli._output import emit_diagnostic
-from irc_lens.seed import apply_seed
 from irc_lens.session import LensConnectionLost, Session
 from irc_lens.web import make_app
+
+# `irc_lens.seed` is imported function-locally inside `_serve_async`
+# to avoid a real-but-latent module-load cycle:
+#   seed.py -> cli._errors -> cli/__init__.py (which eagerly imports
+#   serve.py) -> serve.py -> seed.py (partially initialized)
+# Phase 9c's `seeded_lens_client` fixture is the first place that
+# imports `irc_lens.seed` at module-load time, which uncovered this.
+# Keep the cycle broken at the production-code import edge.
 
 
 class _JsonLineFormatter(logging.Formatter):
@@ -121,8 +128,13 @@ async def _serve_async(args: argparse.Namespace) -> None:
         # connection cleanup runs on every failure path — leaking a
         # connected IRC session past process exit would orphan state
         # in the AgentIRC server. BaseException (KeyboardInterrupt,
-        # SystemExit) still propagates untouched.
+        # SystemExit) still propagates untouched. The function-local
+        # import lives INSIDE the try so an import-time failure on
+        # `irc_lens.seed` (or any module it loads) also triggers the
+        # disconnect cleanup branch.
         try:
+            from irc_lens.seed import apply_seed  # see module top comment
+
             apply_seed(session, Path(args.seed))
         except Exception:
             await session.disconnect()
