@@ -2,7 +2,55 @@
   <span data-testid="view-indicator" data-view="{{ session.view }}" class="lens-view">
     view: {{ session.view }}
   </span>
-  {% if session.current_channel %}
-    <p class="lens-info-channel">channel: {{ session.current_channel }}</p>
+  {% if session.view == "help" %}
+    <section class="lens-info-help">
+      <h2>Slash commands</h2>
+      <dl>
+        <dt><code>/join #channel</code></dt><dd>Join a channel and switch the chat pane to it.</dd>
+        <dt><code>/part #channel</code></dt><dd>Leave a channel.</dd>
+        <dt><code>/send target text…</code></dt><dd>Send a message to a specific channel or nick.</dd>
+        <dt><code>/help</code></dt><dd>Show this help pane.</dd>
+        <dt><code>/overview</code></dt><dd>Show the joined-channels overview.</dd>
+        <dt><code>/status</code></dt><dd>Show the connection / session status pane.</dd>
+        <dt><em>(plain text)</em></dt><dd>Sends a message to the active channel.</dd>
+      </dl>
+    </section>
+  {% elif session.view == "overview" %}
+    <section class="lens-info-overview">
+      <h2>Joined channels ({{ session.joined_channels|length }})</h2>
+      {% if session.joined_channels %}
+        <ul>
+          {% for ch in session.joined_channels|sort %}
+            <li>
+              <code>{{ ch }}</code>
+              {% if ch == session.current_channel %}<small>(active)</small>{% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      {% else %}
+        <p class="lens-info-empty">No channels joined. Try <code>/join #general</code>.</p>
+      {% endif %}
+    </section>
+  {% elif session.view == "status" %}
+    <section class="lens-info-status">
+      <h2>Session status</h2>
+      <dl>
+        <dt>Nick</dt><dd>{{ session.nick }}</dd>
+        <dt>Server</dt><dd>{{ session.host }}:{{ session.port }}</dd>
+        <dt>Connected</dt><dd>{{ "yes" if session.connected else "no" }}</dd>
+        <dt>Healthy</dt><dd>{{ "yes" if session.healthy else "no" }}</dd>
+        <dt>Channels</dt><dd>{{ session.joined_channels|length }}</dd>
+        <dt>SSE subscribers</dt><dd>{{ session.event_bus.subscriber_count }}</dd>
+      </dl>
+    </section>
+  {% else %}
+    <section class="lens-info-chat">
+      {% if session.current_channel %}
+        <p class="lens-info-channel">channel: <code>{{ session.current_channel }}</code></p>
+        <p class="lens-info-topic">Topic: <em>not set</em></p>
+      {% else %}
+        <p class="lens-info-empty">No active channel. <code>/join #general</code> to start.</p>
+      {% endif %}
+    </section>
   {% endif %}
 </div>

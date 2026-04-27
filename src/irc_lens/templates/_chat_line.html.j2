@@ -1,4 +1,10 @@
 <div data-testid="chat-line" class="lens-chat-line">
+  {# Live SSE publishes pass `ts_display` (pre-formatted string) so the
+     wire payload is byte-stable. Initial render receives BufferedMessage
+     which has a numeric `timestamp` — fall back through the strftime
+     filter for that path. Either branch ends up rendering an HH:MM:SS
+     stamp in the same span. #}
+  <span class="lens-chat-ts">{{ msg.ts_display if msg.ts_display is defined else (msg.timestamp|strftime) }}</span>
   <span data-testid="chat-line-nick" class="lens-chat-nick">{{ msg.nick }}</span>
   <span data-testid="chat-line-text" class="lens-chat-text">{{ msg.text }}</span>
 </div>
