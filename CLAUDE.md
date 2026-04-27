@@ -50,18 +50,22 @@ These are checked by `afi cli verify` and must not be weakened when shape-adapti
 2. **stdout/stderr split** — results to stdout, errors and diagnostics to stderr, even in `--json` mode. The streams are never mixed.
 3. **Errors have shape `{code, message, remediation}`** — text-mode errors render as `error: <msg>\nhint: <remediation>`. The `hint:` prefix is required by the rubric.
 4. **`_ArgumentParser` override** — argparse errors must route through `emit_error` so unknown verbs/flags exit with `error:` + `hint:` and no traceback.
-5. **Globals `learn` and `explain` exist at the top level** — not nested under a noun. New command groups are registered as siblings via `register(sub)` in `cli/__init__.py` at the marked location.
+5. **Globals `learn`, `explain`, `overview` exist at the top level** — not nested under a noun. New command groups are registered as siblings via `register(sub)` in `cli/__init__.py` at the marked location. Every noun group with action-verbs must also expose its own `overview` verb.
 6. **`learn` output rubric** — stdout ≥ 200 chars, mentions purpose, commands, exit codes, `--json`, and `explain`. `learn --json` is parseable with stderr clean.
+7. **`overview` is descriptive, not verifying** — `overview <bogus-path>` exits **0** with a warning section. Hard-failing on a missing target is `afi cli verify`'s job, not `overview`'s.
 
 ### `afi cli verify` rubric bundles
 
-The five bundles checked by the verifier (run from the host project root once code exists):
+The six bundles checked by the verifier (run from the host project root once code exists):
 
 1. **Structure** — `pyproject.toml` with `[project.scripts]`, `tests/` dir, `<tool> --help` exits 0.
 2. **Learnability** — `<tool> learn` exits 0, stdout ≥ 200 chars, mentions purpose / commands / exit codes / `--json` / `explain`.
 3. **JSON** — `<tool> learn --json` parseable; stderr clean on success; `<tool> explain --json` works.
 4. **Errors** — bogus verb exits non-zero with a `hint:` line and no Python traceback.
 5. **Explain** — `explain`, `explain <tool>`, and bogus-path-failure with hint all work.
+6. **Overview** — global `<tool> overview` exits 0; `<tool> overview --json` returns `{subject, path, sections}`; every noun group with action-verbs also exposes an `overview` verb (e.g. `<tool> cli overview`); `<tool> overview <bogus-path>` exits **0** with a warning section (overview is descriptive, not verifying).
+
+The `python-cli` reference template predates the `overview` bundle. The bootstrap phase explicitly adds an `overview` global + a minimal `cli` noun with `cli overview`. New noun groups added later must follow the same rule.
 
 After integration completes and the rubric passes, the reference can be removed (`rm -rf .afi/reference/`) or refreshed with `afi cli cite`.
 

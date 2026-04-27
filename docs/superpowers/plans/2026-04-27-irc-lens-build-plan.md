@@ -1,9 +1,22 @@
 # `irc-lens` Build Plan
 
-**Status:** Ready to execute
+**Status:** Ready to execute (Phase 1 landed in PR #3)
 **Date:** 2026-04-27
 **Spec:** [`docs/superpowers/specs/2026-04-27-irc-lens-handover-design.md`](../specs/2026-04-27-irc-lens-handover-design.md)
-**Audience:** The agent building this repo. Read the spec first, then this plan, then start at Phase 1.
+**Audience:** The agent building this repo. Read the spec first, then this plan, then start at the first not-yet-landed phase.
+
+## Resolved decisions
+
+These were "agent's call" or "two options" in the original draft; they
+have since been decided. The relevant phases below have been updated.
+
+| Decision | Choice | Rationale |
+| --- | --- | --- |
+| HTMX delivery | **Vendored** under `src/irc_lens/static/vendor/` | Localhost + Playwright + offline-friendly agent loops; no outbound network at boot. |
+| AgentIRC test fixture | **Option (a)** — culture pinned as a dev dep, import its `tests/conftest.py` server fixture | Zero IRC-server code in this repo; SHA-pinned for reproducibility. Fall back to (b) only if upstream's fixture surface stops fitting. |
+| PyPI release model | **PR → TestPyPI / push-to-main → PyPI** via PyPI Trusted Publishers, mirroring `../culture/.github/workflows/publish.yml` | The `pypi` and `testpypi` GitHub environments are already provisioned with Trusted Publishers; tag-based releases are not needed for v0.1.0. |
+| `afi cli verify` rubric | **Six bundles** (added `overview` after the original draft) — Phase 1 ships an `overview` global + `cli overview` noun-verb so the verifier passes 22/22 from day one | The reference template (`python-cli`) predates the `overview` bundle. |
+| PR cadence | **One PR per phase** | Per-phase verification gates were designed for this. |
 
 ---
 
@@ -32,7 +45,7 @@ Before Phase 1:
 
 ## Phase 1 — Repo bootstrap
 
-**Goal:** A working `pip install -e .` and `irc-lens learn` that exits 0 with rubric-passing output.
+**Goal:** A working `pip install -e .` and `irc-lens learn` that exits 0 with rubric-passing output (22/22 across all six `afi cli verify` bundles).
 
 1. Run `afi cli cite python-cli` from the repo root. This populates `.afi/reference/python-cli/`. **Read `MANIFEST.json` and `AGENT.md` before writing any CLI code.**
 2. Substitute tokens (`{{project_name}}` → `irc-lens`, `{{slug}}`/`{{module}}` → `irc_lens`) and copy `stable-contract` files verbatim into `src/irc_lens/`:
@@ -41,23 +54,35 @@ Before Phase 1:
    - `cli/_commands/explain.py`
    - `explain/` (catalog resolver)
 3. Shape-adapt `cli/__init__.py` (parser + `_dispatch`, including `_ArgumentParser` override and try/except wrapping `AfiError`), `cli/_commands/learn.py` (TEXT body + JSON payload mentioning purpose, commands, exit codes, `--json`, `explain`), `explain/catalog.py`, package `__init__.py` / `__main__.py`, and `tests/test_cli.py` per `MANIFEST.json`.
-4. Write `pyproject.toml`:
+4. Add the new `overview` bundle (the `python-cli` reference predates it):
+   - `cli/_commands/overview.py` — global `overview` verb. Subject defaults to `"all"`. JSON shape `{subject, path, sections: [{heading, body_md, findings}]}`. Unknown `<path>` arg exits **0** with a warning section, not non-zero — overview is descriptive, not a verifier.
+   - Register a minimal `cli` noun in `cli/__init__.py` with at least an `overview` verb (`cli overview`), to satisfy "every noun with action-verbs exposes `overview`."
+   - Add `("overview",)` and `("cli",)` entries to `explain/catalog.py`.
+5. Write `pyproject.toml`:
    - `[project]` with name `irc-lens`, version `0.1.0`, Python 3.11+
    - `[project.scripts]` registers `irc-lens = "irc_lens.cli:main"`
+   - Build backend: `hatchling` (`[tool.hatch.build.targets.wheel] packages = ["src/irc_lens"]`)
    - Runtime deps: `aiohttp`, `jinja2`, `pyyaml`
    - Dev deps: `pytest`, `pytest-asyncio`, `pytest-aiohttp`, `playwright`, `pytest-playwright`
-5. Write a minimal CI skeleton at `.github/workflows/ci.yml`: `uv sync`, `pytest`, `afi cli verify`. Skip the Playwright job for now (added in Phase 9).
-6. Write `CITATION.md` with a placeholder block for culture's source SHA (filled in Phase 2).
+   - `[tool.pytest.ini_options]` with `asyncio_mode = "auto"` and a `playwright` marker for the opt-in browser job (used in Phase 9c).
+6. Write a minimal CI skeleton at `.github/workflows/ci.yml`: `uv venv`, `uv pip install -e ".[dev]"`, `uv run pytest`. Skip `afi cli verify` in CI for now (afi is not on PyPI; the verifier runs locally before each commit). Skip the Playwright job (added in Phase 9c). The PyPI publish workflow is a separate file added in Phase 11.
+7. Write `CITATION.md` with a placeholder Sources table (filled in Phase 2).
+8. Track `uv.lock` (matches culture's convention).
 
 **Verification:**
 
 ```bash
 uv venv && uv pip install -e ".[dev]"
-irc-lens --help                # exits 0, lists global verbs (learn, explain)
+irc-lens --help                # exits 0, lists globals (learn, explain, overview) + `cli` noun
 irc-lens learn                  # exits 0, stdout ≥ 200 chars, mentions all 5 rubric items
 irc-lens learn --json | jq .    # parseable JSON, stderr clean
+irc-lens overview               # exits 0, prints rollup
+irc-lens overview --json | jq . # {subject, path, sections} shape
+irc-lens overview bogus-path    # exits 0 with a warning section (NOT non-zero)
+irc-lens cli overview           # exits 0
 irc-lens nope                   # exits non-zero, stderr has 'error:' and 'hint:', no Python traceback
-afi cli verify                  # all five rubric bundles pass
+uv run pytest                   # all green
+afi cli verify                  # 22/22 passed across six bundles
 ```
 
 **Commit:** "phase 1: bootstrap repo with afi cli cite python-cli pattern"
@@ -123,7 +148,7 @@ uv run pytest tests/test_session_unit.py -v
    - `GET /events` → SSE stub that emits one `chat` event saying "irc-lens online" then closes. Wired properly in Phase 5.
    - `GET /static/{path}` → static file handler for `lens.css`, `lens.js`.
 3. Create `src/irc_lens/web/render.py` with the Jinja2 environment and a `render_fragment(template, **ctx)` helper.
-4. Create `templates/index.html.j2` with the three-pane layout (sidebar, chat, info) and the SSE listener `<script>` tag (HTMX vendored or CDN — document the choice in `docs/architecture.md`).
+4. Create `templates/index.html.j2` with the three-pane layout (sidebar, chat, info) and the SSE listener `<script>` tag. HTMX is vendored (per Resolved decisions): drop a pinned `htmx.min.js` + `sse.js` extension under `src/irc_lens/static/vendor/` and reference them by relative path from the template. Document the pinned version in `docs/architecture.md`.
 5. Add `_chat_line.j2`, `_sidebar.j2`, `_info.j2` as empty placeholders rendered with current state.
 
 **Verification:**
@@ -287,13 +312,22 @@ The new repo's `docs/` must contain at least:
 
 ## Phase 11 — Release workflow
 
-**Goal:** Tagging `v0.1.0` produces a wheel on PyPI.
+**Goal:** Every PR pushes a `.devN` build to TestPyPI; merging to `main` publishes a real version to PyPI. No long-lived tokens.
 
-1. Add `.github/workflows/release.yml`: triggers on `tags: v*`. Builds with `uv build`, publishes with `pypa/gh-action-pypi-publish` using a PyPI Trusted Publisher (no long-lived token in the repo).
-2. Tag `v0.1.0` and push. Confirm the release lands on PyPI.
-3. Update `README.md` install line to `pip install irc-lens`.
+The `pypi` and `testpypi` GitHub environments are already provisioned with PyPI Trusted Publishers pointing at this repo. Mirror `../culture/.github/workflows/publish.yml`:
 
-**Commit:** "phase 11: release workflow + first release"
+1. Add `.github/workflows/publish.yml` with three jobs:
+   - **`test`** — runs on every `push` and `pull_request` to `main`. `uv sync && uv run pytest -n auto -v`.
+   - **`test-publish`** — `if: github.event_name == 'pull_request'`. `needs: test`. `environment: testpypi`. `permissions: contents: read, id-token: write`. Mints a `${BASE_VERSION}.dev${{ github.run_number }}` version (sed into `pyproject.toml`), then `uv build && uv publish --publish-url https://test.pypi.org/legacy/ --trusted-publishing always --check-url https://test.pypi.org/simple/`. Prints the install command via `::notice::`.
+   - **`publish`** — `if: github.event_name == 'push'`. `needs: test`. `environment: pypi`. `permissions: contents: read, id-token: write`. `uv build && uv publish --trusted-publishing always --check-url https://pypi.org/simple/`.
+2. Pin all action SHAs (mirror culture: `actions/checkout@34e114876b…` v4 and `astral-sh/setup-uv@38f3f10…` v4).
+3. Open a small PR; confirm `test-publish` puts `0.1.0.devN` on TestPyPI in the `testpypi` environment.
+4. Merge to `main`; confirm `publish` puts `0.1.0` on PyPI in the `pypi` environment.
+5. Update `README.md` install line to `pip install irc-lens`.
+
+Tag-based releases are intentionally not used for v0.1.0 — the GitHub environments + Trusted Publishers already give us safe, gated publishing without manual tagging.
+
+**Commit:** "phase 11: trusted-publisher PyPI workflow + first release"
 
 ---
 

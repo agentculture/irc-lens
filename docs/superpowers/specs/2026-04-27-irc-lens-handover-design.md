@@ -29,7 +29,7 @@ The expected outcome: a `pip install irc-lens && irc-lens --host x --port y --ni
 - **Dependency manager:** `uv` (match culture)
 - **Web framework:** `aiohttp`
 - **Templating:** Jinja2
-- **Frontend:** vanilla JS + HTMX (loaded from CDN or vendored — agent's call, document the choice)
+- **Frontend:** vanilla JS + HTMX. **Vendored** under `src/irc_lens/static/vendor/` (pinned `htmx.min.js` + `sse.js`), not loaded from a CDN — irc-lens runs on localhost, drives Playwright in offline-friendly agent loops, and must boot deterministically without outbound network. The pinned version is documented in `docs/architecture.md`.
 
 ---
 
@@ -286,12 +286,9 @@ Three layers:
 
 **3. Playwright e2e (`tests/test_e2e_playwright.py`, opt-in via `pytest -m playwright`):** launches chromium, navigates to the local URL, types into `data-testid="chat-input"`, asserts visible `data-testid="chat-line"` elements. Uses `--seed` fixtures for setup. Slower; runs in CI on a separate job.
 
-**AgentIRC server fixture.** The agent has two options for getting an AgentIRC server in tests:
+**AgentIRC server fixture.** Use option (a): pin `culture` as a dev dependency to a commit SHA and import its `tests/conftest.py` server fixture. This keeps zero IRC-server code in `irc-lens` and lets us track upstream protocol changes by bumping the SHA. Document the pinned SHA in `tests/README.md` and `CITATION.md`.
 
-- (a) Add `culture` as a dev dependency (pinned to a commit SHA), import its `tests/conftest.py` server fixture. Simplest, but couples test-time deps to culture's source.
-- (b) Build a thin AgentIRC test server in the new repo. More work; cleaner boundary.
-
-**Recommendation:** start with (a). If/when culture's test fixture stops fitting, extract a minimal test server into `tests/_agentirc_server.py`. Document the choice in `tests/README.md`.
+If culture's fixture later stops fitting (e.g., the import surface changes, or culture itself splits), fall back to option (b): extract a minimal AgentIRC test server into `tests/_agentirc_server.py` and update `tests/README.md`. Do not attempt both at once.
 
 ---
 
@@ -310,22 +307,27 @@ The repo's CLAUDE.md should mirror culture's structure: project overview, packag
 
 ---
 
-## Build sequence (suggested for the building agent)
+## Build sequence
 
-1. Bootstrap repo: `pyproject.toml`, `uv` venv, CI skeleton, `README.md`, `CLAUDE.md`, `CITATION.md`.
-2. Cite `irc_transport.py`, `message_buffer.py`, `commands.py` per the citation table. Verify they import.
-3. Build `Session` class — wire transport + buffer + commands, implement query methods (LIST/WHO/HISTORY) by mirroring `culture/console/client.py`.
-4. Build aiohttp app + routes + Jinja templates. Render index page, hard-coded SSE event for sanity check.
-5. Wire `Session` events → SSE stream. End-to-end smoke: open browser, see a real chat line.
-6. Add `data-testid` attributes per the DOM contract.
-7. Add `--seed` flag and YAML loading.
-8. Write unit tests (commands, render).
-9. Write HTTP e2e tests (real AgentIRC fixture).
-10. Write Playwright e2e tests (opt-in marker).
-11. Write `docs/` deliverables.
-12. PyPI publish workflow + first release.
+The operational sequence is the 11-phase build plan: [`docs/superpowers/plans/2026-04-27-irc-lens-build-plan.md`](../plans/2026-04-27-irc-lens-build-plan.md). Each phase ends with a verification block; one PR per phase.
 
-Each step is independently committable. Do not skip the documentation step at the end — agents that follow this spec will rely on those docs.
+Quick map (spec section → plan phase):
+
+| Spec topic | Plan phase |
+| --- | --- |
+| Repo bootstrap (incl. `overview` global + `cli overview`) | Phase 1 |
+| Citation lift from culture | Phase 2 |
+| `Session` class | Phase 3 |
+| aiohttp app skeleton + index render | Phase 4 |
+| SSE event bus wired through `Session` | Phase 5 |
+| Render fragments per event type | Phase 6 |
+| Browser glue (`lens.js`, `lens.css`) | Phase 7 |
+| `--seed` YAML fixture | Phase 8 |
+| Tests (unit, HTTP e2e, Playwright opt-in) | Phase 9 |
+| `docs/` deliverables | Phase 10 |
+| Release workflow (PR → TestPyPI / push → PyPI) | Phase 11 |
+
+Do not skip the documentation phase — agents reading this spec later will rely on those docs.
 
 ---
 
@@ -353,10 +355,11 @@ If a v2 needs any of these, that's a follow-up spec.
 The handover is complete when, on a clean machine:
 
 1. `pip install irc-lens` succeeds.
-2. With a culture AgentIRC server running, `irc-lens --host localhost --port 6667 --nick test` starts and prints the localhost URL.
+2. With a culture AgentIRC server running, `irc-lens serve --host localhost --port 6667 --nick test` starts and prints the localhost URL.
 3. Opening the URL shows the three-pane layout with the user joined to no channels.
 4. Typing `/join #general` in the chat input causes the channel to appear in the sidebar (via SSE `roster` event).
 5. Typing `hello` posts a PRIVMSG and the message appears in the chat log.
 6. A second user posting from another IRC client appears in the chat log within the SSE delivery latency.
 7. `pytest` passes (with Playwright tests opt-in via `-m playwright`).
 8. Playwright MCP can navigate to the URL, locate elements by `data-testid`, and drive the same flow.
+9. `afi cli verify` reports 22/22 across all six rubric bundles (Structure, Learnability, JSON, Errors, Explain, Overview).
