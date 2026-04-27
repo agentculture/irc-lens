@@ -12,12 +12,18 @@ name: Publish to PyPI
 on:
   push:
     branches: [main]
+    # Push triggers `publish` against PyPI, which rejects re-uploads of
+    # an existing version. Gate it on `pyproject.toml` so the publish
+    # only fires when `[project] version` bumps. `src/**` changes still
+    # run on PRs (test-publish) and are validated by `ci.yml`'s `test`
+    # job on push to main; we just don't try to re-publish them.
     paths:
       - "pyproject.toml"
-      - "src/**"
       - ".github/workflows/publish.yml"
   pull_request:
     branches: [main]
+    # PRs are safe to run on broader changes — `test-publish` mints a
+    # unique `.devN` per run_number so re-uploads can't collide.
     paths:
       - "pyproject.toml"
       - "src/**"
@@ -62,8 +68,11 @@ jobs:
         # every PR build needs a unique suffix. `github.run_number` is
         # monotonic per workflow file and survives re-runs of the same
         # workflow run (those reuse the run_attempt, not run_number).
+        # Use the uv-installed 3.12 interpreter explicitly so this step
+        # doesn't depend on whatever `python` the runner happens to
+        # ship (tomllib is 3.11+).
         run: |
-          BASE=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          BASE=$(uv run --python 3.12 python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
           DEV_VERSION="${BASE}.dev${{ github.run_number }}"
           sed -i "s/^version = .*/version = \"${DEV_VERSION}\"/" pyproject.toml
           echo "DEV_VERSION=${DEV_VERSION}" >> "$GITHUB_ENV"
