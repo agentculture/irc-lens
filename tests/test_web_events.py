@@ -16,6 +16,7 @@ What's covered:
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncGenerator
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -152,7 +153,7 @@ async def test_post_input_413_on_chunked_oversize_body(client: TestClient) -> No
     closes that hole.
     """
 
-    async def chunked() -> object:
+    async def chunked() -> AsyncGenerator[bytes, None]:
         # Five 1 KiB chunks = 5 KiB > 4 KiB cap.
         for _ in range(5):
             yield b"x" * 1024
