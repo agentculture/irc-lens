@@ -229,18 +229,16 @@ class IRCTransport:
                     await self._do_connect()
                     logger.info("Reconnected to IRC")
                     return
-                except (OSError, ConnectionError):
-                    # ``_do_connect`` wraps ``OSError`` from
-                    # ``asyncio.open_connection`` into ``ConnectionError``,
-                    # which is NOT a subclass of ``OSError``. Catching only
-                    # ``OSError`` (as upstream does) lets the wrapped
-                    # exception escape, killing the reconnect task and
-                    # leaving ``_reconnecting`` stuck True forever.
-                    # Upstream bug — fix candidate to feed back to culture.
+                except OSError:
+                    # `ConnectionError` from `_do_connect` is also caught
+                    # here — it's a subclass of `OSError` in Python 3.3+.
                     delay = min(delay * 2, 60)
         finally:
-            # Always release the gate so a future read-loop exit can spawn
-            # a fresh reconnect task even if this one bailed out.
+            # Release the gate so a future read-loop exit can always spawn
+            # a fresh reconnect task — even if this one was cancelled or
+            # exited because `_should_run` flipped while we were sleeping.
+            # Upstream releases the gate only on successful return; this
+            # `finally` is a small improvement to flag for back-port.
             self._reconnecting = False
 
     async def _handle(self, msg: Message) -> None:
