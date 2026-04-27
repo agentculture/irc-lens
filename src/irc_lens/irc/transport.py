@@ -117,7 +117,11 @@ class IRCTransport:
             self._writer.close()
             try:
                 await self._writer.wait_closed()
-            except ConnectionError:
+            except OSError:
+                # ConnectionResetError and other transport-level errors
+                # are subclasses of OSError; catching the parent matches
+                # the QUIT-send handling above. Upstream bug — fix
+                # candidate to feed back to culture.
                 pass
         self.connected = False
 
@@ -184,16 +188,22 @@ class IRCTransport:
         await self.send_raw(line)
 
     async def _read_loop(self) -> None:
-        buf = ""
+        # Buffer as bytes and decode per complete line. Decoding each
+        # ``recv`` chunk independently risks splitting a UTF-8 multibyte
+        # sequence across chunks, which ``errors="replace"`` would
+        # silently corrupt with U+FFFD. Upstream bug — fix candidate to
+        # feed back to culture.
+        buf = b""
         try:
             while True:
                 data = await self._reader.read(4096)
                 if not data:
                     break
-                buf += data.decode("utf-8", errors="replace")
-                buf = buf.replace("\r\n", "\n").replace("\r", "\n")
-                while "\n" in buf:
-                    line, buf = buf.split("\n", 1)
+                buf += data
+                buf = buf.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+                while b"\n" in buf:
+                    raw, buf = buf.split(b"\n", 1)
+                    line = raw.decode("utf-8", errors="replace")
                     if line.strip():
                         msg = Message.parse(line)
                         await self._handle(msg)
@@ -210,17 +220,28 @@ class IRCTransport:
 
     async def _reconnect(self) -> None:
         self._reconnecting = True
-        delay = 1
-        while self._should_run:
-            logger.info("Reconnecting to IRC in %ds...", delay)
-            await asyncio.sleep(delay)
-            try:
-                await self._do_connect()
-                logger.info("Reconnected to IRC")
-                self._reconnecting = False
-                return
-            except OSError:
-                delay = min(delay * 2, 60)
+        try:
+            delay = 1
+            while self._should_run:
+                logger.info("Reconnecting to IRC in %ds...", delay)
+                await asyncio.sleep(delay)
+                try:
+                    await self._do_connect()
+                    logger.info("Reconnected to IRC")
+                    return
+                except (OSError, ConnectionError):
+                    # ``_do_connect`` wraps ``OSError`` from
+                    # ``asyncio.open_connection`` into ``ConnectionError``,
+                    # which is NOT a subclass of ``OSError``. Catching only
+                    # ``OSError`` (as upstream does) lets the wrapped
+                    # exception escape, killing the reconnect task and
+                    # leaving ``_reconnecting`` stuck True forever.
+                    # Upstream bug — fix candidate to feed back to culture.
+                    delay = min(delay * 2, 60)
+        finally:
+            # Always release the gate so a future read-loop exit can spawn
+            # a fresh reconnect task even if this one bailed out.
+            self._reconnecting = False
 
     async def _handle(self, msg: Message) -> None:
         handler = self._cmd_handlers.get(msg.command)
