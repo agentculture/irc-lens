@@ -374,52 +374,44 @@ def test_event_bus_overflow_emits_single_error_then_drops() -> None:
     Test directly against `_Subscriber` so we can inspect the queue
     contents without driving the iterator. A small burst (queue_max=4,
     push 6) exercises overflow without itself evicting the error event
-    from the queue.
+    from the queue. Sync — `_Subscriber.publish` is a plain method.
     """
-
-    async def run() -> list[str]:
-        sub = _Subscriber(queue_max=4)
-        for i in range(4):
-            sub.publish(SessionEvent(name="chat", data=f"a{i}"))
-        # Two extra publishes push us into the overflow path twice; the
-        # first one injects exactly one error event, the second does
-        # NOT (single-shot per burst).
-        sub.publish(SessionEvent(name="chat", data="b0"))
-        sub.publish(SessionEvent(name="chat", data="b1"))
-        drained = []
-        while not sub.queue.empty():
-            drained.append(sub.queue.get_nowait())
-        return [e.name for e in drained]
-
-    names = asyncio.run(run())
+    sub = _Subscriber(queue_max=4)
+    for i in range(4):
+        sub.publish(SessionEvent(name="chat", data=f"a{i}"))
+    # Two extra publishes push us into the overflow path twice; the
+    # first one injects exactly one error event, the second does NOT
+    # (single-shot per burst).
+    sub.publish(SessionEvent(name="chat", data="b0"))
+    sub.publish(SessionEvent(name="chat", data="b1"))
+    drained = []
+    while not sub.queue.empty():
+        drained.append(sub.queue.get_nowait())
+    names = [e.name for e in drained]
     assert names.count("error") == 1, f"expected exactly one error event; got {names}"
 
 
 def test_overflow_flag_clears_after_queue_drains() -> None:
     """A later overflow burst (after the queue catches up) issues its own
-    error notice, rather than being silently coalesced forever."""
-
-    async def run() -> tuple[int, int]:
-        sub = _Subscriber(queue_max=2)
-        sub.publish(SessionEvent(name="chat", data="a0"))
-        sub.publish(SessionEvent(name="chat", data="a1"))
-        sub.publish(SessionEvent(name="chat", data="b0"))  # first overflow
-        first_names: list[str] = []
-        while not sub.queue.empty():
-            first_names.append(sub.queue.get_nowait().name)
-        # Second burst: first the queue gets a normal publish (clears
-        # the flag because the queue had room), then refills + overflows.
-        sub.publish(SessionEvent(name="chat", data="c0"))
-        sub.publish(SessionEvent(name="chat", data="c1"))
-        sub.publish(SessionEvent(name="chat", data="d0"))  # second overflow
-        second_names: list[str] = []
-        while not sub.queue.empty():
-            second_names.append(sub.queue.get_nowait().name)
-        return first_names.count("error"), second_names.count("error")
-
-    first, second = asyncio.run(run())
-    assert first == 1
-    assert second == 1
+    error notice, rather than being silently coalesced forever. Sync —
+    `_Subscriber.publish` is a plain method."""
+    sub = _Subscriber(queue_max=2)
+    sub.publish(SessionEvent(name="chat", data="a0"))
+    sub.publish(SessionEvent(name="chat", data="a1"))
+    sub.publish(SessionEvent(name="chat", data="b0"))  # first overflow
+    first_names: list[str] = []
+    while not sub.queue.empty():
+        first_names.append(sub.queue.get_nowait().name)
+    # Second burst: first the queue gets a normal publish (clears the
+    # flag because the queue had room), then refills + overflows.
+    sub.publish(SessionEvent(name="chat", data="c0"))
+    sub.publish(SessionEvent(name="chat", data="c1"))
+    sub.publish(SessionEvent(name="chat", data="d0"))  # second overflow
+    second_names: list[str] = []
+    while not sub.queue.empty():
+        second_names.append(sub.queue.get_nowait().name)
+    assert first_names.count("error") == 1
+    assert second_names.count("error") == 1
 
 
 def test_overflow_error_payload_matches_spec() -> None:
