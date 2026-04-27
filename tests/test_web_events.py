@@ -134,12 +134,35 @@ async def test_post_input_503_on_lens_connection_lost(
 
 
 async def test_post_input_413_on_oversize_body(client: TestClient) -> None:
+    """Oversize JSON body — `client_max_size` on the Application drops
+    it at the framework layer (returns 413 before the handler even
+    runs), which is what we want for the bounded-memory contract.
+    Body shape isn't asserted because the framework-level error has
+    its own template, not our `{error, hint}` JSON."""
     big = {"text": "x" * 5000}
     resp = await client.post("/input", json=big)
     assert resp.status == 413
-    body = await resp.json()
-    assert body["error"] == "input too large"
-    assert "hint" in body
+
+
+async def test_post_input_413_on_chunked_oversize_body(client: TestClient) -> None:
+    """Chunked transfer (no Content-Length) > cap — also 413.
+
+    Without `client_max_size`, the previous implementation would have
+    buffered the whole body before checking size; the framework cap
+    closes that hole.
+    """
+
+    async def chunked() -> object:
+        # Five 1 KiB chunks = 5 KiB > 4 KiB cap.
+        for _ in range(5):
+            yield b"x" * 1024
+
+    resp = await client.post(
+        "/input",
+        data=chunked(),
+        headers={"Content-Type": "application/json"},
+    )
+    assert resp.status == 413
 
 
 async def test_post_input_400_on_invalid_json(client: TestClient) -> None:
@@ -159,3 +182,46 @@ async def test_post_input_204_on_empty_text(client: TestClient) -> None:
     field on accidental Enter."""
     resp = await client.post("/input", json={"text": ""})
     assert resp.status == 204
+
+
+async def test_post_input_accepts_form_encoded_body(
+    session: Session, client: TestClient
+) -> None:
+    """HTMX submits forms as `application/x-www-form-urlencoded` by
+    default; the shipped `index.html.j2` form sends `text=...` that
+    way. The handler must accept it (not 400 on missing JSON)."""
+    resp = await client.post(
+        "/input",
+        data={"text": "/join #ops"},
+        # aiohttp's TestClient sets the form-encoded Content-Type
+        # automatically for `data=dict`.
+    )
+    assert resp.status == 204
+    # Side-effect check: /join #ops should have advanced session state.
+    assert "#ops" in session.joined_channels
+    assert session.current_channel == "#ops"
+
+
+async def test_post_input_503_when_session_unhealthy(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Once the AgentIRC pipe is gone, subsequent input must fail fast
+    rather than silently no-op through `_writer is None` (spec line 267)."""
+    session._healthy = False
+
+    called = False
+
+    async def should_not_run(_parsed) -> None:
+        nonlocal called
+        called = True
+
+    monkeypatch.setattr(session, "execute", should_not_run)
+
+    app = make_app(session)
+    async with TestClient(TestServer(app)) as c:
+        resp = await c.post("/input", json={"text": "/join #ops"})
+        assert resp.status == 503
+        body = await resp.json()
+        assert "error" in body
+        assert "hint" in body
+    assert called is False, "execute() must not be called once unhealthy"

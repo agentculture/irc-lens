@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from aiohttp import web
 
 from irc_lens.web import routes
+from irc_lens.web.routes import _MAX_INPUT_BODY
 
 if TYPE_CHECKING:
     from irc_lens.session import Session
@@ -24,8 +25,12 @@ def make_app(session: "Session") -> web.Application:
 
     The static directory is resolved via ``importlib.resources`` so the
     wheel install path works the same as a development checkout.
+    ``client_max_size`` mirrors the in-handler ``_MAX_INPUT_BODY`` cap
+    so chunked / unknown-Content-Length requests can't sneak past the
+    bounded-memory contract — aiohttp returns 413 before any handler
+    runs.
     """
-    app = web.Application()
+    app = web.Application(client_max_size=_MAX_INPUT_BODY)
     app["session"] = session
 
     app.router.add_get("/", routes.get_index)

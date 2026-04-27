@@ -87,6 +87,31 @@ def test_execute_join_without_args_publishes_error(session: Session) -> None:
     assert session.joined_channels == set()
 
 
+def test_execute_join_non_hash_target_publishes_error_no_state_change(
+    session: Session,
+) -> None:
+    """`/join ops` (no `#`) must not mutate view state.
+
+    Session.join() no-ops on non-`#` targets; without an early
+    validation in execute(), `set_current_channel` would still run and
+    leave the UI pointing at a channel that's not in joined_channels.
+    """
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.execute(ParsedCommand(type=CommandType.JOIN, args=["ops"])))
+    events = []
+    while not sub._sub.queue.empty():
+        events.append(sub._sub.queue.get_nowait())
+    sub.close()
+    assert session.current_channel == ""
+    assert session.joined_channels == set()
+    names = [e.name for e in events]
+    assert names == ["error"]
+    assert "invalid channel" in events[0].data
+    # No roster/view leakage either.
+    assert "roster" not in names
+    assert "view" not in names
+
+
 def test_execute_part_publishes_roster(session: Session) -> None:
     session.joined_channels.add("#ops")
     session.set_current_channel("#ops")

@@ -403,65 +403,89 @@ class Session:
     async def execute(self, parsed: ParsedCommand) -> None:
         """Dispatch a `ParsedCommand` from `POST /input`.
 
-        Maps each command type to the matching send path, then publishes
-        the visible side-effect as a `SessionEvent`. ``LensConnectionLost``
-        is allowed to propagate so the route layer can translate it to
-        HTTP 503; ``UNKNOWN`` and unsupported-yet types publish an
-        ``error`` event and return normally — typing ``/foo`` should
-        never crash a browser session.
+        Maps each command type to a small per-type helper that runs the
+        matching send path and publishes the visible side-effect.
+        ``LensConnectionLost`` is allowed to propagate so the route
+        layer can translate it to HTTP 503; ``UNKNOWN`` and
+        unsupported-yet types publish an ``error`` event and return
+        normally — typing ``/foo`` should never crash a browser session.
         """
-        t = parsed.type
-        if t is CommandType.CHAT:
-            text = parsed.text
-            if not text:
-                return
-            if not self.current_channel:
-                self._publish_error("no active channel; /join #x first")
-                return
-            await self.send_privmsg(self.current_channel, text)
+        handler = self._exec_dispatch.get(parsed.type, self._exec_unsupported)
+        await handler(parsed)
+
+    @property
+    def _exec_dispatch(self) -> dict[CommandType, Any]:
+        # Built lazily so the bound-method references are stable per
+        # instance; small dict, cheap to construct on demand.
+        return {
+            CommandType.CHAT: self._exec_chat,
+            CommandType.SEND: self._exec_send,
+            CommandType.JOIN: self._exec_join,
+            CommandType.PART: self._exec_part,
+            CommandType.UNKNOWN: self._exec_unknown,
+        }
+
+    async def _exec_chat(self, parsed: ParsedCommand) -> None:
+        text = parsed.text
+        if not text:
+            return
+        if not self.current_channel:
+            self._publish_error("no active channel; /join #x first")
+            return
+        await self.send_privmsg(self.current_channel, text)
+        self._publish_chat(self.nick, text)
+
+    async def _exec_send(self, parsed: ParsedCommand) -> None:
+        if not parsed.args:
+            self._publish_error("/send needs a target")
+            return
+        target = parsed.args[0]
+        text = parsed.text or ""
+        if not text:
+            self._publish_error("/send needs text")
+            return
+        await self.send_privmsg(target, text)
+        # Echo only when the target is the active channel — that's the
+        # one place the local echo will visually render today.
+        if target == self.current_channel:
             self._publish_chat(self.nick, text)
+
+    async def _exec_join(self, parsed: ParsedCommand) -> None:
+        if not parsed.args:
+            self._publish_error("/join needs a channel")
             return
-        if t is CommandType.SEND:
-            if not parsed.args:
-                self._publish_error("/send needs a target")
-                return
-            target = parsed.args[0]
-            text = parsed.text or ""
-            if not text:
-                self._publish_error("/send needs text")
-                return
-            await self.send_privmsg(target, text)
-            # Local echo is only visually meaningful when the target is
-            # the active channel (or a DM with our own nick).
-            if target == self.current_channel:
-                self._publish_chat(self.nick, text)
+        channel = parsed.args[0]
+        # Validate before mutating view state. `Session.join` no-ops on
+        # a non-`#` target, so a permissive `set_current_channel` here
+        # would point the UI at a channel that's not in `joined_channels`.
+        if not channel.startswith("#"):
+            self._publish_error(f"invalid channel: {channel} (must start with #)")
             return
-        if t is CommandType.JOIN:
-            if not parsed.args:
-                self._publish_error("/join needs a channel")
-                return
-            channel = parsed.args[0]
-            await self.join(channel)
-            self.set_current_channel(channel)
-            self._publish_roster()
-            self._publish_view()
+        await self.join(channel)
+        self.set_current_channel(channel)
+        self._publish_roster()
+        self._publish_view()
+
+    async def _exec_part(self, parsed: ParsedCommand) -> None:
+        if not parsed.args:
+            self._publish_error("/part needs a channel")
             return
-        if t is CommandType.PART:
-            if not parsed.args:
-                self._publish_error("/part needs a channel")
-                return
-            channel = parsed.args[0]
-            await self.part(channel)
-            self._publish_roster()
-            self._publish_view()
+        channel = parsed.args[0]
+        if not channel.startswith("#"):
+            self._publish_error(f"invalid channel: {channel} (must start with #)")
             return
-        if t is CommandType.UNKNOWN:
-            self._publish_error(f"unknown command: {parsed.text}")
-            return
+        await self.part(channel)
+        self._publish_roster()
+        self._publish_view()
+
+    async def _exec_unknown(self, parsed: ParsedCommand) -> None:
+        self._publish_error(f"unknown command: {parsed.text}")
+
+    async def _exec_unsupported(self, parsed: ParsedCommand) -> None:
         # Slash commands defined in commands.py but not yet wired
         # (TOPIC/WHO/HISTORY/QUIT/HELP/...). Surface a non-fatal error
         # event rather than 503ing the browser.
-        self._publish_error(f"{t.name.lower()}: not yet supported")
+        self._publish_error(f"{parsed.type.name.lower()}: not yet supported")
 
     async def dispatch(self, msg: Message) -> None:
         """Listener for inbound IRC messages — publishes SSE events.
