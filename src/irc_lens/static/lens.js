@@ -17,15 +17,14 @@
   const input = $("chat-input");
   const form = $("chat-form");
 
-  function toast(message, kind) {
+  function toast(message, kind = "error") {
     if (!toasts) return;
-    const tone = kind || "error";
-    const isError = tone === "error";
+    const isError = kind === "error";
     // Errors get assertive aria-live so screen readers announce them
     // immediately; info-level toasts stay polite.
     toasts.setAttribute("aria-live", isError ? "assertive" : "polite");
     const el = document.createElement("div");
-    el.className = "lens-toast lens-toast--" + tone;
+    el.className = "lens-toast lens-toast--" + kind;
     el.setAttribute("role", isError ? "alert" : "status");
     el.textContent = message;
     toasts.appendChild(el);
