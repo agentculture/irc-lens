@@ -1,0 +1,8 @@
+<div class="lens-info-inner">
+  <span data-testid="view-indicator" data-view="{{ session.view }}" class="lens-view">
+    view: {{ session.view }}
+  </span>
+  {% if session.current_channel %}
+    <p class="lens-info-channel">channel: {{ session.current_channel }}</p>
+  {% endif %}
+</div>

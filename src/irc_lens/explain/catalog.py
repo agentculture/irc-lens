@@ -108,6 +108,29 @@ warning section, not an error.
     irc-lens cli overview --json
 """
 
+_SERVE = """\
+# irc-lens serve
+
+Launches the aiohttp web console (HTMX + SSE, server-rendered HTML
+fragments) against an AgentIRC server. One process owns one IRC
+connection and serves one browser tab.
+
+## Usage
+
+    irc-lens serve --host <agentirc-host> --port <agentirc-port> --nick <nick>
+                   [--web-port 8765] [--bind 127.0.0.1] [--icon <emoji>]
+                   [--open] [--seed <yaml>] [--log-json]
+
+## Lifecycle
+
+* Connects to AgentIRC synchronously before binding the web port —
+  unreachable server exits 1 with `error:` + `hint:` and aiohttp
+  never binds.
+* `--bind 0.0.0.0` prints a loud stderr warning (no auth in v1).
+* Web port already in use exits 2 (env error).
+* Foreground only; Ctrl-C is the supported shutdown.
+"""
+
 
 ENTRIES: dict[tuple[str, ...], str] = {
     (): _ROOT,
@@ -117,4 +140,5 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("overview",): _OVERVIEW,
     ("cli",): _CLI,
     ("cli", "overview"): _CLI_OVERVIEW,
+    ("serve",): _SERVE,
 }

@@ -1,0 +1,26 @@
+<section class="lens-sidebar-section">
+  <h2 class="lens-sidebar-heading">Channels</h2>
+  <ul class="lens-channel-list">
+    {% for channel in session.joined_channels|sort %}
+      <li
+        data-testid="sidebar-channel"
+        data-channel="{{ channel }}"
+        class="lens-channel{% if channel == session.current_channel %} lens-channel--active{% endif %}">
+        {{ channel }}
+      </li>
+    {% endfor %}
+  </ul>
+</section>
+<section class="lens-sidebar-section">
+  <h2 class="lens-sidebar-heading">Roster</h2>
+  <ul class="lens-roster">
+    {% for entity in session.roster %}
+      <li
+        data-testid="sidebar-entity"
+        data-nick="{{ entity.nick }}"
+        class="lens-entity lens-entity--{{ entity.type }}{% if not entity.online %} lens-entity--offline{% endif %}">
+        {{ entity.nick }}
+      </li>
+    {% endfor %}
+  </ul>
+</section>

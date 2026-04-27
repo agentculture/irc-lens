@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>irc-lens — {{ session.nick }}@{{ session.host }}</title>
+    <link rel="stylesheet" href="/static/lens.css">
+    <script src="/static/vendor/htmx.min.js" defer></script>
+    <script src="/static/vendor/sse.js" defer></script>
+    <script src="/static/lens.js" defer></script>
+  </head>
+  <body data-view="{{ session.view }}">
+    <header class="lens-header">
+      <span data-testid="connection-status" class="lens-conn {{ 'lens-conn--healthy' if session.healthy else 'lens-conn--down' }}">
+        {% if session.healthy %}connected{% else %}disconnected{% endif %}
+      </span>
+      <span class="lens-identity">{{ session.nick }}@{{ session.host }}:{{ session.port }}</span>
+    </header>
+
+    <main class="lens-grid">
+      <aside data-testid="sidebar" id="sidebar" class="lens-sidebar">
+        {% include "_sidebar.html.j2" %}
+      </aside>
+
+      <section class="lens-chat">
+        <div data-testid="chat-log" id="chat-log" class="lens-log">
+          {% for msg in session.buffer.read(session.current_channel, limit=200) if session.current_channel %}
+            {% include "_chat_line.html.j2" %}
+          {% endfor %}
+        </div>
+        <form id="chat-form" class="lens-form" hx-post="/input" hx-trigger="submit" hx-swap="none">
+          <input
+            data-testid="chat-input"
+            id="chat-input"
+            name="text"
+            type="text"
+            autocomplete="off"
+            placeholder="Type a message or /command…">
+          <button data-testid="chat-submit" id="chat-submit" type="submit">send</button>
+        </form>
+      </section>
+
+      <aside data-testid="info" id="info" class="lens-info">
+        {% include "_info.html.j2" %}
+      </aside>
+    </main>
+
+    <div id="toast-region" aria-live="polite" aria-atomic="true"></div>
+  </body>
+</html>

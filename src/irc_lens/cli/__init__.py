@@ -19,6 +19,7 @@ from irc_lens import __version__
 from irc_lens.cli._commands import explain as _explain_cmd
 from irc_lens.cli._commands import learn as _learn_cmd
 from irc_lens.cli._commands import overview as _overview_cmd
+from irc_lens.cli._commands import serve as _serve_cmd
 from irc_lens.cli._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.cli._output import emit_error
 
@@ -66,6 +67,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _learn_cmd.register(sub)
     _explain_cmd.register(sub)
     _overview_cmd.register(sub)
+    _serve_cmd.register(sub)
 
     # Noun groups. Every noun with action-verbs must also expose `overview`.
     cli_noun = sub.add_parser(
@@ -77,10 +79,6 @@ def _build_parser() -> argparse.ArgumentParser:
     # `irc-lens cli` with no verb prints the noun's own help instead of
     # raising AttributeError out of _dispatch.
     cli_noun.set_defaults(func=lambda _args: (cli_noun.print_help() or 0))
-
-    # Register additional noun groups here:
-    #   from irc_lens.cli._commands import serve as _serve_group
-    #   _serve_group.register(sub)
 
     return parser
 

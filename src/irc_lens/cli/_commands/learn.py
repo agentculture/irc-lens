@@ -30,7 +30,8 @@ Commands
   irc-lens overview [path]    Descriptive rollup across interface surfaces.
                               Unknown paths warn and exit 0. Supports --json.
   irc-lens cli overview       Same rollup, scoped to the cli noun.
-  irc-lens serve              (lands in a later phase) Launch the web console.
+  irc-lens serve              Launch the aiohttp web console against an AgentIRC server.
+                              See `irc-lens serve --help` for flags.
 
 Machine-readable output
 -----------------------
@@ -76,7 +77,10 @@ def _as_json_payload() -> dict[str, object]:
             },
             {
                 "path": ["serve"],
-                "summary": "Launch the web console (lands in a later phase).",
+                "summary": (
+                    "Launch the aiohttp web console against an AgentIRC server. "
+                    "Required: --host, --port, --nick."
+                ),
             },
         ],
         "exit_codes": {
