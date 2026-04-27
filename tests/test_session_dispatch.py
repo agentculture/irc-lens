@@ -35,14 +35,10 @@ def _drain(session: Session) -> list[SessionEvent]:
     `events()` generator since the queue is filled synchronously by
     `publish` and we just want a snapshot."""
     sub = session.event_bus.subscribe()
-    out: list[SessionEvent] = []
-    while True:
-        try:
-            out.append(sub._sub.queue.get_nowait())
-        except asyncio.QueueEmpty:
-            break
-    sub.close()
-    return out
+    try:
+        return sub.drain_nowait()
+    finally:
+        sub.close()
 
 
 def _run(coro):
@@ -61,9 +57,7 @@ def test_execute_join_publishes_roster_and_info(session: Session) -> None:
     so it must NOT fire here."""
     sub = session.event_bus.subscribe()
     asyncio.run(session.execute(ParsedCommand(type=CommandType.JOIN, args=["#ops"])))
-    events = []
-    while not sub._sub.queue.empty():
-        events.append(sub._sub.queue.get_nowait())
+    events = sub.drain_nowait()
     sub.close()
 
     assert "#ops" in session.joined_channels
@@ -88,9 +82,7 @@ def test_execute_join_publishes_roster_and_info(session: Session) -> None:
 def test_execute_join_without_args_publishes_error(session: Session) -> None:
     sub = session.event_bus.subscribe()
     asyncio.run(session.execute(ParsedCommand(type=CommandType.JOIN, args=[])))
-    events = []
-    while not sub._sub.queue.empty():
-        events.append(sub._sub.queue.get_nowait())
+    events = sub.drain_nowait()
     sub.close()
     assert any(e.name == "error" for e in events)
     assert session.joined_channels == set()
@@ -107,9 +99,7 @@ def test_execute_join_non_hash_target_publishes_error_no_state_change(
     """
     sub = session.event_bus.subscribe()
     asyncio.run(session.execute(ParsedCommand(type=CommandType.JOIN, args=["ops"])))
-    events = []
-    while not sub._sub.queue.empty():
-        events.append(sub._sub.queue.get_nowait())
+    events = sub.drain_nowait()
     sub.close()
     assert session.current_channel == ""
     assert session.joined_channels == set()
@@ -126,9 +116,7 @@ def test_execute_part_publishes_roster(session: Session) -> None:
     session.set_current_channel("#ops")
     sub = session.event_bus.subscribe()
     asyncio.run(session.execute(ParsedCommand(type=CommandType.PART, args=["#ops"])))
-    events = []
-    while not sub._sub.queue.empty():
-        events.append(sub._sub.queue.get_nowait())
+    events = sub.drain_nowait()
     sub.close()
     assert "#ops" not in session.joined_channels
     # current_channel was the parted one — Session.part clears it.
@@ -141,9 +129,7 @@ def test_execute_chat_publishes_chat_fragment(session: Session) -> None:
     session.set_current_channel("#ops")
     sub = session.event_bus.subscribe()
     asyncio.run(session.execute(ParsedCommand(type=CommandType.CHAT, text="hi all")))
-    events = []
-    while not sub._sub.queue.empty():
-        events.append(sub._sub.queue.get_nowait())
+    events = sub.drain_nowait()
     sub.close()
     chat_events = [e for e in events if e.name == "chat"]
     assert len(chat_events) == 1
@@ -155,9 +141,7 @@ def test_execute_chat_publishes_chat_fragment(session: Session) -> None:
 def test_execute_chat_without_channel_publishes_error(session: Session) -> None:
     sub = session.event_bus.subscribe()
     asyncio.run(session.execute(ParsedCommand(type=CommandType.CHAT, text="lonely")))
-    events = []
-    while not sub._sub.queue.empty():
-        events.append(sub._sub.queue.get_nowait())
+    events = sub.drain_nowait()
     sub.close()
     assert any(e.name == "error" for e in events)
 
@@ -171,9 +155,7 @@ def test_execute_send_to_active_channel_local_echoes(session: Session) -> None:
             ParsedCommand(type=CommandType.SEND, args=["#ops"], text="payload")
         )
     )
-    events = []
-    while not sub._sub.queue.empty():
-        events.append(sub._sub.queue.get_nowait())
+    events = sub.drain_nowait()
     sub.close()
     chat = [e for e in events if e.name == "chat"]
     assert len(chat) == 1
@@ -186,9 +168,7 @@ def test_execute_unknown_publishes_error_does_not_raise(session: Session) -> Non
     asyncio.run(
         session.execute(ParsedCommand(type=CommandType.UNKNOWN, text="/foo bar"))
     )
-    events = []
-    while not sub._sub.queue.empty():
-        events.append(sub._sub.queue.get_nowait())
+    events = sub.drain_nowait()
     sub.close()
     errors = [e for e in events if e.name == "error"]
     assert len(errors) == 1
@@ -224,9 +204,7 @@ def test_dispatch_privmsg_in_active_channel_publishes_chat(session: Session) -> 
     session.set_current_channel("#ops")
     sub = session.event_bus.subscribe()
     asyncio.run(session.dispatch(_privmsg("alice!~a@h", "#ops", "hello")))
-    events = []
-    while not sub._sub.queue.empty():
-        events.append(sub._sub.queue.get_nowait())
+    events = sub.drain_nowait()
     sub.close()
     assert len(events) == 1
     e = events[0]
@@ -241,9 +219,7 @@ def test_dispatch_skips_self_echo(session: Session) -> None:
     session.set_current_channel("#ops")
     sub = session.event_bus.subscribe()
     asyncio.run(session.dispatch(_privmsg("lens-test!~l@h", "#ops", "echo")))
-    events = []
-    while not sub._sub.queue.empty():
-        events.append(sub._sub.queue.get_nowait())
+    events = sub.drain_nowait()
     sub.close()
     assert events == []
 
@@ -253,9 +229,7 @@ def test_dispatch_skips_system_event_emitter(session: Session) -> None:
     session.set_current_channel("#ops")
     sub = session.event_bus.subscribe()
     asyncio.run(session.dispatch(_privmsg("system-local!~s@h", "#ops", "joined")))
-    events = []
-    while not sub._sub.queue.empty():
-        events.append(sub._sub.queue.get_nowait())
+    events = sub.drain_nowait()
     sub.close()
     assert events == []
 
@@ -264,9 +238,7 @@ def test_dispatch_skips_inactive_channel(session: Session) -> None:
     session.set_current_channel("#ops")
     sub = session.event_bus.subscribe()
     asyncio.run(session.dispatch(_privmsg("alice!~a@h", "#elsewhere", "hi")))
-    events = []
-    while not sub._sub.queue.empty():
-        events.append(sub._sub.queue.get_nowait())
+    events = sub.drain_nowait()
     sub.close()
     assert events == []
 
@@ -277,9 +249,7 @@ def test_dispatch_join_publishes_roster(session: Session) -> None:
     asyncio.run(
         session.dispatch(Message(prefix="alice!~a@h", command="JOIN", params=["#ops"]))
     )
-    events = []
-    while not sub._sub.queue.empty():
-        events.append(sub._sub.queue.get_nowait())
+    events = sub.drain_nowait()
     sub.close()
     assert any(e.name == "roster" for e in events)
 
@@ -291,12 +261,11 @@ def test_dispatch_join_publishes_roster(session: Session) -> None:
 
 def _events_after(session: Session, parsed: ParsedCommand) -> list[SessionEvent]:
     sub = session.event_bus.subscribe()
-    asyncio.run(session.execute(parsed))
-    out: list[SessionEvent] = []
-    while not sub._sub.queue.empty():
-        out.append(sub._sub.queue.get_nowait())
-    sub.close()
-    return out
+    try:
+        asyncio.run(session.execute(parsed))
+        return sub.drain_nowait()
+    finally:
+        sub.close()
 
 
 def test_execute_help_switches_view_and_publishes_info(session: Session) -> None:
@@ -344,3 +313,35 @@ def test_view_event_payload_is_spec_strict(session: Session) -> None:
     payload = json.loads(view.data)
     assert set(payload.keys()) == {"view"}
     assert payload["view"] in ("chat", "help", "overview", "status")
+
+
+def test_back_to_back_view_switches_publish_one_event_each(session: Session) -> None:
+    """Sequence /help → /overview → /status: each switch must emit
+    exactly one `view` event + one `info` event. Regression guard
+    against `_publish_view` ever drifting to multi-publish behaviour
+    (or a stale spec line 162 fix being undone)."""
+    events: list[SessionEvent] = []
+
+    async def collect() -> None:
+        sub = session.event_bus.subscribe()
+        try:
+            for cmd_type in (CommandType.HELP, CommandType.OVERVIEW, CommandType.STATUS):
+                await session.execute(ParsedCommand(type=cmd_type))
+            # SessionEventBus.publish is synchronous (no await needed) —
+            # drain_nowait sees every event the loop produced.
+            events.extend(sub.drain_nowait())
+        finally:
+            sub.close()
+
+    asyncio.run(collect())
+    names = [e.name for e in events]
+    assert names.count("view") == 3, (
+        f"expected 3 view events (one per switch), got {names.count('view')}: {names}"
+    )
+    assert names.count("info") == 3, (
+        f"expected 3 info events (one per switch), got {names.count('info')}: {names}"
+    )
+    # Each view event payload reflects the active view at publish time.
+    view_payloads = [json.loads(e.data) for e in events if e.name == "view"]
+    assert [p["view"] for p in view_payloads] == ["help", "overview", "status"]
+    assert session.view == "status"
