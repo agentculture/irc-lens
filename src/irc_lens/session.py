@@ -519,8 +519,9 @@ class Session:
 
     async def _exec_unsupported(self, parsed: ParsedCommand) -> None:
         # Slash commands defined in commands.py but not yet wired
-        # (TOPIC/WHO/HISTORY/QUIT/HELP/...). Surface a non-fatal error
-        # event rather than 503ing the browser.
+        # (CHANNELS/WHO/READ/AGENTS/START/STOP/RESTART/ICON/TOPIC/
+        # KICK/INVITE/SERVER/QUIT). Surface a non-fatal error event
+        # rather than 503ing the browser.
         self._publish_error(f"{parsed.type.name.lower()}: not yet supported")
 
     async def dispatch(self, msg: Message) -> None:

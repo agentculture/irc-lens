@@ -12,9 +12,10 @@ guard against here:
    each branch must render identifiable content (so the SSE
    consumer can tell the four views apart).
 3. **Autoescape** — Jinja2's autoescape policy is set on
-   `[".html", ".html.j2"]`; nick/text containing `<` must not
-   render as raw HTML in the chat fragment (this is the same XSS
-   path that PR #6 closed by renaming `.j2` → `.html.j2`).
+   `["html", "html.j2"]` (extensions, no leading dots — see
+   `web/render.py`); nick/text containing `<` must not render as
+   raw HTML in the chat fragment (this is the same XSS path that
+   PR #6 closed by renaming `.j2` → `.html.j2`).
 """
 
 from __future__ import annotations
