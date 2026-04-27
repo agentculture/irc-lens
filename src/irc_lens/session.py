@@ -98,23 +98,32 @@ class _Subscriber:
             # the next burst is allowed to issue a fresh error event.
             self._overflow_flagged = False
             return
-        # Overflow path: drop oldest, signal once, then try the new one.
-        try:
-            self.queue.get_nowait()
-        except asyncio.QueueEmpty:
-            pass
+        # Overflow path: the spec says "drop oldest on overflow" — the
+        # newest event must always survive. To inject the one-shot
+        # error notice without losing the new event, drop one extra
+        # oldest entry so both the error and the new event fit.
         if not self._overflow_flagged:
+            self._drop_one_oldest()  # make room for the error
+            self._drop_one_oldest()  # make room for the new event
             err = SessionEvent(name="error", data=_OVERFLOW_DATA)
             try:
                 self.queue.put_nowait(err)
                 self._overflow_flagged = True
             except asyncio.QueueFull:
-                # Bus completely jammed; the subscriber will see the
-                # next event whenever it drains. Don't loop forever.
+                # Bus completely jammed even after two drops (queue_max=1
+                # edge case). Skip the error rather than loop forever.
                 pass
+        else:
+            self._drop_one_oldest()  # just one drop on subsequent overflows
         try:
             self.queue.put_nowait(event)
         except asyncio.QueueFull:
+            pass
+
+    def _drop_one_oldest(self) -> None:
+        try:
+            self.queue.get_nowait()
+        except asyncio.QueueEmpty:
             pass
 
     async def iter(self) -> AsyncIterator[SessionEvent]:
@@ -249,6 +258,13 @@ class Session:
         # Future + collect-buffer state for LIST / WHO / HISTORY.
         self._pending: dict[str, asyncio.Future[Any]] = {}
         self._collect_buffers: dict[str, list[Any]] = {}
+        # Per-query-key lock: serialises concurrent same-key queries so
+        # they can't clobber each other's collect-buffer + pending future.
+        # IRC numerics like RPL_LISTEND (323) carry no query-id, so two
+        # in-flight LIST calls would otherwise resolve each other's
+        # futures with mixed results. Different keys (e.g. WHO #a vs
+        # WHO #b) don't block each other.
+        self._query_locks: dict[str, asyncio.Lock] = {}
 
         # Event bus: Phase 5 will wire publishes; Phase 3 just holds it.
         self.event_bus = event_bus if event_bus is not None else SessionEventBus()
@@ -273,6 +289,13 @@ class Session:
             # ConnectionError is an OSError subclass in Python 3.3+.
             self._healthy = False
             raise LensConnectionLost(str(exc)) from exc
+        # Disable IRCTransport's auto-reconnect: the spec's lifecycle
+        # contract is "no auto-reconnect in v1 — restart irc-lens to
+        # reconnect". `_transport.connect()` set `_should_run = True`,
+        # which would cause `_read_loop`'s finally to spawn `_reconnect`
+        # on EOF. Flipping it back to False keeps the read loop alive
+        # but lets it terminate cleanly when the socket closes.
+        self._transport._should_run = False
 
     async def disconnect(self) -> None:
         await self._transport.disconnect()
@@ -321,9 +344,10 @@ class Session:
     async def join(self, channel: str) -> None:
         if not channel.startswith("#"):
             return
-        # Track locally first so the optimistic UI matches the user's
-        # intent even if the JOIN ack hasn't landed yet. The server's
-        # ack will be a no-op via this set (set semantics).
+        # Server-confirmed semantics: only mark the channel joined once
+        # the JOIN write succeeds. A failed send raises
+        # `LensConnectionLost` and `joined_channels` does NOT advance —
+        # see `test_join_translates_pipe_error`.
         try:
             await self._transport.join_channel(channel)
         except OSError as exc:
@@ -414,27 +438,32 @@ class Session:
         Mirrors the body of LIST/WHO/HISTORY in
         ``culture/console/client.py``. Extracted so each query verb is a
         five-line wrapper; the upstream files duplicate this 25-line
-        block three times.
+        block three times. Wrapped in a per-key lock so concurrent
+        same-key queries serialise instead of clobbering each other's
+        future/buffer (upstream has the same defect — flag candidate to
+        feed back to culture).
         """
-        self._collect_buffers[key] = []
-        end_future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
-        self._pending[pending_key] = end_future
-        try:
-            await send()
-        except LensConnectionLost:
-            self._pending.pop(pending_key, None)
-            self._collect_buffers.pop(key, None)
-            raise
+        lock = self._query_locks.setdefault(key, asyncio.Lock())
+        async with lock:
+            self._collect_buffers[key] = []
+            end_future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+            self._pending[pending_key] = end_future
+            try:
+                await send()
+            except LensConnectionLost:
+                self._pending.pop(pending_key, None)
+                self._collect_buffers.pop(key, None)
+                raise
 
-        try:
-            await asyncio.wait_for(end_future, timeout=QUERY_TIMEOUT)
-        except asyncio.TimeoutError:
-            pass
-        finally:
-            self._pending.pop(pending_key, None)
+            try:
+                await asyncio.wait_for(end_future, timeout=QUERY_TIMEOUT)
+            except asyncio.TimeoutError:
+                pass
+            finally:
+                self._pending.pop(pending_key, None)
 
-        items = self._collect_buffers.pop(key, [])
-        return sorted(items) if sort else items
+            items = self._collect_buffers.pop(key, [])
+            return sorted(items) if sort else items
 
     # ------------------------------------------------------------------
     # IRC dispatch handlers (registered into IRCTransport._cmd_handlers)

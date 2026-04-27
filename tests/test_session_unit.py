@@ -215,6 +215,27 @@ def test_connect_translates_to_lens_connection_lost() -> None:
     assert s.healthy is False
 
 
+def test_connect_disables_transport_auto_reconnect() -> None:
+    """Spec lifecycle: 'no auto-reconnect in v1'.
+
+    `IRCTransport.connect()` sets `_should_run = True`, which would let
+    `_read_loop`'s finally block spawn `_reconnect()` on EOF. Session
+    must flip the gate back to False so the read loop terminates
+    cleanly when the socket closes.
+    """
+    s = Session(host="x", port=0, nick="lens")
+
+    async def fake_connect() -> None:
+        s._transport._should_run = True  # mimic IRCTransport.connect()
+
+    s._transport.connect = fake_connect  # type: ignore[assignment]
+    asyncio.run(s.connect())
+    assert s._transport._should_run is False, (
+        "Session.connect() must disable transport auto-reconnect (no "
+        "auto-reconnect in v1 per the spec)"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Future-based query methods
 # ---------------------------------------------------------------------------
@@ -312,6 +333,57 @@ def test_query_clears_state_on_send_failure(offline_session: Session) -> None:
         asyncio.run(offline_session.list_channels())
     assert "LIST" not in offline_session._collect_buffers
     assert "323" not in offline_session._pending
+
+
+def test_concurrent_list_calls_serialize(offline_session: Session) -> None:
+    """Two concurrent list_channels() calls on the same Session must not
+    clobber each other's collect-buffer + pending future. The per-key
+    lock serialises them; each call sees its own canned response."""
+
+    async def run() -> tuple[list[str], list[str]]:
+        first_call_active = asyncio.Event()
+        first_call_complete = asyncio.Event()
+
+        async def fake_send(line: str) -> None:
+            # Tag which call we're inside via what the buffer already
+            # holds — first call sets `first_call_active`, holds, then
+            # fires its own END; second call follows.
+            if not first_call_active.is_set():
+                first_call_active.set()
+
+                async def fire_first() -> None:
+                    offline_session._on_rpl_list(_make_msg("322", "lens", "#a1"))
+                    offline_session._on_rpl_list(_make_msg("322", "lens", "#a2"))
+                    # Wait until the second call is also started so we
+                    # can prove they don't interleave; release ours.
+                    await asyncio.sleep(0.02)
+                    offline_session._on_rpl_listend(_make_msg("323", "lens", "End"))
+                    first_call_complete.set()
+
+                asyncio.get_running_loop().call_soon(
+                    lambda: asyncio.ensure_future(fire_first())
+                )
+            else:
+
+                async def fire_second() -> None:
+                    offline_session._on_rpl_list(_make_msg("322", "lens", "#b1"))
+                    offline_session._on_rpl_listend(_make_msg("323", "lens", "End"))
+
+                asyncio.get_running_loop().call_soon(
+                    lambda: asyncio.ensure_future(fire_second())
+                )
+
+        offline_session._transport.send_raw = fake_send  # type: ignore[assignment]
+        a, b = await asyncio.gather(
+            offline_session.list_channels(),
+            offline_session.list_channels(),
+        )
+        return a, b
+
+    a, b = asyncio.run(run())
+    # Each call sees its own response (no cross-talk).
+    assert a == ["#a1", "#a2"]
+    assert b == ["#b1"]
 
 
 # ---------------------------------------------------------------------------
@@ -425,6 +497,38 @@ def test_overflow_error_payload_matches_spec() -> None:
         seen.append(sub.queue.get_nowait())
     payloads = [e.data for e in seen if e.name == "error"]
     assert _OVERFLOW_DATA in payloads
+
+
+def test_overflow_keeps_newest_event() -> None:
+    """Spec: 'drop oldest on overflow' — the newest event must always
+    survive, even on the burst's first overflow that injects the error."""
+    sub = _Subscriber(queue_max=4)
+    for i in range(4):
+        sub.publish(SessionEvent(name="chat", data=f"old{i}"))
+    # First overflow: must drop oldest, inject error, AND retain `latest`.
+    sub.publish(SessionEvent(name="chat", data="latest"))
+    drained = []
+    while not sub.queue.empty():
+        drained.append(sub.queue.get_nowait())
+    datas = [e.data for e in drained]
+    assert "latest" in datas, f"newest event must survive overflow; got {datas}"
+    # The error event is still present.
+    assert any(e.name == "error" for e in drained)
+
+
+def test_overflow_subsequent_within_burst_keeps_newest() -> None:
+    """Subsequent overflows within the same burst (flag already set)
+    must still retain the newest event."""
+    sub = _Subscriber(queue_max=2)
+    sub.publish(SessionEvent(name="chat", data="a0"))
+    sub.publish(SessionEvent(name="chat", data="a1"))
+    sub.publish(SessionEvent(name="chat", data="b0"))  # first overflow
+    sub.publish(SessionEvent(name="chat", data="b1"))  # second overflow (flag set)
+    sub.publish(SessionEvent(name="chat", data="b2"))  # third overflow
+    drained = []
+    while not sub.queue.empty():
+        drained.append(sub.queue.get_nowait().data)
+    assert "b2" in drained, f"newest of subsequent overflows must survive; got {drained}"
 
 
 def test_subscription_close_unregisters() -> None:
