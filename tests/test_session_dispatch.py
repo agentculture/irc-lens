@@ -1,0 +1,250 @@
+"""Unit tests for `Session.execute` and `Session.dispatch` (Phase 5).
+
+`execute` is the entry point from `POST /input`; `dispatch` is the
+listener wired into `IRCTransport.add_listener` for inbound IRC
+messages. Both publish through `SessionEventBus`. The tests drive
+the methods directly without touching a real socket — the offline
+session's transport has `_writer is None`, so its `_send_raw` is a
+silent no-op (see test_session_unit.py).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+
+import pytest
+
+from irc_lens.commands import CommandType, ParsedCommand
+from irc_lens.irc import Message
+from irc_lens.session import LensConnectionLost, Session, SessionEvent
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def session() -> Session:
+    return Session(host="127.0.0.1", port=6667, nick="lens-test")
+
+
+def _drain(session: Session) -> list[SessionEvent]:
+    """Subscribe + drain whatever's already queued. Skips the awaitable
+    `events()` generator since the queue is filled synchronously by
+    `publish` and we just want a snapshot."""
+    sub = session.event_bus.subscribe()
+    out: list[SessionEvent] = []
+    while True:
+        try:
+            out.append(sub._sub.queue.get_nowait())
+        except asyncio.QueueEmpty:
+            break
+    sub.close()
+    return out
+
+
+def _run(coro):
+    return asyncio.get_event_loop().run_until_complete(coro)
+
+
+# ---------------------------------------------------------------------------
+# execute — JOIN/PART/CHAT/SEND
+# ---------------------------------------------------------------------------
+
+
+def test_execute_join_publishes_roster_and_view(session: Session) -> None:
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.execute(ParsedCommand(type=CommandType.JOIN, args=["#ops"])))
+    events = []
+    while not sub._sub.queue.empty():
+        events.append(sub._sub.queue.get_nowait())
+    sub.close()
+
+    assert "#ops" in session.joined_channels
+    assert session.current_channel == "#ops"
+    names = [e.name for e in events]
+    assert "roster" in names
+    assert "view" in names
+    # The roster fragment carries the channel testid + data attribute.
+    roster = next(e for e in events if e.name == "roster")
+    assert 'data-testid="sidebar-channel"' in roster.data
+    assert 'data-channel="#ops"' in roster.data
+    # View payload is JSON with current_channel set.
+    view = next(e for e in events if e.name == "view")
+    assert json.loads(view.data)["current_channel"] == "#ops"
+
+
+def test_execute_join_without_args_publishes_error(session: Session) -> None:
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.execute(ParsedCommand(type=CommandType.JOIN, args=[])))
+    events = []
+    while not sub._sub.queue.empty():
+        events.append(sub._sub.queue.get_nowait())
+    sub.close()
+    assert any(e.name == "error" for e in events)
+    assert session.joined_channels == set()
+
+
+def test_execute_part_publishes_roster(session: Session) -> None:
+    session.joined_channels.add("#ops")
+    session.set_current_channel("#ops")
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.execute(ParsedCommand(type=CommandType.PART, args=["#ops"])))
+    events = []
+    while not sub._sub.queue.empty():
+        events.append(sub._sub.queue.get_nowait())
+    sub.close()
+    assert "#ops" not in session.joined_channels
+    # current_channel was the parted one — Session.part clears it.
+    assert session.current_channel == ""
+    assert any(e.name == "roster" for e in events)
+
+
+def test_execute_chat_publishes_chat_fragment(session: Session) -> None:
+    session.joined_channels.add("#ops")
+    session.set_current_channel("#ops")
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.execute(ParsedCommand(type=CommandType.CHAT, text="hi all")))
+    events = []
+    while not sub._sub.queue.empty():
+        events.append(sub._sub.queue.get_nowait())
+    sub.close()
+    chat_events = [e for e in events if e.name == "chat"]
+    assert len(chat_events) == 1
+    body = chat_events[0].data
+    assert "hi all" in body
+    assert "lens-test" in body  # local nick echoed
+
+
+def test_execute_chat_without_channel_publishes_error(session: Session) -> None:
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.execute(ParsedCommand(type=CommandType.CHAT, text="lonely")))
+    events = []
+    while not sub._sub.queue.empty():
+        events.append(sub._sub.queue.get_nowait())
+    sub.close()
+    assert any(e.name == "error" for e in events)
+
+
+def test_execute_send_to_active_channel_local_echoes(session: Session) -> None:
+    session.joined_channels.add("#ops")
+    session.set_current_channel("#ops")
+    sub = session.event_bus.subscribe()
+    asyncio.run(
+        session.execute(
+            ParsedCommand(type=CommandType.SEND, args=["#ops"], text="payload")
+        )
+    )
+    events = []
+    while not sub._sub.queue.empty():
+        events.append(sub._sub.queue.get_nowait())
+    sub.close()
+    chat = [e for e in events if e.name == "chat"]
+    assert len(chat) == 1
+    assert "payload" in chat[0].data
+
+
+def test_execute_unknown_publishes_error_does_not_raise(session: Session) -> None:
+    sub = session.event_bus.subscribe()
+    # parse_command produces UNKNOWN with `text=stripped`; mimic it.
+    asyncio.run(
+        session.execute(ParsedCommand(type=CommandType.UNKNOWN, text="/foo bar"))
+    )
+    events = []
+    while not sub._sub.queue.empty():
+        events.append(sub._sub.queue.get_nowait())
+    sub.close()
+    errors = [e for e in events if e.name == "error"]
+    assert len(errors) == 1
+    assert "/foo bar" in errors[0].data
+
+
+def test_execute_propagates_lens_connection_lost(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Send-path failures must reach the route layer so it can return 503."""
+
+    async def broken(_target: str, _text: str) -> None:
+        raise LensConnectionLost("pipe gone")
+
+    session.set_current_channel("#ops")
+    monkeypatch.setattr(session, "send_privmsg", broken)
+    with pytest.raises(LensConnectionLost):
+        asyncio.run(
+            session.execute(ParsedCommand(type=CommandType.CHAT, text="boom"))
+        )
+
+
+# ---------------------------------------------------------------------------
+# dispatch — inbound PRIVMSG / JOIN / PART
+# ---------------------------------------------------------------------------
+
+
+def _privmsg(prefix: str, target: str, text: str) -> Message:
+    return Message(prefix=prefix, command="PRIVMSG", params=[target, text])
+
+
+def test_dispatch_privmsg_in_active_channel_publishes_chat(session: Session) -> None:
+    session.set_current_channel("#ops")
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.dispatch(_privmsg("alice!~a@h", "#ops", "hello")))
+    events = []
+    while not sub._sub.queue.empty():
+        events.append(sub._sub.queue.get_nowait())
+    sub.close()
+    assert len(events) == 1
+    e = events[0]
+    assert e.name == "chat"
+    assert "alice" in e.data
+    assert "hello" in e.data
+
+
+def test_dispatch_skips_self_echo(session: Session) -> None:
+    """Local echo of our own SEND already fired in `execute` — don't
+    double-publish from the inbound path."""
+    session.set_current_channel("#ops")
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.dispatch(_privmsg("lens-test!~l@h", "#ops", "echo")))
+    events = []
+    while not sub._sub.queue.empty():
+        events.append(sub._sub.queue.get_nowait())
+    sub.close()
+    assert events == []
+
+
+def test_dispatch_skips_system_event_emitter(session: Session) -> None:
+    """system-<server> PRIVMSGs are mesh events, not chat."""
+    session.set_current_channel("#ops")
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.dispatch(_privmsg("system-local!~s@h", "#ops", "joined")))
+    events = []
+    while not sub._sub.queue.empty():
+        events.append(sub._sub.queue.get_nowait())
+    sub.close()
+    assert events == []
+
+
+def test_dispatch_skips_inactive_channel(session: Session) -> None:
+    session.set_current_channel("#ops")
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.dispatch(_privmsg("alice!~a@h", "#elsewhere", "hi")))
+    events = []
+    while not sub._sub.queue.empty():
+        events.append(sub._sub.queue.get_nowait())
+    sub.close()
+    assert events == []
+
+
+def test_dispatch_join_publishes_roster(session: Session) -> None:
+    session.joined_channels.add("#ops")
+    sub = session.event_bus.subscribe()
+    asyncio.run(
+        session.dispatch(Message(prefix="alice!~a@h", command="JOIN", params=["#ops"]))
+    )
+    events = []
+    while not sub._sub.queue.empty():
+        events.append(sub._sub.queue.get_nowait())
+    sub.close()
+    assert any(e.name == "roster" for e in events)

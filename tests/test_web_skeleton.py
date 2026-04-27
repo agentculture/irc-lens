@@ -130,17 +130,19 @@ async def test_post_input_204_on_empty_body(client: TestClient) -> None:
 
 
 async def test_get_events_returns_event_stream(client: TestClient) -> None:
-    resp = await client.get("/events")
-    assert resp.status == 200
-    assert resp.headers["Content-Type"].startswith("text/event-stream")
+    """Header sanity — full stream behaviour is in `test_web_events.py`.
 
-
-async def test_get_events_emits_one_chat_then_eof(client: TestClient) -> None:
+    Don't read the body here; the Phase 5 stream stays open until the
+    client disconnects, so a blind `read()` would block until the
+    pytest fixture's TCP teardown closes the socket.
+    """
     resp = await client.get("/events")
-    body = await resp.read()
-    assert body == b"event: chat\ndata: irc-lens online\n\n", (
-        f"expected one chat event then EOF; got {body!r}"
-    )
+    try:
+        assert resp.status == 200
+        assert resp.headers["Content-Type"].startswith("text/event-stream")
+        assert resp.headers["Cache-Control"] == "no-store"
+    finally:
+        resp.close()
 
 
 # ---------------------------------------------------------------------------

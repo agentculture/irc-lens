@@ -20,11 +20,13 @@ adds the bits the spec asks for that don't belong in a re-cited file:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
+from irc_lens.commands import CommandType, ParsedCommand
 from irc_lens.irc import IRCTransport, Message, MessageBuffer
 
 logger = logging.getLogger(__name__)
@@ -296,6 +298,12 @@ class Session:
         # on EOF. Flipping it back to False keeps the read loop alive
         # but lets it terminate cleanly when the socket closes.
         self._transport._should_run = False
+        # Subscribe to inbound commands the SSE bus needs to surface.
+        # The transport's own `_cmd_handlers` keep doing buffer-add;
+        # `add_listener` runs us *after* them. See transport.py docstring.
+        self._transport.add_listener("PRIVMSG", self.dispatch)
+        self._transport.add_listener("JOIN", self.dispatch)
+        self._transport.add_listener("PART", self.dispatch)
 
     async def disconnect(self) -> None:
         await self._transport.disconnect()
@@ -387,6 +395,137 @@ class Session:
 
     def set_roster(self, entries: list[EntityItem]) -> None:
         self.roster = list(entries)
+
+    # ------------------------------------------------------------------
+    # Command execution + inbound dispatch (Phase 5 SSE wiring)
+    # ------------------------------------------------------------------
+
+    async def execute(self, parsed: ParsedCommand) -> None:
+        """Dispatch a `ParsedCommand` from `POST /input`.
+
+        Maps each command type to the matching send path, then publishes
+        the visible side-effect as a `SessionEvent`. ``LensConnectionLost``
+        is allowed to propagate so the route layer can translate it to
+        HTTP 503; ``UNKNOWN`` and unsupported-yet types publish an
+        ``error`` event and return normally — typing ``/foo`` should
+        never crash a browser session.
+        """
+        t = parsed.type
+        if t is CommandType.CHAT:
+            text = parsed.text
+            if not text:
+                return
+            if not self.current_channel:
+                self._publish_error("no active channel; /join #x first")
+                return
+            await self.send_privmsg(self.current_channel, text)
+            self._publish_chat(self.nick, text)
+            return
+        if t is CommandType.SEND:
+            if not parsed.args:
+                self._publish_error("/send needs a target")
+                return
+            target = parsed.args[0]
+            text = parsed.text or ""
+            if not text:
+                self._publish_error("/send needs text")
+                return
+            await self.send_privmsg(target, text)
+            # Local echo is only visually meaningful when the target is
+            # the active channel (or a DM with our own nick).
+            if target == self.current_channel:
+                self._publish_chat(self.nick, text)
+            return
+        if t is CommandType.JOIN:
+            if not parsed.args:
+                self._publish_error("/join needs a channel")
+                return
+            channel = parsed.args[0]
+            await self.join(channel)
+            self.set_current_channel(channel)
+            self._publish_roster()
+            self._publish_view()
+            return
+        if t is CommandType.PART:
+            if not parsed.args:
+                self._publish_error("/part needs a channel")
+                return
+            channel = parsed.args[0]
+            await self.part(channel)
+            self._publish_roster()
+            self._publish_view()
+            return
+        if t is CommandType.UNKNOWN:
+            self._publish_error(f"unknown command: {parsed.text}")
+            return
+        # Slash commands defined in commands.py but not yet wired
+        # (TOPIC/WHO/HISTORY/QUIT/HELP/...). Surface a non-fatal error
+        # event rather than 503ing the browser.
+        self._publish_error(f"{t.name.lower()}: not yet supported")
+
+    async def dispatch(self, msg: Message) -> None:
+        """Listener for inbound IRC messages — publishes SSE events.
+
+        Registered for PRIVMSG/JOIN/PART in `connect()`. The transport's
+        own handlers still run first (buffer-add, etc.); this just emits
+        the user-visible reactive update.
+        """
+        if msg.command == "PRIVMSG":
+            if len(msg.params) < 2:
+                return
+            target = msg.params[0]
+            text = msg.params[1]
+            sender = msg.prefix.split("!")[0] if msg.prefix else "unknown"
+            # Local echo guard: SEND already published from `execute()`.
+            # Most IRC daemons don't echo own PRIVMSGs, but defensive.
+            if sender == self.nick:
+                return
+            # `system-<server>` PRIVMSGs announce mesh events, not chat —
+            # the transport already drops them from the buffer; mirror.
+            if sender.startswith("system-"):
+                return
+            # Only publish when the message belongs in the active pane.
+            # DMs come addressed to our own nick.
+            if target != self.current_channel and target != self.nick:
+                return
+            self._publish_chat(sender, text)
+            return
+        if msg.command in ("JOIN", "PART"):
+            # Server-confirmed channel-membership change. The local
+            # `joined_channels` set was already updated by our outbound
+            # join/part call (or — for other users — needs no local
+            # mutation in v1); re-render the sidebar regardless.
+            self._publish_roster()
+
+    # ------------------------------------------------------------------
+    # Publish helpers (Phase 5)
+    # ------------------------------------------------------------------
+    # Templates are imported lazily because `web/render.py` imports
+    # `Session` for type hints; a top-level import here would cycle.
+
+    def _publish_chat(self, nick: str, text: str) -> None:
+        from irc_lens.web.render import render_fragment
+
+        fragment = render_fragment(
+            "_chat_line.html.j2", msg={"nick": nick, "text": text}
+        )
+        self.event_bus.publish(SessionEvent(name="chat", data=fragment))
+
+    def _publish_roster(self) -> None:
+        from irc_lens.web.render import render_fragment
+
+        fragment = render_fragment("_sidebar.html.j2", session=self)
+        self.event_bus.publish(SessionEvent(name="roster", data=fragment))
+
+    def _publish_view(self) -> None:
+        payload = json.dumps(
+            {"view": self.view, "current_channel": self.current_channel}
+        )
+        self.event_bus.publish(SessionEvent(name="view", data=payload))
+
+    def _publish_error(self, message: str) -> None:
+        payload = json.dumps({"message": message})
+        self.event_bus.publish(SessionEvent(name="error", data=payload))
 
     # ------------------------------------------------------------------
     # Future-based query methods
