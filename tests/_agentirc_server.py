@@ -144,7 +144,6 @@ class AgentIRCTestServer:
             return
         if line.command == "PART" and line.params:
             await self._echo_membership(writer, "PART", line.params[0])
-            return
         # PRIVMSG / TOPIC / QUIT etc. — just record, no echo. Real
         # IRC daemons don't echo PRIVMSGs to the sender; the lens
         # publishes its own chat event from the local-echo path.
