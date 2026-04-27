@@ -21,6 +21,7 @@ Spec contract enforced:
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import logging
 import sys
@@ -35,7 +36,15 @@ from irc_lens.web import make_app
 
 
 class _JsonLineFormatter(logging.Formatter):
-    """One JSON object per line on stderr (mirrors culture's --log-json)."""
+    """One JSON object per line on stderr (mirrors culture's --log-json).
+
+    Tracebacks are intentionally omitted — the spec mandates "no Python
+    traceback ever leaks", which applies to JSON-line output too.
+    Exceptions are summarised by class+message via ``logger.error`` /
+    the dispatcher's ``AfiError`` translation; full tracebacks are for
+    interactive debugging via ``logger.exception`` and the default
+    text formatter, not for the agent-facing JSON channel.
+    """
 
     def format(self, record: logging.LogRecord) -> str:
         payload = {
@@ -44,8 +53,12 @@ class _JsonLineFormatter(logging.Formatter):
             "logger": record.name,
             "msg": record.getMessage(),
         }
-        if record.exc_info:
-            payload["exc"] = self.formatException(record.exc_info)
+        if record.exc_info and record.exc_info[1] is not None:
+            exc = record.exc_info[1]
+            payload["exc"] = {
+                "type": exc.__class__.__name__,
+                "msg": str(exc),
+            }
         return json.dumps(payload, ensure_ascii=False)
 
 
@@ -64,6 +77,77 @@ def _configure_logging(log_json: bool) -> None:
     root.setLevel(logging.INFO)
 
 
+def _display_url(bind: str, port: int) -> str:
+    """The URL we PRINT and ``--open`` against.
+
+    When binding to ``0.0.0.0`` (any interface), the user-facing URL has
+    to be a routable address — ``http://0.0.0.0:port/`` is not a valid
+    browser target on most systems. Substitute ``127.0.0.1`` for the
+    display only; the bind address itself is unchanged.
+    """
+    host = "127.0.0.1" if bind in ("0.0.0.0", "::") else bind
+    return f"http://{host}:{port}/"
+
+
+async def _serve_async(args: argparse.Namespace) -> None:
+    """Run connect → bind → forever inside one event loop.
+
+    Doing the IRC connect in a separate ``asyncio.run`` would create
+    background read tasks tied to a loop that exits before
+    ``aiohttp.web.run_app`` starts — the IRC connection would die
+    before the web UI ever serves a request. This coroutine keeps
+    everything on one loop until shutdown.
+    """
+    session = Session(host=args.host, port=args.port, nick=args.nick, icon=args.icon)
+    try:
+        await session.connect()
+    except LensConnectionLost as exc:
+        raise AfiError(
+            code=EXIT_USER_ERROR,
+            message=f"cannot reach AgentIRC at {args.host}:{args.port}: {exc}",
+            remediation=(
+                "verify the AgentIRC server is running and reachable, then "
+                "retry. e.g. `culture server start --name local && culture "
+                "server status local`"
+            ),
+        ) from exc
+
+    app = make_app(session)
+    runner = web.AppRunner(app, handle_signals=True)
+    await runner.setup()
+    site = web.TCPSite(runner, host=args.bind, port=args.web_port)
+    try:
+        await site.start()
+    except OSError as exc:
+        await session.disconnect()
+        await runner.cleanup()
+        raise AfiError(
+            code=EXIT_ENV_ERROR,
+            message=f"cannot bind web port {args.bind}:{args.web_port}: {exc}",
+            remediation=(
+                "pick a different --web-port, or stop whatever is already "
+                "bound to this port"
+            ),
+        ) from exc
+
+    url = _display_url(args.bind, args.web_port)
+    emit_diagnostic(f"irc-lens serving on {url}")
+    if args.open:
+        try:
+            webbrowser.open(url)
+        except webbrowser.Error as exc:
+            emit_diagnostic(f"warning: --open failed: {exc}")
+
+    # Sleep forever until the runtime cancels us (SIGINT / SIGTERM via
+    # AppRunner.handle_signals=True, or the test harness cancelling the
+    # task).
+    try:
+        await asyncio.Event().wait()
+    finally:
+        await session.disconnect()
+        await runner.cleanup()
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     if args.bind == "0.0.0.0":
         emit_diagnostic(
@@ -80,55 +164,11 @@ def cmd_serve(args: argparse.Namespace) -> int:
             "no fixture loaded yet."
         )
 
-    session = Session(host=args.host, port=args.port, nick=args.nick, icon=args.icon)
-
-    # Connect synchronously via aiohttp's loop helper so failure
-    # surfaces BEFORE we ever bind the web port. The contract is
-    # "AgentIRC unreachable → exit 1, aiohttp never starts".
-    import asyncio
-
     try:
-        asyncio.run(session.connect())
-    except LensConnectionLost as exc:
-        raise AfiError(
-            code=EXIT_USER_ERROR,
-            message=f"cannot reach AgentIRC at {args.host}:{args.port}: {exc}",
-            remediation=(
-                "verify the AgentIRC server is running and reachable, then "
-                "retry. e.g. `culture server start --name local && culture "
-                "server status local`"
-            ),
-        ) from exc
-
-    url = f"http://{args.bind}:{args.web_port}/"
-    emit_diagnostic(f"irc-lens serving on {url}")
-
-    if args.open:
-        try:
-            webbrowser.open(url)
-        except webbrowser.Error as exc:
-            emit_diagnostic(f"warning: --open failed: {exc}")
-
-    app = make_app(session)
-    try:
-        web.run_app(
-            app,
-            host=args.bind,
-            port=args.web_port,
-            print=None,  # we already printed our own banner
-            handle_signals=True,
-        )
-    except OSError as exc:
-        # Port in use is the canonical failure here — exit 2 per the
-        # spec's exit-code policy (env error).
-        raise AfiError(
-            code=EXIT_ENV_ERROR,
-            message=f"cannot bind web port {args.bind}:{args.web_port}: {exc}",
-            remediation=(
-                "pick a different --web-port, or stop whatever is already "
-                "bound to this port"
-            ),
-        ) from exc
+        asyncio.run(_serve_async(args))
+    except KeyboardInterrupt:
+        # Ctrl-C is the supported shutdown per the spec; exit 0.
+        emit_diagnostic("irc-lens shutdown")
     return 0
 
 

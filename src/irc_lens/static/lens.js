@@ -5,7 +5,10 @@
 
 (function () {
   "use strict";
-  if (typeof window === "undefined" || !("EventSource" in window)) return;
+  // Use globalThis so this snippet stays valid in workers / non-window
+  // contexts too. EventSource is browser-only, so the feature check still
+  // matters; we just don't bind to `window` directly.
+  if (typeof globalThis === "undefined" || !("EventSource" in globalThis)) return;
   const src = new EventSource("/events");
   src.addEventListener("chat",  (e) => console.log("[lens] chat",  e.data));
   src.addEventListener("roster",(e) => console.log("[lens] roster",e.data));

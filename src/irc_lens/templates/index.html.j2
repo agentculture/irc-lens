@@ -19,13 +19,13 @@
 
     <main class="lens-grid">
       <aside data-testid="sidebar" id="sidebar" class="lens-sidebar">
-        {% include "_sidebar.j2" %}
+        {% include "_sidebar.html.j2" %}
       </aside>
 
       <section class="lens-chat">
         <div data-testid="chat-log" id="chat-log" class="lens-log">
           {% for msg in session.buffer.read(session.current_channel, limit=200) if session.current_channel %}
-            {% include "_chat_line.j2" %}
+            {% include "_chat_line.html.j2" %}
           {% endfor %}
         </div>
         <form id="chat-form" class="lens-form" hx-post="/input" hx-trigger="submit" hx-swap="none">
@@ -41,7 +41,7 @@
       </section>
 
       <aside data-testid="info" id="info" class="lens-info">
-        {% include "_info.j2" %}
+        {% include "_info.html.j2" %}
       </aside>
     </main>
 
