@@ -516,6 +516,10 @@ def _drive_to_status(session: Session) -> None:
 
 def _stub_async_return(value):
     async def _stub(*_args, **_kwargs):
+        # `asyncio.sleep(0)` yields once so sonarcloud's S7503
+        # ("async without await") sees a real await — same trick as
+        # `fake_send` in test_execute_read_other_channel_publishes_log.
+        await asyncio.sleep(0)
         return value
 
     return _stub
@@ -637,3 +641,45 @@ def test_channels_from_chat_view_does_not_emit_view_event(session: Session) -> N
     assert names.count("info") == 1
     info = next(e for e in events if e.name == "info")
     assert 'data-testid="info-channels-heading"' in info.data
+
+
+def test_channels_drops_publish_when_view_changed_during_query(
+    session: Session,
+) -> None:
+    """Stale-view guard: if the user switches view during a slow LIST
+    (e.g. impatient `/help` while `/channels` is still awaiting), the
+    late completion must NOT forcibly flip the UI back to chat.
+    Mirrors the existing `_fetch_and_publish_history` stale-guard
+    pattern (session.py:617). Addresses Qodo's race-condition flag
+    on PR #21."""
+    session._transport.connected = True  # type: ignore[attr-defined]
+
+    async def slow_list_then_user_switches(*_args, **_kwargs):
+        # Simulate the user issuing /help on a separate POST /input
+        # while LIST is in-flight: aiohttp can interleave handlers
+        # against the same Session. Mutate view directly (what
+        # `_switch_view` would have done) to keep the test focused on
+        # the guard, not the dispatch wiring.
+        await asyncio.sleep(0)
+        session.set_view("help")
+        return ["#general", "#ops"]
+
+    session.list_channels = slow_list_then_user_switches  # type: ignore[assignment]
+    _drive_to_status(session)  # start on status
+
+    sub = session.event_bus.subscribe()
+    try:
+        asyncio.run(session.execute(ParsedCommand(type=CommandType.CHANNELS)))
+        events = sub.drain_nowait()
+    finally:
+        sub.close()
+
+    # User explicitly moved to help — the late LIST result must not
+    # publish a view-flip back to chat or an info fragment.
+    assert session.view == "help", (
+        "stale-guard must not overwrite the view the user moved to"
+    )
+    names = [e.name for e in events]
+    assert names == [], (
+        f"late LIST completion must publish nothing once view changed; got {names}"
+    )
