@@ -1,15 +1,18 @@
-/* irc-lens styles. Phase 7 fills in typography, view-state cues,
-   chat-line timestamp, and toast styling on top of Phase 4's
-   three-pane grid. Goal is "demoable", not "designed". */
+/* irc-lens styles. Palette tracks culture.dev's dark-terminal scheme
+   (see culture/_sass/color_schemes/dark-terminal.scss); near-black page,
+   lifted surfaces, green accent, off-white text. */
 
 :root {
-  --lens-fg: #e0e0e0;
-  --lens-bg: #1a1a1a;
-  --lens-accent: #f5a623;
-  --lens-muted: #666;
-  --lens-border: #333;
-  --lens-down: #c44;
-  --lens-ok:   #5a5;
+  --lens-bg:        #0B0F12;
+  --lens-surface:   #11161B;
+  --lens-fg:        #F3F5F7;
+  --lens-fg-soft:   #C7D0D9;
+  --lens-muted:     #8A97A3;
+  --lens-accent:    #41D67A;
+  --lens-bright:    #7CFF9E;
+  --lens-border:    #1A222B;
+  --lens-down:      #c44;
+  --lens-ok:        #41D67A;
 }
 
 * { box-sizing: border-box; }
@@ -50,11 +53,14 @@ body {
 
 .lens-sidebar,
 .lens-info {
+  background: var(--lens-surface);
   border-right: 1px solid var(--lens-border);
   padding: 0.5em;
   overflow-y: auto;
 }
 .lens-info { border-right: 0; border-left: 1px solid var(--lens-border); }
+
+.lens-logo { height: 1.5em; width: auto; vertical-align: middle; }
 
 .lens-chat {
   display: grid;
@@ -75,7 +81,7 @@ body {
 }
 .lens-form input[type="text"] {
   flex: 1;
-  background: var(--lens-bg);
+  background: var(--lens-surface);
   color: var(--lens-fg);
   border: 1px solid var(--lens-border);
   padding: 0.3em 0.5em;
@@ -87,8 +93,10 @@ body {
   border: 0;
   padding: 0.3em 1em;
   font: inherit;
+  font-weight: 600;
   cursor: pointer;
 }
+.lens-form button:hover { background: var(--lens-bright); }
 
 .lens-chat-line { padding: 0.1em 0; }
 .lens-chat-line--action { font-style: italic; color: var(--lens-muted); }
@@ -99,7 +107,7 @@ body {
 .lens-channel-list,
 .lens-roster { list-style: none; margin: 0; padding: 0; }
 .lens-channel { cursor: pointer; padding: 0.15em 0.25em; border-radius: 2px; }
-.lens-channel:hover { background: rgba(127, 127, 127, 0.12); }
+.lens-channel:hover { background: rgba(65, 214, 122, 0.10); }
 .lens-channel:focus-visible { outline: 2px solid var(--lens-accent); outline-offset: 1px; }
 .lens-channel--active { color: var(--lens-accent); }
 .lens-entity--offline { color: var(--lens-muted); }
@@ -134,7 +142,7 @@ body[data-conn="down"] .lens-conn { color: var(--lens-down); }
   pointer-events: none;
 }
 .lens-toast {
-  background: var(--lens-bg);
+  background: var(--lens-surface);
   color: var(--lens-fg);
   border: 1px solid var(--lens-border);
   padding: 0.4em 0.8em;

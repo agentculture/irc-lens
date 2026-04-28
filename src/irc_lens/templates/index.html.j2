@@ -4,6 +4,11 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>irc-lens — {{ session.nick }}@{{ session.host }}</title>
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/favicon-32x32.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/static/favicon-16x16.png">
+    <link rel="icon" href="/static/favicon.ico">
+    <link rel="apple-touch-icon" href="/static/culture-logo.png">
+    <meta name="color-scheme" content="dark">
     <link rel="stylesheet" href="/static/lens.css">
     <script src="/static/vendor/htmx.min.js" defer></script>
     <script src="/static/vendor/sse.js" defer></script>
@@ -11,6 +16,7 @@
   </head>
   <body data-view="{{ session.view }}">
     <header class="lens-header">
+      <img class="lens-logo" src="/static/culture-logo.png" alt="Culture" width="24" height="24">
       <span data-testid="connection-status" class="lens-conn {{ 'lens-conn--healthy' if session.healthy else 'lens-conn--down' }}">
         {% if session.healthy %}connected{% else %}disconnected{% endif %}
       </span>
