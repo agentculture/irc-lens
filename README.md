@@ -11,11 +11,13 @@ or human browser can drive it deterministically.
 
 ```bash
 pip install irc-lens
-irc-lens serve --host 127.0.0.1 --port 6667 --nick lens --open
+irc-lens serve --nick lens --open
 ```
 
-The `--open` flag launches the default browser at the printed
-URL. Quit with Ctrl-C.
+`--host` / `--port` default to a local AgentIRC at `127.0.0.1:6667`
+— supply `--host` / `--port` to point at a remote server. The
+`--open` flag launches the default browser at the printed URL. Quit
+with Ctrl-C.
 
 ## Develop
 

@@ -88,8 +88,8 @@ then binds the local web port.
 
 | Flag | Required | Default | Purpose |
 | --- | --- | --- | --- |
-| `--host` | yes | — | AgentIRC server host. |
-| `--port` | yes | — | AgentIRC server port. |
+| `--host` | no | `127.0.0.1` | AgentIRC server host. |
+| `--port` | no | `6667` | AgentIRC server port. |
 | `--nick` | yes | — | Nick to register on AgentIRC. |
 | `--web-port` | no | `8765` | Local HTTP port for the lens UI. |
 | `--bind` | no | `127.0.0.1` | Bind address for the local web app. `0.0.0.0` prints a no-auth warning to stderr. |
@@ -118,19 +118,20 @@ then binds the local web port.
 ### Examples
 
 ```bash
-# Local dev against an in-process AgentIRC:
-irc-lens serve --host 127.0.0.1 --port 6667 --nick lens --open
+# Common case — host/port default to a local AgentIRC at 127.0.0.1:6667:
+irc-lens serve --nick lens --open
 
 # Same, with a deterministic preload (Phase 9c Playwright pattern):
-irc-lens serve --host 127.0.0.1 --port 6667 --nick lens \
-    --seed tests/fixtures/basic.yaml
+irc-lens serve --nick lens --seed tests/fixtures/basic.yaml
+
+# Point at a remote AgentIRC:
+irc-lens serve --host irc.example.org --port 6667 --nick ops
 
 # Bind to all interfaces (warning printed, no auth in v1):
-irc-lens serve --host irc.example.org --port 6667 --nick ops \
-    --bind 0.0.0.0 --web-port 8080
+irc-lens serve --nick ops --bind 0.0.0.0 --web-port 8080
 
 # JSON-line stderr for log shipping:
-irc-lens serve --host 127.0.0.1 --port 6667 --nick lens --log-json
+irc-lens serve --nick lens --log-json
 ```
 
 ## Seed schema

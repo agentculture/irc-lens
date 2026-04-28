@@ -91,18 +91,32 @@ def successful_connect(monkeypatch: pytest.MonkeyPatch):
 # ---------------------------------------------------------------------------
 
 
-def test_serve_requires_host_port_nick(
+def test_serve_requires_only_nick(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Missing required flags must error via the AfiError + hint contract,
-    not an argparse traceback."""
+    """``--host`` / ``--port`` default to a local AgentIRC, so only ``--nick``
+    is required. The bare ``irc-lens serve`` invocation still must error via
+    the AfiError + hint contract (no argparse traceback) and the hint must
+    point at the concrete fix — supplying ``--nick``."""
     with pytest.raises(SystemExit) as exc:
         main(["serve"])
     assert exc.value.code != 0
     err = capsys.readouterr().err
     assert "error:" in err
     assert "hint:" in err
+    assert "--nick" in err
     assert "Traceback" not in err
+    # The argparse "required" complaint must mention nick and ONLY nick now
+    # that host/port have defaults — guards against silent regression of the
+    # defaults.
+    assert "--host" not in err
+    assert "--port" not in err
+    # The hint must be the serve-specific copy-pasteable form, NOT the
+    # generic `run '<prog> --help'` fallback. This is the regression
+    # Copilot flagged on PR #16: a weaker assertion would silently pass
+    # if `_hint_for` regressed to the generic branch.
+    hint_line = next(line for line in err.splitlines() if "hint:" in line)
+    assert "try 'irc-lens serve --nick" in hint_line
 
 
 def test_serve_help_lists_all_flags(capsys: pytest.CaptureFixture[str]) -> None:
@@ -123,6 +137,46 @@ def test_serve_help_lists_all_flags(capsys: pytest.CaptureFixture[str]) -> None:
         "--log-json",
     ):
         assert flag in out, f"--help missing flag {flag!r}"
+
+
+def test_serve_help_renders_defaults_from_argparse(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Help text for each defaulted flag must show the argparse-stored
+    default value verbatim. This is the drift-catcher Copilot flagged on
+    PR #16: hard-coding the default in the `help=` string makes it
+    possible to change `default=` without updating the help — using
+    `%(default)s` (or any equivalent) keeps them in lockstep, and this
+    test asserts the rendered output proves it.
+
+    Driving the assertion from `parser._actions` rather than the literal
+    values means a future bump (e.g. default --port → 6668) only needs
+    the `default=` change; the test re-derives the expected help string.
+    """
+    from irc_lens.cli import _build_parser  # noqa: PLC0415 - local import keeps the test self-contained
+
+    parser = _build_parser()
+    serve_parser = parser._subparsers._group_actions[0].choices["serve"]
+    expected: dict[str, object] = {
+        action.option_strings[0]: action.default
+        for action in serve_parser._actions
+        if action.option_strings
+        and action.default is not None
+        and action.default is not False  # store_true flags
+        and action.dest != "help"
+    }
+
+    with pytest.raises(SystemExit):
+        main(["serve", "--help"])
+    out = capsys.readouterr().out
+
+    # Every defaulted flag's stored default must surface in the rendered help.
+    for flag, default_value in expected.items():
+        token = f"(default: {default_value})"
+        assert token in out, (
+            f"--help text for {flag} is out of sync with argparse default "
+            f"{default_value!r}: expected to find {token!r} in output"
+        )
 
 
 # ---------------------------------------------------------------------------

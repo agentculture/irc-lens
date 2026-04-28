@@ -41,6 +41,25 @@ def _argv_requested_json(argv: list[str] | None) -> bool:
 _PARSE_JSON_MODE: bool = False
 
 
+_SERVE_NICK_HINT = (
+    "try 'irc-lens serve --nick <name>' (e.g. --nick lens); "
+    "run 'irc-lens serve --help' for all flags"
+)
+
+
+def _hint_for(prog: str, message: str) -> str:
+    """Pick a remediation tailored to the failing parser + message.
+
+    The default ``run '<prog> --help' …`` is fine for most cases, but when
+    ``serve`` complains about a missing required arg (now just ``--nick``
+    after the host/port defaults) a concrete example is more useful than a
+    pointer to ``--help``.
+    """
+    if prog == "irc-lens serve" and "--nick" in message and "required" in message:
+        return _SERVE_NICK_HINT
+    return f"run '{prog} --help' to see valid arguments"
+
+
 class _ArgumentParser(argparse.ArgumentParser):
     """ArgumentParser that emits errors via our structured format."""
 
@@ -48,7 +67,7 @@ class _ArgumentParser(argparse.ArgumentParser):
         err = AfiError(
             code=EXIT_USER_ERROR,
             message=message,
-            remediation=f"run '{self.prog} --help' to see valid arguments",
+            remediation=_hint_for(self.prog, message),
         )
         emit_error(err, json_mode=_PARSE_JSON_MODE)
         raise SystemExit(err.code)
