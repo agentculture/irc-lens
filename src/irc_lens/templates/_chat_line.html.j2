@@ -5,7 +5,12 @@
      filter for that path. Either branch ends up rendering an HH:MM:SS
      stamp in the same span. `kind == "action"` formats as IRC /me lines:
      `* nick text`. #}
-  <span class="lens-chat-ts">{{ msg.ts_display if msg.ts_display is defined and msg.ts_display else (msg.timestamp|strftime) }}</span>
+  {# `ts_display is defined` is authoritative — the dict path always
+     sets it (possibly as an empty string on parse error); only the
+     BufferedMessage path leaves it undefined and falls through to the
+     numeric `timestamp` + strftime filter. Without that guard, a parse
+     failure would call `strftime` with an undefined value. #}
+  <span class="lens-chat-ts">{{ msg.ts_display if msg.ts_display is defined else (msg.timestamp|strftime) }}</span>
   {% if msg.kind == 'action' %}
     <span data-testid="chat-line-text" class="lens-chat-text">* {{ msg.nick }} {{ msg.text }}</span>
   {% else %}

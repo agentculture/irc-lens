@@ -67,7 +67,11 @@ async def get_index(request: web.Request) -> web.Response:
     degrade to an empty log rather than 500ing the page.
     """
     session = request.app["session"]
-    chat_log_html = ""
+    # `chat_log_html=None` lets `render_index` fall back to the
+    # `MessageBuffer` — which is the seed-loader path. We only override
+    # to a string when the live IRCd query actually ran, so `--seed`
+    # preloaded fixtures still render on the initial page render.
+    chat_log_html: str | None = None
     channel = session.current_channel
     # Both `connected` (post-welcome) and `healthy` (no broken pipe) must
     # hold — a pre-welcome session would block for QUERY_TIMEOUT (10s) on
@@ -79,12 +83,14 @@ async def get_index(request: web.Request) -> web.Response:
         except LensConnectionLost:
             # Page render shouldn't break on transport loss; the
             # connection-status indicator + 503 on next /input will
-            # surface the problem to the user.
-            entries = []
+            # surface the problem to the user. Fall back to the buffer
+            # rather than forcing a blank pane.
+            entries = None
         except Exception:
             logger.exception("history fetch for %s during GET / failed", channel)
-            entries = []
-        chat_log_html = render_chat_log(entries)
+            entries = None
+        if entries is not None:
+            chat_log_html = render_chat_log(entries)
     body = render_index(session, chat_log_html=chat_log_html)
     return web.Response(text=body, content_type="text/html")
 

@@ -9,7 +9,16 @@
         role="button"
         tabindex="0"
         hx-post="/input"
-        hx-vals='{"text": "/switch {{ channel }}"}'
+        {# `tojson|forceescape` defends against IRC channel names containing
+           quotes or `<` from breaking the surrounding HTML attribute or the
+           inner JSON. Hand-rolled `'{"text": "..."}'` interpolation breaks
+           on a single-quote in the channel name. #}
+        hx-vals="{{ {'text': '/switch ' ~ channel}|tojson|forceescape }}"
+        {# Keyboard activation: `role="button"` + `tabindex="0"` alone makes
+           the row focusable but Enter/Space do nothing on an `<li>`. The
+           explicit `hx-trigger` wires the same htmx POST to keypress events
+           so screen-reader and keyboard-only users can switch channels. #}
+        hx-trigger="click, keyup[key=='Enter'], keyup[key==' ']"
         hx-swap="none">
         {{ channel }}
       </li>

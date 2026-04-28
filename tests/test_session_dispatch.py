@@ -354,6 +354,46 @@ def test_execute_switch_to_joined_channel(session: Session) -> None:
     assert "error" not in names
 
 
+def test_execute_read_other_channel_publishes_log(session: Session) -> None:
+    """Regression for the /read #other stale-guard bug: with the user
+    sitting on #ops, `/read #dev` must produce one `log` event for the
+    pane the user is looking at — even though the queried channel isn't
+    `current_channel`. Before the view_channel fix, the stale guard
+    inside `_fetch_and_publish_history` matched against the queried
+    channel and silently dropped the result."""
+    session.joined_channels.update({"#ops", "#dev"})
+    session.set_current_channel("#ops")
+    # Force `connected=True` on the offline transport so the
+    # query-not-connected guard doesn't short-circuit; the real history
+    # call no-ops on the None writer and returns [] after timeout. We
+    # short the timeout via the connected guard upstream — but here we
+    # want to specifically prove the publish path runs.
+    session._transport.connected = True
+    sub = session.event_bus.subscribe()
+
+    async def fire_history_end() -> list:
+        # Drive the IRC dispatch handler manually so the history Future
+        # resolves immediately rather than waiting QUERY_TIMEOUT.
+        async def fake_send(_line: str) -> None:
+            session._on_historyend(
+                Message(prefix=None, command="HISTORYEND", params=["#dev", "End"])
+            )
+
+        session._transport.send_raw = fake_send  # type: ignore[assignment]
+        await session.execute(
+            ParsedCommand(type=CommandType.READ, args=["#dev"])
+        )
+        return sub.drain_nowait()
+
+    events = asyncio.run(fire_history_end())
+    sub.close()
+    log_events = [e for e in events if e.name == "log"]
+    assert len(log_events) == 1, (
+        "/read #dev from #ops must still publish one `log` event into "
+        "the active pane"
+    )
+
+
 def test_execute_switch_to_unjoined_channel_errors(session: Session) -> None:
     """/switch must refuse channels the lens hasn't joined — preserves
     the invariant that current_channel is always in joined_channels."""

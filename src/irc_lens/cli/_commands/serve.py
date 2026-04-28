@@ -128,7 +128,7 @@ async def _serve_async(args: argparse.Namespace) -> None:
     # this gate a rejected nick produces a silently broken session
     # where every query times out at 10s and the chat pane stays empty.
     try:
-        await session.wait_for_welcome(timeout=5.0)
+        await session.wait_for_welcome()
     except LensConnectionLost as exc:
         await session.disconnect()
         raise AfiError(
