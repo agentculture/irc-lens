@@ -682,12 +682,15 @@ class Session:
     async def _exec_channels(self, _parsed: ParsedCommand) -> None:
         if not self._require_connected("/channels"):
             return
+        view_at_start = self.view
         try:
             channels = await self.list_channels()
         except Exception:
             logger.exception("LIST query failed")
             self._publish_error("/channels: query failed")
             return
+        if self.view != view_at_start:
+            return  # user moved off this view during the LIST; drop the publish
         self._publish_info_extra(channels=channels)
 
     async def _exec_who(self, parsed: ParsedCommand) -> None:
@@ -697,12 +700,15 @@ class Session:
         if not target:
             self._publish_error("/who: no target — /join a channel or pass /who #x")
             return
+        view_at_start = self.view
         try:
             entries = await self.who(target)
         except Exception:
             logger.exception("WHO %s failed", target)
             self._publish_error(f"/who {target}: query failed")
             return
+        if self.view != view_at_start:
+            return  # stale: a later command switched the view; drop the publish
         self._publish_info_extra(who_target=target, who_entries=entries)
 
     async def _exec_agents(self, _parsed: ParsedCommand) -> None:
@@ -711,6 +717,7 @@ class Session:
         if not self.joined_channels:
             self._publish_error("/agents: no channels joined — /join #x first")
             return
+        view_at_start = self.view
         nicks: dict[str, dict] = {}
         for ch in sorted(self.joined_channels):
             try:
@@ -722,6 +729,8 @@ class Session:
                 nick = entry.get("nick", "")
                 if nick and nick not in nicks:
                     nicks[nick] = entry
+        if self.view != view_at_start:
+            return  # stale: a later command switched the view; drop the publish
         self._publish_info_extra(agents=sorted(nicks.values(), key=lambda e: e.get("nick", "")))
 
     async def _exec_me(self, parsed: ParsedCommand) -> None:
@@ -909,8 +918,25 @@ class Session:
     def _publish_info_extra(self, **extra: Any) -> None:
         """Re-render the info pane with extra context (channels list,
         who results, agents). Used by /channels, /who, /agents to surface
-        query results without inventing a new SSE event type."""
+        query results without inventing a new SSE event type.
+
+        The extras only render under the chat-view branch of
+        _info.html.j2, so promote the view to chat first when the
+        verb was invoked from status/help/overview — otherwise the
+        result is silently dropped by the template (issue #20). The
+        `view` event mirrors `_switch_view`'s contract so the client
+        toggles `<body data-view>` to match before the info swap.
+
+        Callers are expected to have stale-guarded against an
+        intervening view switch (see _exec_channels/_exec_who/
+        _exec_agents) so the promotion here can't overwrite a
+        view the user explicitly moved to during a slow query.
+        """
         from irc_lens.web.render import render_fragment
+
+        if self.view != "chat":
+            self.set_view("chat")
+            self._publish_view()
 
         fragment = render_fragment("_info.html.j2", session=self, **extra)
         self.event_bus.publish(SessionEvent(name="info", data=fragment))
