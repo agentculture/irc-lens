@@ -5,7 +5,12 @@
       <li
         data-testid="sidebar-channel"
         data-channel="{{ channel }}"
-        class="lens-channel{% if channel == session.current_channel %} lens-channel--active{% endif %}">
+        class="lens-channel{% if channel == session.current_channel %} lens-channel--active{% endif %}"
+        role="button"
+        tabindex="0"
+        hx-post="/input"
+        hx-vals='{"text": "/switch {{ channel }}"}'
+        hx-swap="none">
         {{ channel }}
       </li>
     {% endfor %}

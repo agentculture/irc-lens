@@ -49,6 +49,14 @@
 
   const src = new EventSource("/events");
   src.addEventListener("chat",   (e) => appendChat(e.data));
+  // `log` replaces the entire chat-log innerHTML — used after a /join or
+  // /switch to swap in server-fetched history. Distinct from `chat` so
+  // the live-tail append path stays append-only.
+  src.addEventListener("log",    (e) => {
+    if (!log) return;
+    log.innerHTML = e.data;
+    log.scrollTop = log.scrollHeight;
+  });
   src.addEventListener("roster", (e) => swap(sidebar, e.data));
   src.addEventListener("info",   (e) => swap(info, e.data));
   src.addEventListener("view",   (e) => {

@@ -9,6 +9,14 @@
         <dt><code>/join #channel</code></dt><dd>Join a channel and switch the chat pane to it.</dd>
         <dt><code>/part #channel</code></dt><dd>Leave a channel.</dd>
         <dt><code>/send target text…</code></dt><dd>Send a message to a specific channel or nick.</dd>
+        <dt><code>/switch #channel</code></dt><dd>Switch the active channel without rejoining (also: click the sidebar).</dd>
+        <dt><code>/me action…</code></dt><dd>Send a CTCP ACTION (rendered as <code>* nick action</code>).</dd>
+        <dt><code>/read [#channel] [-n N]</code></dt><dd>Fetch HISTORY RECENT (default 50) and replace the chat log.</dd>
+        <dt><code>/channels</code></dt><dd>List public channels on the server (rendered in this pane).</dd>
+        <dt><code>/who [target]</code></dt><dd>List members of a channel or details of a nick.</dd>
+        <dt><code>/agents</code></dt><dd>Union of nicks across every joined channel.</dd>
+        <dt><code>/topic #channel [text…]</code></dt><dd>Read or set the channel topic.</dd>
+        <dt><code>/icon emoji</code></dt><dd>Set your icon (AgentIRC extension).</dd>
         <dt><code>/help</code></dt><dd>Show this help pane.</dd>
         <dt><code>/overview</code></dt><dd>Show the joined-channels overview.</dd>
         <dt><code>/status</code></dt><dd>Show the connection / session status pane.</dd>
@@ -50,6 +58,49 @@
         <p class="lens-info-topic">Topic: <em>not set</em></p>
       {% else %}
         <p class="lens-info-empty">No active channel. <code>/join #general</code> to start.</p>
+      {% endif %}
+      {% if channels is defined %}
+        <h3 data-testid="info-channels-heading">Server channels ({{ channels|length }})</h3>
+        {% if channels %}
+          <ul data-testid="info-channels" class="lens-info-channels">
+            {% for ch in channels %}
+              <li><code>{{ ch }}</code></li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="lens-info-empty">No public channels listed.</p>
+        {% endif %}
+      {% endif %}
+      {% if who_target is defined %}
+        <h3 data-testid="info-who-heading">WHO {{ who_target }} ({{ who_entries|length }})</h3>
+        {% if who_entries %}
+          <ul data-testid="info-who" class="lens-info-who">
+            {% for entry in who_entries %}
+              <li>
+                <code>{{ entry.nick }}</code>
+                {% if entry.flags %}<small>{{ entry.flags }}</small>{% endif %}
+                {% if entry.realname %}— <em>{{ entry.realname }}</em>{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="lens-info-empty">No members.</p>
+        {% endif %}
+      {% endif %}
+      {% if agents is defined %}
+        <h3 data-testid="info-agents-heading">Agents ({{ agents|length }})</h3>
+        {% if agents %}
+          <ul data-testid="info-agents" class="lens-info-agents">
+            {% for entry in agents %}
+              <li>
+                <code>{{ entry.nick }}</code>
+                {% if entry.flags %}<small>{{ entry.flags }}</small>{% endif %}
+              </li>
+            {% endfor %}
+          </ul>
+        {% else %}
+          <p class="lens-info-empty">No agents found across joined channels.</p>
+        {% endif %}
       {% endif %}
     </section>
   {% endif %}

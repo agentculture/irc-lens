@@ -91,12 +91,16 @@ body {
 }
 
 .lens-chat-line { padding: 0.1em 0; }
+.lens-chat-line--action { font-style: italic; color: var(--lens-muted); }
 .lens-chat-ts   { color: var(--lens-muted); margin-right: 0.6ch; }
 .lens-chat-nick { color: var(--lens-accent); margin-right: 0.5ch; }
 
 .lens-sidebar-heading { font-size: 0.85em; color: var(--lens-muted); text-transform: uppercase; margin: 0.5em 0 0.25em; }
 .lens-channel-list,
 .lens-roster { list-style: none; margin: 0; padding: 0; }
+.lens-channel { cursor: pointer; padding: 0.15em 0.25em; border-radius: 2px; }
+.lens-channel:hover { background: rgba(127, 127, 127, 0.12); }
+.lens-channel:focus-visible { outline: 2px solid var(--lens-accent); outline-offset: 1px; }
 .lens-channel--active { color: var(--lens-accent); }
 .lens-entity--offline { color: var(--lens-muted); }
 

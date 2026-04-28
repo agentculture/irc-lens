@@ -25,7 +25,7 @@ import time
 import pytest
 
 from irc_lens.session import EntityItem, Session
-from irc_lens.web.render import render_fragment
+from irc_lens.web.render import render_chat_log, render_fragment
 
 
 @pytest.fixture
@@ -155,3 +155,72 @@ def test_sidebar_pins_testid_contract(session: Session) -> None:
     assert 'data-channel="#ops"' in out
     assert 'data-testid="sidebar-entity"' in out
     assert 'data-nick="alice"' in out
+
+
+def test_sidebar_channel_is_clickable(session: Session) -> None:
+    """Phase 2 contract: clicking a channel in the sidebar fires
+    /switch via htmx. Without `hx-post` + `hx-vals` the sidebar is
+    decorative — Playwright + the user complaint both depend on this."""
+    session.joined_channels.update({"#ops", "#dev"})
+    session.set_current_channel("#ops")
+    out = render_fragment("_sidebar.html.j2", session=session)
+    assert 'hx-post="/input"' in out
+    # hx-vals carries the /switch text — both #ops and #dev get rows.
+    assert "/switch #ops" in out
+    assert "/switch #dev" in out
+
+
+# ---------------------------------------------------------------------------
+# render_chat_log — multi-line replacement helper
+# ---------------------------------------------------------------------------
+
+
+def test_render_chat_log_dict_entries_normalize_timestamp() -> None:
+    """HISTORY rows from the IRCd carry timestamp as a string. The
+    helper parses + formats it; the rendered span shows HH:MM:SS."""
+    entries = [
+        {"nick": "alice", "text": "hello", "timestamp": "1700000000"},
+        {"nick": "bob", "text": "world", "timestamp": "1700000005"},
+    ]
+    out = render_chat_log(entries)
+    # Two chat-line divs.
+    assert out.count('data-testid="chat-line"') == 2
+    assert "alice" in out
+    assert "world" in out
+
+
+def test_render_chat_log_strips_ctcp_action_wrapper() -> None:
+    """HISTORY rows for /me lines arrive wrapped in `\\x01ACTION text\\x01`;
+    they must render as `* nick text` without the control characters."""
+    entries = [
+        {
+            "nick": "alice",
+            "text": "\x01ACTION waves\x01",
+            "timestamp": "1700000000",
+        }
+    ]
+    out = render_chat_log(entries)
+    assert "* alice waves" in out
+    assert "lens-chat-line--action" in out
+    assert "\x01" not in out
+
+
+def test_render_chat_log_empty_returns_empty_string() -> None:
+    assert render_chat_log([]) == ""
+
+
+def test_chat_line_action_kind_renders_asterisk_form() -> None:
+    out = render_fragment(
+        "_chat_line.html.j2",
+        msg={
+            "nick": "alice",
+            "text": "waves",
+            "ts_display": "12:00:00",
+            "kind": "action",
+        },
+    )
+    assert "* alice waves" in out
+    assert "lens-chat-line--action" in out
+    # Action lines must still carry the chat-line-text testid; nick
+    # gets folded into the text span, so no chat-line-nick testid here.
+    assert 'data-testid="chat-line-text"' in out

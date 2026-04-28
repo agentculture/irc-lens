@@ -40,7 +40,10 @@ REGISTER_TIMEOUT = 15.0
 ViewName = Literal["chat", "help", "overview", "status"]
 
 #: SSE event names defined in the spec's "SSE event types" section.
-EventName = Literal["chat", "roster", "info", "view", "error"]
+#: ``log`` is a full chat-log replacement (innerHTML swap of ``#chat-log``)
+#: emitted on /join and /switch so server-side history surfaces in the UI;
+#: ``chat`` continues to append single live lines.
+EventName = Literal["chat", "log", "roster", "info", "view", "error"]
 
 
 class LensConnectionLost(ConnectionError):
@@ -318,6 +321,44 @@ class Session:
         self._transport.add_listener("PRIVMSG", self.dispatch)
         self._transport.add_listener("JOIN", self.dispatch)
         self._transport.add_listener("PART", self.dispatch)
+        # Track NICK rejection (432/433) so `wait_for_welcome` can fail
+        # fast with a useful message instead of silently sitting at
+        # connected=False forever (AgentIRC enforces a server-name
+        # prefix; a bad nick gets 432 ERR_ERRONEUSNICKNAME).
+        self._transport._cmd_handlers.setdefault("432", self._on_nick_rejected)
+        self._transport._cmd_handlers.setdefault("433", self._on_nick_rejected)
+
+    def _on_nick_rejected(self, msg: Message) -> None:
+        # Stash the server's reason text (last param) so the caller can
+        # surface it. Don't raise from a sync IRC handler — the read
+        # loop swallows nothing useful from there; flag and let
+        # `wait_for_welcome` translate.
+        reason = msg.params[-1] if msg.params else "nickname rejected"
+        self._nick_rejection = reason
+
+    async def wait_for_welcome(self, timeout: float = 5.0) -> None:
+        """Wait until the IRCd sends 001 RPL_WELCOME, or fail fast on
+        a 432/433 rejection. Raises ``LensConnectionLost`` on failure
+        so the serve command can translate to a user-readable error
+        instead of running with a silently broken session."""
+        # Poll-based — `IRCTransport.connected` is set in the read
+        # loop's 001 handler; we don't need a Future on it for a
+        # one-shot startup wait. 50ms granularity is well below human
+        # perception and well above asyncio scheduling overhead.
+        deadline = asyncio.get_running_loop().time() + timeout
+        while asyncio.get_running_loop().time() < deadline:
+            if self.connected:
+                return
+            if getattr(self, "_nick_rejection", None):
+                self._healthy = False
+                raise LensConnectionLost(f"nick rejected: {self._nick_rejection}")
+            await asyncio.sleep(0.05)
+        # Timed out without welcome and without an explicit rejection.
+        self._healthy = False
+        raise LensConnectionLost(
+            "no RPL_WELCOME within "
+            f"{timeout:.1f}s — server may be unresponsive or quietly rejecting registration"
+        )
 
     async def disconnect(self) -> None:
         await self._transport.disconnect()
@@ -439,6 +480,14 @@ class Session:
             CommandType.HELP: self._exec_help,
             CommandType.OVERVIEW: self._exec_overview,
             CommandType.STATUS: self._exec_status,
+            CommandType.SWITCH: self._exec_switch,
+            CommandType.READ: self._exec_read,
+            CommandType.CHANNELS: self._exec_channels,
+            CommandType.WHO: self._exec_who,
+            CommandType.AGENTS: self._exec_agents,
+            CommandType.ME: self._exec_me,
+            CommandType.TOPIC: self._exec_topic,
+            CommandType.ICON: self._exec_icon,
             CommandType.UNKNOWN: self._exec_unknown,
         }
 
@@ -486,6 +535,63 @@ class Session:
         # not `view` (which is reserved for /help/overview/status switches
         # per spec line 162).
         self._publish_info()
+        # Server-persisted backlog: pull the last N messages so the chat
+        # pane isn't blank on first join. Mirrors the culture console's
+        # `_switch_to_channel` (../culture/culture/console/app.py:677).
+        await self._fetch_and_publish_history(channel)
+
+    async def _exec_switch(self, parsed: ParsedCommand) -> None:
+        if not parsed.args:
+            self._publish_error("/switch needs a channel")
+            return
+        channel = parsed.args[0]
+        if not channel.startswith("#"):
+            self._publish_error(f"invalid channel: {channel} (must start with #)")
+            return
+        if channel not in self.joined_channels:
+            self._publish_error(f"not joined to {channel} — /join {channel} first")
+            return
+        # Switch is a pure view-state mutation — no IRC side-effect.
+        self.set_current_channel(channel)
+        self._publish_roster()
+        self._publish_info()
+        await self._fetch_and_publish_history(channel)
+
+    async def _fetch_and_publish_history(self, channel: str, limit: int = 50) -> None:
+        """Pull HISTORY RECENT and publish it as a `log` SSE event.
+
+        Stale-switch guard: if the user switched away while the query
+        was in flight, drop the result. Mirrors
+        ``culture/console/app.py:677-716``.
+        """
+        from irc_lens.web.render import render_chat_log
+
+        if not self.connected:
+            # Pre-welcome (or post-disconnect) — skip the IRCd round-trip
+            # and publish an empty log so the chat pane still clears on
+            # /switch. Without this, every offline unit test would hang
+            # for QUERY_TIMEOUT seconds waiting for HISTORYEND that
+            # never arrives.
+            if self.current_channel == channel:
+                self._publish_log(render_chat_log([]))
+            return
+
+        try:
+            entries = await self.history(channel, limit=limit)
+        except LensConnectionLost:
+            # Surface but don't crash the dispatcher — the route layer
+            # will translate to 503; we want the JOIN side-effect to
+            # still publish via the earlier roster/info events.
+            raise
+        except Exception:
+            # _query_locks / collect-buffer paths are defensive but may
+            # raise on malformed numerics; degrade to empty log rather
+            # than crashing the dispatcher.
+            logger.exception("history fetch for %s failed", channel)
+            entries = []
+        if self.current_channel != channel:
+            return  # user switched away; skip the swap
+        self._publish_log(render_chat_log(entries))
 
     async def _exec_part(self, parsed: ParsedCommand) -> None:
         if not parsed.args:
@@ -498,6 +604,137 @@ class Session:
         await self.part(channel)
         self._publish_roster()
         self._publish_info()
+
+    def _require_connected(self, verb: str) -> bool:
+        """Pre-welcome guard for query verbs.
+
+        Without this gate, `/channels`/`/who`/`/agents`/`/read` would
+        block for QUERY_TIMEOUT (10s) when AgentIRC hasn't sent 001 yet
+        — e.g. registration is pending or the nick was rejected
+        (`wait_for_welcome` already failed fast on startup, so reaching
+        this state at runtime is unusual but possible after a future
+        in-session reconnect feature lands)."""
+        if not self.connected:
+            self._publish_error(f"{verb}: not connected to AgentIRC yet")
+            return False
+        return True
+
+    async def _exec_read(self, parsed: ParsedCommand) -> None:
+        if not self._require_connected("/read"):
+            return
+        # Args: optional [#channel] [-n N]; default to current_channel and 50.
+        channel = self.current_channel
+        limit = 50
+        # Lightweight arg scan — full argparse would be overkill for two
+        # forms (`/read`, `/read #ch`, `/read -n 100`, `/read #ch -n 100`).
+        i = 0
+        args = parsed.args
+        while i < len(args):
+            tok = args[i]
+            if tok == "-n" and i + 1 < len(args):
+                try:
+                    limit = max(1, min(500, int(args[i + 1])))
+                except ValueError:
+                    self._publish_error(f"/read: -n needs an integer, got {args[i + 1]!r}")
+                    return
+                i += 2
+                continue
+            if tok.startswith("#"):
+                channel = tok
+                i += 1
+                continue
+            i += 1
+        if not channel:
+            self._publish_error("/read: no channel — /join #x first or pass /read #x")
+            return
+        await self._fetch_and_publish_history(channel, limit=limit)
+
+    async def _exec_channels(self, _parsed: ParsedCommand) -> None:
+        if not self._require_connected("/channels"):
+            return
+        try:
+            channels = await self.list_channels()
+        except Exception:
+            logger.exception("LIST query failed")
+            self._publish_error("/channels: query failed")
+            return
+        self._publish_info_extra(channels=channels)
+
+    async def _exec_who(self, parsed: ParsedCommand) -> None:
+        if not self._require_connected("/who"):
+            return
+        target = parsed.args[0] if parsed.args else self.current_channel
+        if not target:
+            self._publish_error("/who: no target — /join a channel or pass /who #x")
+            return
+        try:
+            entries = await self.who(target)
+        except Exception:
+            logger.exception("WHO %s failed", target)
+            self._publish_error(f"/who {target}: query failed")
+            return
+        self._publish_info_extra(who_target=target, who_entries=entries)
+
+    async def _exec_agents(self, _parsed: ParsedCommand) -> None:
+        if not self._require_connected("/agents"):
+            return
+        if not self.joined_channels:
+            self._publish_error("/agents: no channels joined — /join #x first")
+            return
+        nicks: dict[str, dict] = {}
+        for ch in sorted(self.joined_channels):
+            try:
+                entries = await self.who(ch)
+            except Exception:
+                logger.exception("WHO %s failed during /agents", ch)
+                continue
+            for entry in entries:
+                nick = entry.get("nick", "")
+                if nick and nick not in nicks:
+                    nicks[nick] = entry
+        self._publish_info_extra(agents=sorted(nicks.values(), key=lambda e: e.get("nick", "")))
+
+    async def _exec_me(self, parsed: ParsedCommand) -> None:
+        text = parsed.text.strip() if parsed.text else " ".join(parsed.args)
+        if not text:
+            self._publish_error("/me needs an action")
+            return
+        if not self.current_channel:
+            self._publish_error("no active channel; /join #x first")
+            return
+        # CTCP ACTION wire format: PRIVMSG #ch :\x01ACTION text\x01
+        # Build via raw transport so we don't double-buffer through
+        # `send_privmsg` (which would also rewrite buffer entries).
+        ctcp = f"\x01ACTION {text}\x01"
+        try:
+            await self._transport.send_raw(f"PRIVMSG {self.current_channel} :{ctcp}")
+        except OSError as exc:
+            self._healthy = False
+            raise LensConnectionLost(str(exc)) from exc
+        # Local echo as an action chat-line.
+        self._publish_chat(self.nick, text, kind="action")
+
+    async def _exec_topic(self, parsed: ParsedCommand) -> None:
+        if not parsed.args:
+            self._publish_error("/topic needs a channel")
+            return
+        channel = parsed.args[0]
+        if not channel.startswith("#"):
+            self._publish_error(f"/topic: invalid channel {channel}")
+            return
+        # `/topic #ch` (no body) reads; `/topic #ch text…` writes.
+        if parsed.text:
+            await self.send_raw(f"TOPIC {channel} :{parsed.text}")
+        else:
+            await self.send_raw(f"TOPIC {channel}")
+
+    async def _exec_icon(self, parsed: ParsedCommand) -> None:
+        if not parsed.args:
+            self._publish_error("/icon needs an emoji")
+            return
+        emoji = parsed.args[0]
+        await self.send_raw(f"ICON {emoji}")
+        self.icon = emoji
 
     async def _exec_help(self, _parsed: ParsedCommand) -> None:
         self._switch_view("help")
@@ -562,7 +799,16 @@ class Session:
             # DMs come addressed to our own nick.
             if target != self.current_channel and target != self.nick:
                 return
-            self._publish_chat(sender, text)
+            # CTCP ACTION decode — `\x01ACTION text\x01` becomes a /me
+            # line. Other CTCP types (VERSION, PING) we drop silently;
+            # they're protocol pings, not chat.
+            kind = "chat"
+            if text.startswith("\x01ACTION ") and text.endswith("\x01"):
+                text = text[len("\x01ACTION ") : -1]
+                kind = "action"
+            elif text.startswith("\x01") and text.endswith("\x01"):
+                return
+            self._publish_chat(sender, text, kind=kind)
             return
         if msg.command in ("JOIN", "PART"):
             # Server-confirmed channel-membership change. The local
@@ -577,7 +823,7 @@ class Session:
     # Templates are imported lazily because `web/render.py` imports
     # `Session` for type hints; a top-level import here would cycle.
 
-    def _publish_chat(self, nick: str, text: str) -> None:
+    def _publish_chat(self, nick: str, text: str, *, kind: str = "chat") -> None:
         from irc_lens.web.render import render_fragment
 
         # Pre-format the timestamp so the SSE payload is byte-stable
@@ -587,9 +833,18 @@ class Session:
         ts_display = time.strftime("%H:%M:%S", time.localtime(time.time()))
         fragment = render_fragment(
             "_chat_line.html.j2",
-            msg={"nick": nick, "text": text, "ts_display": ts_display},
+            msg={"nick": nick, "text": text, "ts_display": ts_display, "kind": kind},
         )
         self.event_bus.publish(SessionEvent(name="chat", data=fragment))
+
+    def _publish_log(self, html: str) -> None:
+        """Publish a full chat-log replacement (innerHTML of #chat-log).
+
+        The frontend's `log` listener swaps innerHTML so the user sees
+        history-on-join and the channel switch wipes the previous
+        channel's lines. Live `chat` events continue to append after.
+        """
+        self.event_bus.publish(SessionEvent(name="log", data=html))
 
     def _publish_roster(self) -> None:
         from irc_lens.web.render import render_fragment
@@ -607,6 +862,15 @@ class Session:
         from irc_lens.web.render import render_fragment
 
         fragment = render_fragment("_info.html.j2", session=self)
+        self.event_bus.publish(SessionEvent(name="info", data=fragment))
+
+    def _publish_info_extra(self, **extra: Any) -> None:
+        """Re-render the info pane with extra context (channels list,
+        who results, agents). Used by /channels, /who, /agents to surface
+        query results without inventing a new SSE event type."""
+        from irc_lens.web.render import render_fragment
+
+        fragment = render_fragment("_info.html.j2", session=self, **extra)
         self.event_bus.publish(SessionEvent(name="info", data=fragment))
 
     def _publish_view(self) -> None:

@@ -83,7 +83,15 @@ def successful_connect(monkeypatch: pytest.MonkeyPatch):
     async def ok(self) -> None:
         return None
 
+    async def welcomed(self, timeout: float = 5.0) -> None:
+        # Mocked alongside connect() — without it, the serve command's
+        # `wait_for_welcome` would block on a real `connected` flag that
+        # never flips (no actual transport here), making every test
+        # that monkeypatches connect() time out at 5s.
+        return None
+
     monkeypatch.setattr("irc_lens.session.Session.connect", ok)
+    monkeypatch.setattr("irc_lens.session.Session.wait_for_welcome", welcomed)
 
 
 # ---------------------------------------------------------------------------
