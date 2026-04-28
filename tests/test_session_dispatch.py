@@ -498,3 +498,142 @@ def test_back_to_back_view_switches_publish_one_event_each(session: Session) -> 
     view_payloads = [json.loads(e.data) for e in events if e.name == "view"]
     assert [p["view"] for p in view_payloads] == ["help", "overview", "status"]
     assert session.view == "status"
+
+
+# ---------------------------------------------------------------------------
+# Issue #20 regression: /channels, /who, /agents from a non-chat view must
+# promote the view back to chat so the info-extra template branch renders.
+# ---------------------------------------------------------------------------
+
+
+def _drive_to_status(session: Session) -> None:
+    """Switch the session to `view = "status"` and discard the
+    resulting events. Subsequent tests then start from a fresh
+    subscriber and only see the events under test."""
+    asyncio.run(session.execute(ParsedCommand(type=CommandType.STATUS)))
+    assert session.view == "status"
+
+
+def _stub_async_return(value):
+    async def _stub(*_args, **_kwargs):
+        return value
+
+    return _stub
+
+
+def test_channels_from_status_view_promotes_to_chat(session: Session) -> None:
+    """Issue #20: `/channels` after `/status` was silently swallowed —
+    the channels block in `_info.html.j2` only renders under the chat
+    branch. The fix forces a view-switch back to chat before publishing
+    the info-extra fragment."""
+    session._transport.connected = True  # type: ignore[attr-defined]
+    session.list_channels = _stub_async_return(["#general", "#ops"])  # type: ignore[assignment]
+    _drive_to_status(session)
+
+    sub = session.event_bus.subscribe()
+    try:
+        asyncio.run(session.execute(ParsedCommand(type=CommandType.CHANNELS)))
+        events = sub.drain_nowait()
+    finally:
+        sub.close()
+
+    assert session.view == "chat"
+    names = [e.name for e in events]
+    assert names.count("view") == 1, (
+        f"expected exactly one `view` event (chat-promotion), got {names}"
+    )
+    assert names.count("info") == 1, (
+        f"expected exactly one `info` event (rendered fragment), got {names}"
+    )
+    view = next(e for e in events if e.name == "view")
+    assert json.loads(view.data) == {"view": "chat"}
+    info = next(e for e in events if e.name == "info")
+    assert 'data-testid="info-channels-heading"' in info.data, (
+        "info fragment must carry the channels heading once the view is "
+        "promoted back to chat"
+    )
+    assert "#general" in info.data and "#ops" in info.data
+
+
+def test_who_from_help_view_promotes_to_chat(session: Session) -> None:
+    """`/who #ops` from the help view: same swallowing trap as /channels."""
+    session._transport.connected = True  # type: ignore[attr-defined]
+    session.who = _stub_async_return(  # type: ignore[assignment]
+        [{"nick": "alice", "flags": "H", "realname": "Alice"}]
+    )
+    asyncio.run(session.execute(ParsedCommand(type=CommandType.HELP)))
+    assert session.view == "help"
+
+    sub = session.event_bus.subscribe()
+    try:
+        asyncio.run(
+            session.execute(ParsedCommand(type=CommandType.WHO, args=["#ops"]))
+        )
+        events = sub.drain_nowait()
+    finally:
+        sub.close()
+
+    assert session.view == "chat"
+    names = [e.name for e in events]
+    assert names.count("view") == 1
+    assert names.count("info") == 1
+    view = next(e for e in events if e.name == "view")
+    assert json.loads(view.data) == {"view": "chat"}
+    info = next(e for e in events if e.name == "info")
+    assert 'data-testid="info-who-heading"' in info.data
+    assert "alice" in info.data
+
+
+def test_agents_from_overview_view_promotes_to_chat(session: Session) -> None:
+    """`/agents` from the overview view: union of WHO results across
+    joined channels — same swallowing trap when the active view isn't
+    chat."""
+    session._transport.connected = True  # type: ignore[attr-defined]
+    session.joined_channels.add("#ops")
+    session.who = _stub_async_return(  # type: ignore[assignment]
+        [{"nick": "alice", "flags": "H"}, {"nick": "bob", "flags": ""}]
+    )
+    asyncio.run(session.execute(ParsedCommand(type=CommandType.OVERVIEW)))
+    assert session.view == "overview"
+
+    sub = session.event_bus.subscribe()
+    try:
+        asyncio.run(session.execute(ParsedCommand(type=CommandType.AGENTS)))
+        events = sub.drain_nowait()
+    finally:
+        sub.close()
+
+    assert session.view == "chat"
+    names = [e.name for e in events]
+    assert names.count("view") == 1
+    assert names.count("info") == 1
+    view = next(e for e in events if e.name == "view")
+    assert json.loads(view.data) == {"view": "chat"}
+    info = next(e for e in events if e.name == "info")
+    assert 'data-testid="info-agents-heading"' in info.data
+    assert "alice" in info.data and "bob" in info.data
+
+
+def test_channels_from_chat_view_does_not_emit_view_event(session: Session) -> None:
+    """Control case: when the user is already on the chat view, the
+    promotion is a no-op — no spurious `view` event, just the info
+    fragment with the channels block. Guards against accidental flicker
+    from an unconditional view-publish."""
+    session._transport.connected = True  # type: ignore[attr-defined]
+    session.list_channels = _stub_async_return(["#general"])  # type: ignore[assignment]
+    assert session.view == "chat"  # default
+
+    sub = session.event_bus.subscribe()
+    try:
+        asyncio.run(session.execute(ParsedCommand(type=CommandType.CHANNELS)))
+        events = sub.drain_nowait()
+    finally:
+        sub.close()
+
+    names = [e.name for e in events]
+    assert "view" not in names, (
+        f"chat→chat must not emit a view event, got {names}"
+    )
+    assert names.count("info") == 1
+    info = next(e for e in events if e.name == "info")
+    assert 'data-testid="info-channels-heading"' in info.data

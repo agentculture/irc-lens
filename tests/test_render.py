@@ -141,6 +141,26 @@ def test_info_status_view_shows_session_metadata(session: Session) -> None:
     assert "6667" in out  # port
 
 
+def test_info_extras_only_render_under_chat_view(session: Session) -> None:
+    """Template contract for issue #20: the channels/who/agents blocks
+    are intentionally nested inside the chat-view branch of
+    `_info.html.j2`. If a future refactor hoists them out, the
+    `_publish_info_extra` view-promotion in session.py would become
+    redundant — pin the current shape so that decision is made
+    deliberately, not by accident.
+
+    This test passes `channels=` while sitting on the status view and
+    asserts the heading does NOT render. The runtime fix lives in
+    `_publish_info_extra`, which promotes the view back to chat
+    before calling `render_fragment`."""
+    session.set_view("status")
+    out = render_fragment(
+        "_info.html.j2", session=session, channels=["#general", "#ops"]
+    )
+    assert 'data-testid="info-channels-heading"' not in out
+    assert "Session status" in out  # status branch still rendered
+
+
 # ---------------------------------------------------------------------------
 # _sidebar.html.j2 — testid contract
 # ---------------------------------------------------------------------------

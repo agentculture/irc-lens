@@ -909,8 +909,20 @@ class Session:
     def _publish_info_extra(self, **extra: Any) -> None:
         """Re-render the info pane with extra context (channels list,
         who results, agents). Used by /channels, /who, /agents to surface
-        query results without inventing a new SSE event type."""
+        query results without inventing a new SSE event type.
+
+        The extras only render under the chat-view branch of
+        _info.html.j2, so promote the view to chat first when the
+        verb was invoked from status/help/overview — otherwise the
+        result is silently dropped by the template (issue #20). The
+        `view` event mirrors `_switch_view`'s contract so the client
+        toggles `<body data-view>` to match before the info swap.
+        """
         from irc_lens.web.render import render_fragment
+
+        if self.view != "chat":
+            self.set_view("chat")
+            self._publish_view()
 
         fragment = render_fragment("_info.html.j2", session=self, **extra)
         self.event_bus.publish(SessionEvent(name="info", data=fragment))
