@@ -375,6 +375,11 @@ def test_execute_read_other_channel_publishes_log(session: Session) -> None:
         # Drive the IRC dispatch handler manually so the history Future
         # resolves immediately rather than waiting QUERY_TIMEOUT.
         async def fake_send(_line: str) -> None:
+            # `send_raw` is awaited in production, so this stand-in must
+            # be `async` too — even though the body is synchronous.
+            # `asyncio.sleep(0)` yields once so sonarcloud's S7503
+            # ("async without await") sees a real await.
+            await asyncio.sleep(0)
             session._on_historyend(
                 Message(prefix=None, command="HISTORYEND", params=["#dev", "End"])
             )
