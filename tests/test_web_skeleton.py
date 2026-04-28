@@ -186,6 +186,29 @@ async def test_static_404_for_missing_file(client: TestClient) -> None:
     assert resp.status == 404
 
 
+@pytest.mark.parametrize(
+    "path,expected_type_prefix",
+    [
+        ("/static/favicon-16x16.png", "image/"),
+        ("/static/favicon-32x32.png", "image/"),
+        ("/static/favicon.ico", "image/"),
+        ("/static/apple-touch-icon.png", "image/"),
+        ("/static/culture-logo.png", "image/"),
+    ],
+)
+async def test_static_brand_assets_served(
+    client: TestClient, path: str, expected_type_prefix: str
+) -> None:
+    resp = await client.get(path)
+    assert resp.status == 200, f"{path} should return 200"
+    assert resp.headers["Content-Type"].startswith(expected_type_prefix), (
+        f"{path} content-type {resp.headers['Content-Type']!r} "
+        f"missing prefix {expected_type_prefix!r}"
+    )
+    body = await resp.read()
+    assert len(body) > 0, f"{path} returned empty body"
+
+
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
