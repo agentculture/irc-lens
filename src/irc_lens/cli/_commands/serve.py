@@ -123,6 +123,24 @@ async def _serve_async(args: argparse.Namespace) -> None:
                 "server status local`"
             ),
         ) from exc
+    # Block until 001 RPL_WELCOME (or 432/433 rejection). AgentIRC
+    # enforces a server-name prefix on nicks (e.g. `spark-`); without
+    # this gate a rejected nick produces a silently broken session
+    # where every query times out at 10s and the chat pane stays empty.
+    try:
+        await session.wait_for_welcome()
+    except LensConnectionLost as exc:
+        await session.disconnect()
+        raise AfiError(
+            code=EXIT_USER_ERROR,
+            message=f"AgentIRC registration failed: {exc}",
+            remediation=(
+                "AgentIRC enforces a server-name prefix on nicks (e.g. "
+                "`spark-foo` for a server named `spark`). Pass a nick "
+                "matching that prefix via --nick, or check the server's "
+                "config for the expected prefix."
+            ),
+        ) from exc
 
     if args.seed:
         # Spec line 261: connection is real; seed only overlays UI

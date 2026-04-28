@@ -17,9 +17,12 @@ def _read_lens_js() -> str:
     )
 
 
-def test_lens_js_subscribes_to_all_five_event_types() -> None:
+def test_lens_js_subscribes_to_all_six_event_types() -> None:
     js = _read_lens_js()
-    for name in ("chat", "roster", "info", "view", "error"):
+    # `log` was added alongside history-on-join: replaces #chat-log
+    # innerHTML so the chat pane swaps content on /switch and shows
+    # server-side backlog after /join.
+    for name in ("chat", "log", "roster", "info", "view", "error"):
         assert f'addEventListener("{name}"' in js, (
             f"lens.js missing handler for SSE event {name!r}"
         )

@@ -40,7 +40,10 @@ REGISTER_TIMEOUT = 15.0
 ViewName = Literal["chat", "help", "overview", "status"]
 
 #: SSE event names defined in the spec's "SSE event types" section.
-EventName = Literal["chat", "roster", "info", "view", "error"]
+#: ``log`` is a full chat-log replacement (innerHTML swap of ``#chat-log``)
+#: emitted on /join and /switch so server-side history surfaces in the UI;
+#: ``chat`` continues to append single live lines.
+EventName = Literal["chat", "log", "roster", "info", "view", "error"]
 
 
 class LensConnectionLost(ConnectionError):
@@ -291,6 +294,19 @@ class Session:
         # marks the session unhealthy on first `LensConnectionLost`.
         self._healthy = True
 
+        # Welcome / nick-rejection signalling for `wait_for_welcome`.
+        # Initialised in __init__ so the listeners can be registered
+        # *before* `transport.connect()` starts the read loop — without
+        # that ordering, a fast 001 can land in the read loop before we
+        # observe it and `wait_for_welcome` would time out spuriously.
+        # asyncio.Event in 3.10+ is loop-agnostic until first awaited,
+        # so constructing it pre-loop is safe.
+        self._welcome_event = asyncio.Event()
+        self._nick_rejection: str | None = None
+        self._transport.add_listener("001", self._on_welcome_signal)
+        self._transport._cmd_handlers.setdefault("432", self._on_nick_rejected)
+        self._transport._cmd_handlers.setdefault("433", self._on_nick_rejected)
+
     # ------------------------------------------------------------------
     # Connection lifecycle
     # ------------------------------------------------------------------
@@ -318,6 +334,45 @@ class Session:
         self._transport.add_listener("PRIVMSG", self.dispatch)
         self._transport.add_listener("JOIN", self.dispatch)
         self._transport.add_listener("PART", self.dispatch)
+
+    def _on_welcome_signal(self, _msg: Message) -> None:
+        # Runs after IRCTransport's own 001 handler (which set
+        # `connected=True` and joined any boot channels); flipping the
+        # Event releases `wait_for_welcome`.
+        self._welcome_event.set()
+
+    def _on_nick_rejected(self, msg: Message) -> None:
+        # Stash the server's reason text and unblock `wait_for_welcome`
+        # so it can translate to a clean error rather than time out.
+        # Don't raise from a sync IRC handler — the read loop swallows
+        # exceptions there.
+        reason = msg.params[-1] if msg.params else "nickname rejected"
+        self._nick_rejection = reason
+        self._welcome_event.set()
+
+    async def wait_for_welcome(self) -> None:
+        """Block until the IRCd sends 001 RPL_WELCOME, or fail fast on
+        a 432/433 rejection. Raises ``LensConnectionLost`` on failure
+        so the serve command can translate to a user-readable error
+        instead of running with a silently broken session.
+
+        Wraps the welcome Event in `asyncio.timeout()` rather than
+        taking a `timeout=` parameter (sonarcloud python:S7483: timeout
+        belongs in a context manager, not a function arg). 5s is the
+        established budget and isn't user-tunable.
+        """
+        try:
+            async with asyncio.timeout(5.0):
+                await self._welcome_event.wait()
+        except asyncio.TimeoutError as exc:
+            self._healthy = False
+            raise LensConnectionLost(
+                "no RPL_WELCOME within 5.0s — server may be unresponsive "
+                "or quietly rejecting registration"
+            ) from exc
+        if self._nick_rejection is not None:
+            self._healthy = False
+            raise LensConnectionLost(f"nick rejected: {self._nick_rejection}")
 
     async def disconnect(self) -> None:
         await self._transport.disconnect()
@@ -439,6 +494,14 @@ class Session:
             CommandType.HELP: self._exec_help,
             CommandType.OVERVIEW: self._exec_overview,
             CommandType.STATUS: self._exec_status,
+            CommandType.SWITCH: self._exec_switch,
+            CommandType.READ: self._exec_read,
+            CommandType.CHANNELS: self._exec_channels,
+            CommandType.WHO: self._exec_who,
+            CommandType.AGENTS: self._exec_agents,
+            CommandType.ME: self._exec_me,
+            CommandType.TOPIC: self._exec_topic,
+            CommandType.ICON: self._exec_icon,
             CommandType.UNKNOWN: self._exec_unknown,
         }
 
@@ -486,6 +549,74 @@ class Session:
         # not `view` (which is reserved for /help/overview/status switches
         # per spec line 162).
         self._publish_info()
+        # Server-persisted backlog: pull the last N messages so the chat
+        # pane isn't blank on first join. Mirrors the culture console's
+        # `_switch_to_channel` (../culture/culture/console/app.py:677).
+        await self._fetch_and_publish_history(channel)
+
+    async def _exec_switch(self, parsed: ParsedCommand) -> None:
+        if not parsed.args:
+            self._publish_error("/switch needs a channel")
+            return
+        channel = parsed.args[0]
+        if not channel.startswith("#"):
+            self._publish_error(f"invalid channel: {channel} (must start with #)")
+            return
+        if channel not in self.joined_channels:
+            self._publish_error(f"not joined to {channel} — /join {channel} first")
+            return
+        # Switch is a pure view-state mutation — no IRC side-effect.
+        self.set_current_channel(channel)
+        self._publish_roster()
+        self._publish_info()
+        await self._fetch_and_publish_history(channel)
+
+    async def _fetch_and_publish_history(
+        self, channel: str, limit: int = 50, *, view_channel: str | None = None
+    ) -> None:
+        """Pull HISTORY RECENT and publish it as a `log` SSE event.
+
+        ``channel`` is what we query the IRCd for; ``view_channel`` is
+        the channel whose pane the result is meant to land in (defaults
+        to ``channel`` for /switch and /join). Stale-guard compares
+        ``self.current_channel`` against ``view_channel``: if the user
+        moved away from the pane this fetch was for, drop. Mirrors
+        ``culture/console/app.py:677-716``.
+
+        For ``/read #other`` from ``#ops``: ``channel="#other"`` (we
+        query that backlog) but ``view_channel="#ops"`` (we publish into
+        the active pane the user invoked /read from).
+        """
+        from irc_lens.web.render import render_chat_log
+
+        if view_channel is None:
+            view_channel = channel
+        if not self.connected:
+            # Pre-welcome (or post-disconnect) — skip the IRCd round-trip
+            # and publish an empty log so the chat pane still clears on
+            # /switch. Without this, every offline unit test would hang
+            # for QUERY_TIMEOUT seconds waiting for HISTORYEND that
+            # never arrives.
+            if self.current_channel == view_channel:
+                self._publish_log(render_chat_log([]))
+            return
+
+        try:
+            entries = await self.history(channel, limit=limit)
+        except LensConnectionLost:
+            # Surface but don't crash the dispatcher — the route layer
+            # will translate to 503; we want the JOIN side-effect to
+            # still publish via the earlier roster/info events.
+            raise
+        except Exception:
+            # _query_locks / collect-buffer paths are defensive but may
+            # raise on malformed numerics; degrade to empty log rather
+            # than crashing the dispatcher.
+            logger.exception("history fetch for %s failed", channel)
+            entries = []
+        if self.current_channel != view_channel:
+            return  # user moved off the pane this fetch was for; skip swap
+        self._publish_log(render_chat_log(entries))
 
     async def _exec_part(self, parsed: ParsedCommand) -> None:
         if not parsed.args:
@@ -498,6 +629,142 @@ class Session:
         await self.part(channel)
         self._publish_roster()
         self._publish_info()
+
+    def _require_connected(self, verb: str) -> bool:
+        """Pre-welcome guard for query verbs.
+
+        Without this gate, `/channels`/`/who`/`/agents`/`/read` would
+        block for QUERY_TIMEOUT (10s) when AgentIRC hasn't sent 001 yet
+        — e.g. registration is pending or the nick was rejected
+        (`wait_for_welcome` already failed fast on startup, so reaching
+        this state at runtime is unusual but possible after a future
+        in-session reconnect feature lands)."""
+        if not self.connected:
+            self._publish_error(f"{verb}: not connected to AgentIRC yet")
+            return False
+        return True
+
+    async def _exec_read(self, parsed: ParsedCommand) -> None:
+        if not self._require_connected("/read"):
+            return
+        # Args: optional [#channel] [-n N]; default to current_channel and 50.
+        channel = self.current_channel
+        limit = 50
+        # Lightweight arg scan — full argparse would be overkill for two
+        # forms (`/read`, `/read #ch`, `/read -n 100`, `/read #ch -n 100`).
+        i = 0
+        args = parsed.args
+        while i < len(args):
+            tok = args[i]
+            if tok == "-n" and i + 1 < len(args):
+                try:
+                    limit = max(1, min(500, int(args[i + 1])))
+                except ValueError:
+                    self._publish_error(f"/read: -n needs an integer, got {args[i + 1]!r}")
+                    return
+                i += 2
+                continue
+            if tok.startswith("#"):
+                channel = tok
+                i += 1
+                continue
+            i += 1
+        if not channel:
+            self._publish_error("/read: no channel — /join #x first or pass /read #x")
+            return
+        # /read peeks at history without switching panes — `view_channel`
+        # is the *current* channel so the stale guard works correctly
+        # when the user reads `#other` while sitting on `#ops`.
+        await self._fetch_and_publish_history(
+            channel, limit=limit, view_channel=self.current_channel or channel
+        )
+
+    async def _exec_channels(self, _parsed: ParsedCommand) -> None:
+        if not self._require_connected("/channels"):
+            return
+        try:
+            channels = await self.list_channels()
+        except Exception:
+            logger.exception("LIST query failed")
+            self._publish_error("/channels: query failed")
+            return
+        self._publish_info_extra(channels=channels)
+
+    async def _exec_who(self, parsed: ParsedCommand) -> None:
+        if not self._require_connected("/who"):
+            return
+        target = parsed.args[0] if parsed.args else self.current_channel
+        if not target:
+            self._publish_error("/who: no target — /join a channel or pass /who #x")
+            return
+        try:
+            entries = await self.who(target)
+        except Exception:
+            logger.exception("WHO %s failed", target)
+            self._publish_error(f"/who {target}: query failed")
+            return
+        self._publish_info_extra(who_target=target, who_entries=entries)
+
+    async def _exec_agents(self, _parsed: ParsedCommand) -> None:
+        if not self._require_connected("/agents"):
+            return
+        if not self.joined_channels:
+            self._publish_error("/agents: no channels joined — /join #x first")
+            return
+        nicks: dict[str, dict] = {}
+        for ch in sorted(self.joined_channels):
+            try:
+                entries = await self.who(ch)
+            except Exception:
+                logger.exception("WHO %s failed during /agents", ch)
+                continue
+            for entry in entries:
+                nick = entry.get("nick", "")
+                if nick and nick not in nicks:
+                    nicks[nick] = entry
+        self._publish_info_extra(agents=sorted(nicks.values(), key=lambda e: e.get("nick", "")))
+
+    async def _exec_me(self, parsed: ParsedCommand) -> None:
+        text = parsed.text.strip() if parsed.text else " ".join(parsed.args)
+        if not text:
+            self._publish_error("/me needs an action")
+            return
+        if not self.current_channel:
+            self._publish_error("no active channel; /join #x first")
+            return
+        # CTCP ACTION wire format: PRIVMSG #ch :\x01ACTION text\x01
+        # Build via raw transport so we don't double-buffer through
+        # `send_privmsg` (which would also rewrite buffer entries).
+        ctcp = f"\x01ACTION {text}\x01"
+        try:
+            await self._transport.send_raw(f"PRIVMSG {self.current_channel} :{ctcp}")
+        except OSError as exc:
+            self._healthy = False
+            raise LensConnectionLost(str(exc)) from exc
+        # Local echo as an action chat-line.
+        self._publish_chat(self.nick, text, kind="action")
+
+    async def _exec_topic(self, parsed: ParsedCommand) -> None:
+        if not parsed.args:
+            self._publish_error("/topic needs a channel")
+            return
+        channel = parsed.args[0]
+        if not channel.startswith("#"):
+            self._publish_error(f"/topic: invalid channel {channel}")
+            return
+        # `/topic #ch` (no body) reads; `/topic #ch text…` writes.
+        if parsed.text:
+            await self.send_raw(f"TOPIC {channel} :{parsed.text}")
+        else:
+            await self.send_raw(f"TOPIC {channel}")
+
+    async def _exec_icon(self, parsed: ParsedCommand) -> None:
+        if not parsed.args:
+            self._publish_error("/icon needs an emoji")
+            return
+        emoji = parsed.args[0]
+        await self.send_raw(f"ICON {emoji}")
+        self.icon = emoji
 
     async def _exec_help(self, _parsed: ParsedCommand) -> None:
         self._switch_view("help")
@@ -542,27 +809,11 @@ class Session:
 
         Registered for PRIVMSG/JOIN/PART in `connect()`. The transport's
         own handlers still run first (buffer-add, etc.); this just emits
-        the user-visible reactive update.
+        the user-visible reactive update. Per-command branches live in
+        helpers so this stays under sonarcloud's S3776 complexity cap.
         """
         if msg.command == "PRIVMSG":
-            if len(msg.params) < 2:
-                return
-            target = msg.params[0]
-            text = msg.params[1]
-            sender = msg.prefix.split("!")[0] if msg.prefix else "unknown"
-            # Local echo guard: SEND already published from `execute()`.
-            # Most IRC daemons don't echo own PRIVMSGs, but defensive.
-            if sender == self.nick:
-                return
-            # `system-<server>` PRIVMSGs announce mesh events, not chat —
-            # the transport already drops them from the buffer; mirror.
-            if sender.startswith("system-"):
-                return
-            # Only publish when the message belongs in the active pane.
-            # DMs come addressed to our own nick.
-            if target != self.current_channel and target != self.nick:
-                return
-            self._publish_chat(sender, text)
+            self._dispatch_privmsg(msg)
             return
         if msg.command in ("JOIN", "PART"):
             # Server-confirmed channel-membership change. The local
@@ -571,13 +822,50 @@ class Session:
             # mutation in v1); re-render the sidebar regardless.
             self._publish_roster()
 
+    def _dispatch_privmsg(self, msg: Message) -> None:
+        """Handle inbound PRIVMSG: filter, decode CTCP ACTION, publish."""
+        if len(msg.params) < 2:
+            return
+        target = msg.params[0]
+        text = msg.params[1]
+        sender = msg.prefix.split("!")[0] if msg.prefix else "unknown"
+        # Local echo guard: SEND already published from `execute()`.
+        # Most IRC daemons don't echo own PRIVMSGs, but defensive.
+        if sender == self.nick:
+            return
+        # `system-<server>` PRIVMSGs announce mesh events, not chat —
+        # the transport already drops them from the buffer; mirror.
+        if sender.startswith("system-"):
+            return
+        # Only publish when the message belongs in the active pane.
+        # DMs come addressed to our own nick.
+        if target != self.current_channel and target != self.nick:
+            return
+        decoded = self._decode_ctcp(text)
+        if decoded is None:
+            return  # non-ACTION CTCP (VERSION, PING) — drop silently
+        text, kind = decoded
+        self._publish_chat(sender, text, kind=kind)
+
+    @staticmethod
+    def _decode_ctcp(text: str) -> tuple[str, str] | None:
+        """Decode a PRIVMSG body. Returns (text, kind) for chat or
+        ACTION, or None for other CTCP types we want to drop. Pulled
+        out of `_dispatch_privmsg` to keep the cognitive complexity of
+        the dispatcher under sonarcloud's S3776 cap."""
+        if text.startswith("\x01ACTION ") and text.endswith("\x01"):
+            return text[len("\x01ACTION ") : -1], "action"
+        if text.startswith("\x01") and text.endswith("\x01"):
+            return None  # CTCP VERSION/PING/etc — protocol pings, not chat
+        return text, "chat"
+
     # ------------------------------------------------------------------
     # Publish helpers (Phase 5)
     # ------------------------------------------------------------------
     # Templates are imported lazily because `web/render.py` imports
     # `Session` for type hints; a top-level import here would cycle.
 
-    def _publish_chat(self, nick: str, text: str) -> None:
+    def _publish_chat(self, nick: str, text: str, *, kind: str = "chat") -> None:
         from irc_lens.web.render import render_fragment
 
         # Pre-format the timestamp so the SSE payload is byte-stable
@@ -587,9 +875,18 @@ class Session:
         ts_display = time.strftime("%H:%M:%S", time.localtime(time.time()))
         fragment = render_fragment(
             "_chat_line.html.j2",
-            msg={"nick": nick, "text": text, "ts_display": ts_display},
+            msg={"nick": nick, "text": text, "ts_display": ts_display, "kind": kind},
         )
         self.event_bus.publish(SessionEvent(name="chat", data=fragment))
+
+    def _publish_log(self, html: str) -> None:
+        """Publish a full chat-log replacement (innerHTML of #chat-log).
+
+        The frontend's `log` listener swaps innerHTML so the user sees
+        history-on-join and the channel switch wipes the previous
+        channel's lines. Live `chat` events continue to append after.
+        """
+        self.event_bus.publish(SessionEvent(name="log", data=html))
 
     def _publish_roster(self) -> None:
         from irc_lens.web.render import render_fragment
@@ -607,6 +904,15 @@ class Session:
         from irc_lens.web.render import render_fragment
 
         fragment = render_fragment("_info.html.j2", session=self)
+        self.event_bus.publish(SessionEvent(name="info", data=fragment))
+
+    def _publish_info_extra(self, **extra: Any) -> None:
+        """Re-render the info pane with extra context (channels list,
+        who results, agents). Used by /channels, /who, /agents to surface
+        query results without inventing a new SSE event type."""
+        from irc_lens.web.render import render_fragment
+
+        fragment = render_fragment("_info.html.j2", session=self, **extra)
         self.event_bus.publish(SessionEvent(name="info", data=fragment))
 
     def _publish_view(self) -> None:

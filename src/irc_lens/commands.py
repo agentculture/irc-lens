@@ -35,6 +35,10 @@ class CommandType(Enum):
     SERVER = auto()
     QUIT = auto()
     HELP = auto()
+    # irc-lens additions: SWITCH is a pure view-state verb (no IRC
+    # side-effect) used by the clickable sidebar; ME is CTCP ACTION.
+    SWITCH = auto()
+    ME = auto()
     UNKNOWN = auto()
 
 
@@ -49,6 +53,7 @@ class ParsedCommand:
 _TEXT_COMMANDS = {
     "send": (CommandType.SEND, 1),  # /send <target> <text...>
     "topic": (CommandType.TOPIC, 1),  # /topic <channel> <text...>
+    "me": (CommandType.ME, 0),  # /me <text...> — CTCP ACTION
 }
 
 # Simple commands: name -> type
@@ -70,6 +75,7 @@ _COMMANDS: dict[str, CommandType] = {
     "server": CommandType.SERVER,
     "quit": CommandType.QUIT,
     "help": CommandType.HELP,
+    "switch": CommandType.SWITCH,
 }
 
 

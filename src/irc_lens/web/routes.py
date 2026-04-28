@@ -25,7 +25,7 @@ from aiohttp import web
 from irc_lens.commands import parse_command
 from irc_lens.session import LensConnectionLost
 from irc_lens.web.events import format_sse
-from irc_lens.web.render import render_index
+from irc_lens.web.render import render_chat_log, render_index
 
 logger = logging.getLogger(__name__)
 
@@ -59,8 +59,39 @@ def _connection_lost(message: str) -> web.Response:
 
 
 async def get_index(request: web.Request) -> web.Response:
+    """Render the three-pane page.
+
+    When a current channel is set, pull HISTORY RECENT first so the chat
+    pane isn't blank on a page reload. The Culture IRCd persists messages
+    in SQLite and the query is cheap; on timeout or transport failure we
+    degrade to an empty log rather than 500ing the page.
+    """
     session = request.app["session"]
-    body = render_index(session)
+    # `chat_log_html=None` lets `render_index` fall back to the
+    # `MessageBuffer` — which is the seed-loader path. We only override
+    # to a string when the live IRCd query actually ran, so `--seed`
+    # preloaded fixtures still render on the initial page render.
+    chat_log_html: str | None = None
+    channel = session.current_channel
+    # Both `connected` (post-welcome) and `healthy` (no broken pipe) must
+    # hold — a pre-welcome session would block for QUERY_TIMEOUT (10s) on
+    # the HISTORY query because AgentIRC ignores custom verbs from
+    # unregistered clients.
+    if channel and session.healthy and session.connected:
+        try:
+            entries = await session.history(channel, limit=50)
+        except LensConnectionLost:
+            # Page render shouldn't break on transport loss; the
+            # connection-status indicator + 503 on next /input will
+            # surface the problem to the user. Fall back to the buffer
+            # rather than forcing a blank pane.
+            entries = None
+        except Exception:
+            logger.exception("history fetch for %s during GET / failed", channel)
+            entries = None
+        if entries is not None:
+            chat_log_html = render_chat_log(entries)
+    body = render_index(session, chat_log_html=chat_log_html)
     return web.Response(text=body, content_type="text/html")
 
 

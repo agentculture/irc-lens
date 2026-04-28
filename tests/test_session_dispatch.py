@@ -315,6 +315,159 @@ def test_view_event_payload_is_spec_strict(session: Session) -> None:
     assert payload["view"] in ("chat", "help", "overview", "status")
 
 
+# ---------------------------------------------------------------------------
+# History on JOIN, /switch, CTCP ACTION (console-parity round)
+# ---------------------------------------------------------------------------
+
+
+def test_execute_join_publishes_log_event(session: Session) -> None:
+    """History-on-join: JOIN also publishes a `log` event so the chat
+    pane gets the server-side backlog. Offline session → empty log
+    payload (no IRCd to query), but the event must still fire so the
+    frontend swaps innerHTML and clears whatever the previous channel
+    rendered. Regression guard for the literal user complaint that
+    triggered this work."""
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.execute(ParsedCommand(type=CommandType.JOIN, args=["#ops"])))
+    events = sub.drain_nowait()
+    sub.close()
+    log_events = [e for e in events if e.name == "log"]
+    assert len(log_events) == 1, (
+        "JOIN must publish exactly one `log` event (history replacement)"
+    )
+
+
+def test_execute_switch_to_joined_channel(session: Session) -> None:
+    """/switch flips current_channel without re-joining and publishes
+    log/roster/info. Mirrors clickable-sidebar UX."""
+    session.joined_channels.update({"#ops", "#dev"})
+    session.set_current_channel("#ops")
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.execute(ParsedCommand(type=CommandType.SWITCH, args=["#dev"])))
+    events = sub.drain_nowait()
+    sub.close()
+    assert session.current_channel == "#dev"
+    names = [e.name for e in events]
+    assert "roster" in names
+    assert "info" in names
+    assert "log" in names
+    assert "error" not in names
+
+
+def test_execute_read_other_channel_publishes_log(session: Session) -> None:
+    """Regression for the /read #other stale-guard bug: with the user
+    sitting on #ops, `/read #dev` must produce one `log` event for the
+    pane the user is looking at — even though the queried channel isn't
+    `current_channel`. Before the view_channel fix, the stale guard
+    inside `_fetch_and_publish_history` matched against the queried
+    channel and silently dropped the result."""
+    session.joined_channels.update({"#ops", "#dev"})
+    session.set_current_channel("#ops")
+    # Force `connected=True` on the offline transport so the
+    # query-not-connected guard doesn't short-circuit; the real history
+    # call no-ops on the None writer and returns [] after timeout. We
+    # short the timeout via the connected guard upstream — but here we
+    # want to specifically prove the publish path runs.
+    session._transport.connected = True
+    sub = session.event_bus.subscribe()
+
+    async def fire_history_end() -> list:
+        # Drive the IRC dispatch handler manually so the history Future
+        # resolves immediately rather than waiting QUERY_TIMEOUT.
+        async def fake_send(_line: str) -> None:
+            # `send_raw` is awaited in production, so this stand-in must
+            # be `async` too — even though the body is synchronous.
+            # `asyncio.sleep(0)` yields once so sonarcloud's S7503
+            # ("async without await") sees a real await.
+            await asyncio.sleep(0)
+            session._on_historyend(
+                Message(prefix=None, command="HISTORYEND", params=["#dev", "End"])
+            )
+
+        session._transport.send_raw = fake_send  # type: ignore[assignment]
+        await session.execute(
+            ParsedCommand(type=CommandType.READ, args=["#dev"])
+        )
+        return sub.drain_nowait()
+
+    events = asyncio.run(fire_history_end())
+    sub.close()
+    log_events = [e for e in events if e.name == "log"]
+    assert len(log_events) == 1, (
+        "/read #dev from #ops must still publish one `log` event into "
+        "the active pane"
+    )
+
+
+def test_execute_switch_to_unjoined_channel_errors(session: Session) -> None:
+    """/switch must refuse channels the lens hasn't joined — preserves
+    the invariant that current_channel is always in joined_channels."""
+    session.joined_channels.add("#ops")
+    session.set_current_channel("#ops")
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.execute(ParsedCommand(type=CommandType.SWITCH, args=["#dev"])))
+    events = sub.drain_nowait()
+    sub.close()
+    assert session.current_channel == "#ops"  # unchanged
+    assert any(e.name == "error" for e in events)
+
+
+def test_execute_me_publishes_action_chat(session: Session) -> None:
+    """/me waves → publishes chat event with action styling so the
+    template renders `* nick waves` instead of the standard nick:text."""
+    session.joined_channels.add("#ops")
+    session.set_current_channel("#ops")
+    sub = session.event_bus.subscribe()
+    asyncio.run(
+        session.execute(ParsedCommand(type=CommandType.ME, text="waves"))
+    )
+    events = sub.drain_nowait()
+    sub.close()
+    chat = [e for e in events if e.name == "chat"]
+    assert len(chat) == 1
+    body = chat[0].data
+    # Action lines render as `* nick text` in the template.
+    assert "* lens-test waves" in body
+    assert "lens-chat-line--action" in body
+
+
+def test_execute_me_without_channel_errors(session: Session) -> None:
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.execute(ParsedCommand(type=CommandType.ME, text="waves")))
+    events = sub.drain_nowait()
+    sub.close()
+    assert any(e.name == "error" for e in events)
+
+
+def test_dispatch_ctcp_action_renders_as_action(session: Session) -> None:
+    """Inbound `\\x01ACTION text\\x01` PRIVMSG must surface as an action
+    line, not a literal control-char chat line."""
+    session.set_current_channel("#ops")
+    sub = session.event_bus.subscribe()
+    asyncio.run(
+        session.dispatch(_privmsg("alice!~a@h", "#ops", "\x01ACTION waves\x01"))
+    )
+    events = sub.drain_nowait()
+    sub.close()
+    assert len(events) == 1
+    body = events[0].data
+    assert "* alice waves" in body
+    assert "\x01" not in body  # CTCP wrapper stripped
+    assert "lens-chat-line--action" in body
+
+
+def test_dispatch_ctcp_non_action_dropped(session: Session) -> None:
+    """Other CTCP types (VERSION, PING) are protocol pings — not chat."""
+    session.set_current_channel("#ops")
+    sub = session.event_bus.subscribe()
+    asyncio.run(
+        session.dispatch(_privmsg("alice!~a@h", "#ops", "\x01VERSION\x01"))
+    )
+    events = sub.drain_nowait()
+    sub.close()
+    assert events == []
+
+
 def test_back_to_back_view_switches_publish_one_event_each(session: Session) -> None:
     """Sequence /help → /overview → /status: each switch must emit
     exactly one `view` event + one `info` event. Regression guard

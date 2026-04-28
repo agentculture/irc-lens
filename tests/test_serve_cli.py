@@ -14,6 +14,8 @@ replaces `aiohttp.web.AppRunner`, `aiohttp.web.TCPSite`, and
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from irc_lens.cli import main
@@ -83,7 +85,16 @@ def successful_connect(monkeypatch: pytest.MonkeyPatch):
     async def ok(self) -> None:
         return None
 
+    async def welcomed(self) -> None:
+        # Mocked alongside connect() — without it, the serve command's
+        # `wait_for_welcome` would block on the real welcome Event that
+        # nothing sets (no actual transport here), making every test
+        # that monkeypatches connect() time out. Yields once so the
+        # function isn't a sync-disguised-as-async (sonarcloud S7503).
+        await asyncio.sleep(0)
+
     monkeypatch.setattr("irc_lens.session.Session.connect", ok)
+    monkeypatch.setattr("irc_lens.session.Session.wait_for_welcome", welcomed)
 
 
 # ---------------------------------------------------------------------------

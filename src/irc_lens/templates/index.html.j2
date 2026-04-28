@@ -24,9 +24,11 @@
 
       <section class="lens-chat">
         <div data-testid="chat-log" id="chat-log" class="lens-log">
-          {% for msg in session.buffer.read(session.current_channel, limit=200) if session.current_channel %}
-            {% include "_chat_line.html.j2" %}
-          {% endfor %}
+          {# Initial page render: server-fetched HISTORY for current_channel
+             arrives pre-rendered as `chat_log_html`. Live messages keep
+             arriving via SSE `chat` events. Page reloads re-fetch fresh
+             history from the IRCd's SQLite store. #}
+          {{ chat_log_html|safe }}
         </div>
         <form id="chat-form" class="lens-form" hx-post="/input" hx-trigger="submit" hx-swap="none">
           <input
