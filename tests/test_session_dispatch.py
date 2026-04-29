@@ -705,6 +705,10 @@ def test_execute_serializes_concurrent_invocations(session: Session) -> None:
         order.append("first:exit")
 
     async def fast_second(_parsed: ParsedCommand) -> None:
+        # `asyncio.sleep(0)` keeps sonarcloud's S7503 ("async without
+        # await") quiet without changing semantics — same trick as
+        # `_stub_async_return` above.
+        await asyncio.sleep(0)
         order.append("second:enter")
         order.append("second:exit")
 
@@ -765,6 +769,8 @@ def test_execute_lock_rebinds_across_event_loops(session: Session) -> None:
             await release_first.wait()
 
         async def fast_second(_parsed: ParsedCommand) -> None:
+            # See note in test_execute_serializes_concurrent_invocations.
+            await asyncio.sleep(0)
             order.append("b")
 
         session._exec_help = slow_first  # type: ignore[assignment]
