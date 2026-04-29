@@ -683,3 +683,63 @@ def test_channels_drops_publish_when_view_changed_during_query(
     assert names == [], (
         f"late LIST completion must publish nothing once view changed; got {names}"
     )
+
+
+def test_execute_serializes_concurrent_invocations(session: Session) -> None:
+    """Issue #22: two concurrent ``Session.execute()`` calls on the same
+    session must run in submission order, not interleave. Without
+    ``self._exec_lock``, the second verb's body could enter while the
+    first is still awaiting I/O — observable as out-of-order
+    side-effects on view/current_channel/roster from the same lens
+    client. Substitutes two verb helpers with ordering recorders so the
+    test stays focused on the dispatch lock, not specific verb logic."""
+
+    order: list[str] = []
+    first_inside = asyncio.Event()
+    release_first = asyncio.Event()
+
+    async def slow_first(_parsed: ParsedCommand) -> None:
+        order.append("first:enter")
+        first_inside.set()
+        await release_first.wait()
+        order.append("first:exit")
+
+    async def fast_second(_parsed: ParsedCommand) -> None:
+        order.append("second:enter")
+        order.append("second:exit")
+
+    # Substitute two existing verbs with our trackers. The
+    # `_exec_dispatch` property re-reads `self._exec_*` on each call,
+    # so an instance-level override wins over the bound method.
+    session._exec_channels = slow_first  # type: ignore[assignment]
+    session._exec_help = fast_second  # type: ignore[assignment]
+
+    async def run() -> None:
+        first = asyncio.create_task(
+            session.execute(ParsedCommand(type=CommandType.CHANNELS))
+        )
+        # Wait until the first verb has actually entered the lock.
+        await first_inside.wait()
+        # Schedule the second; under the lock it must block on
+        # `_exec_lock` until the first releases.
+        second = asyncio.create_task(
+            session.execute(ParsedCommand(type=CommandType.HELP))
+        )
+        # Yield twice to give the loop a chance to (incorrectly) start
+        # the second verb if the lock weren't there.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        assert "second:enter" not in order, (
+            f"second verb entered while first was still awaiting; order={order}"
+        )
+        release_first.set()
+        await asyncio.gather(first, second)
+
+    asyncio.run(run())
+
+    assert order == [
+        "first:enter",
+        "first:exit",
+        "second:enter",
+        "second:exit",
+    ], f"verbs did not run in submission order: {order}"

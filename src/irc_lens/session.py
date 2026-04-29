@@ -285,6 +285,16 @@ class Session:
         # WHO #b) don't block each other.
         self._query_locks: dict[str, asyncio.Lock] = {}
 
+        # Per-session dispatch lock. Serialises Session.execute() so two
+        # POST /input handlers against the same lens cannot interleave
+        # their verb logic. Without this, any verb that awaits I/O
+        # (LIST, WHO, HISTORY, ...) can yield to a concurrent verb that
+        # mutates view/current_channel/joined_channels/roster, producing
+        # out-of-order observable side effects. Issue #22.
+        # Distinct from `_query_locks` above, which de-conflicts
+        # collect-buffers for IRC numerics carrying no query-id.
+        self._exec_lock = asyncio.Lock()
+
         # Event bus: Phase 5 will wire publishes; Phase 3 just holds it.
         self.event_bus = event_bus if event_bus is not None else SessionEventBus()
 
@@ -478,9 +488,14 @@ class Session:
         layer can translate it to HTTP 503; ``UNKNOWN`` and
         unsupported-yet types publish an ``error`` event and return
         normally — typing ``/foo`` should never crash a browser session.
+
+        The body runs under ``self._exec_lock`` so two concurrent
+        ``POST /input`` handlers against the same Session execute in
+        submission order rather than interleaving (issue #22).
         """
-        handler = self._exec_dispatch.get(parsed.type, self._exec_unsupported)
-        await handler(parsed)
+        async with self._exec_lock:
+            handler = self._exec_dispatch.get(parsed.type, self._exec_unsupported)
+            await handler(parsed)
 
     @property
     def _exec_dispatch(self) -> dict[CommandType, Any]:
