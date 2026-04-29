@@ -293,7 +293,14 @@ class Session:
         # out-of-order observable side effects. Issue #22.
         # Distinct from `_query_locks` above, which de-conflicts
         # collect-buffers for IRC numerics carrying no query-id.
-        self._exec_lock = asyncio.Lock()
+        # Lazy + loop-bound: asyncio.Lock binds to the first event loop
+        # that contends it and raises on a different loop. Tests drive
+        # one Session via repeated asyncio.run(...) calls (fresh loop
+        # each), so we re-create the lock when the running loop changes
+        # — see _get_exec_lock(). In production aiohttp runs one loop
+        # for the server's lifetime, so this branch fires once.
+        self._exec_lock: asyncio.Lock | None = None
+        self._exec_lock_loop: asyncio.AbstractEventLoop | None = None
 
         # Event bus: Phase 5 will wire publishes; Phase 3 just holds it.
         self.event_bus = event_bus if event_bus is not None else SessionEventBus()
@@ -479,6 +486,21 @@ class Session:
     # Command execution + inbound dispatch (Phase 5 SSE wiring)
     # ------------------------------------------------------------------
 
+    def _get_exec_lock(self) -> asyncio.Lock:
+        """Per-running-loop dispatch lock. ``asyncio.Lock`` binds to the
+        first event loop that contends it (see ``_LoopBoundMixin``) and
+        raises ``RuntimeError`` on later loops. Tests drive one
+        ``Session`` via repeated ``asyncio.run(...)`` calls — each
+        spawns a fresh loop — so contended use across calls would
+        crash without this reset. Production hits the rebind branch
+        exactly once, when aiohttp's loop first contends the lock.
+        """
+        loop = asyncio.get_running_loop()
+        if self._exec_lock is None or self._exec_lock_loop is not loop:
+            self._exec_lock = asyncio.Lock()
+            self._exec_lock_loop = loop
+        return self._exec_lock
+
     async def execute(self, parsed: ParsedCommand) -> None:
         """Dispatch a `ParsedCommand` from `POST /input`.
 
@@ -489,11 +511,11 @@ class Session:
         unsupported-yet types publish an ``error`` event and return
         normally — typing ``/foo`` should never crash a browser session.
 
-        The body runs under ``self._exec_lock`` so two concurrent
+        The body runs under a per-loop dispatch lock so two concurrent
         ``POST /input`` handlers against the same Session execute in
         submission order rather than interleaving (issue #22).
         """
-        async with self._exec_lock:
+        async with self._get_exec_lock():
             handler = self._exec_dispatch.get(parsed.type, self._exec_unsupported)
             await handler(parsed)
 

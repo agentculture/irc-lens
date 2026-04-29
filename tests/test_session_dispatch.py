@@ -743,3 +743,48 @@ def test_execute_serializes_concurrent_invocations(session: Session) -> None:
         "second:enter",
         "second:exit",
     ], f"verbs did not run in submission order: {order}"
+
+
+def test_execute_lock_rebinds_across_event_loops(session: Session) -> None:
+    """Issue #22 follow-up (Qodo + Copilot review): tests drive one
+    Session via repeated ``asyncio.run(...)`` calls — each spawns a
+    fresh event loop. ``asyncio.Lock`` binds to the first loop that
+    contends it and raises ``RuntimeError`` on later loops. The
+    per-loop rebind in ``Session._get_exec_lock`` keeps cross-loop
+    drives safe; this test contends the lock in *both* loops to
+    exercise the rebind path (the bug only fires under contention)."""
+
+    async def contend() -> list[str]:
+        order: list[str] = []
+        first_inside = asyncio.Event()
+        release_first = asyncio.Event()
+
+        async def slow_first(_parsed: ParsedCommand) -> None:
+            order.append("a")
+            first_inside.set()
+            await release_first.wait()
+
+        async def fast_second(_parsed: ParsedCommand) -> None:
+            order.append("b")
+
+        session._exec_help = slow_first  # type: ignore[assignment]
+        session._exec_overview = fast_second  # type: ignore[assignment]
+
+        first = asyncio.create_task(
+            session.execute(ParsedCommand(type=CommandType.HELP))
+        )
+        await first_inside.wait()
+        second = asyncio.create_task(
+            session.execute(ParsedCommand(type=CommandType.OVERVIEW))
+        )
+        # Yield twice so the second task has a chance to contend.
+        await asyncio.sleep(0)
+        await asyncio.sleep(0)
+        release_first.set()
+        await asyncio.gather(first, second)
+        return order
+
+    assert asyncio.run(contend()) == ["a", "b"]
+    # Same Session, fresh loop, contended again. Without the rebind
+    # this would raise: "Lock is bound to a different event loop".
+    assert asyncio.run(contend()) == ["a", "b"]
