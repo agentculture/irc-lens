@@ -16,6 +16,7 @@ import argparse
 import sys
 
 from irc_lens import __version__
+from irc_lens.cli._commands import config_cmd as _config_cmd
 from irc_lens.cli._commands import explain as _explain_cmd
 from irc_lens.cli._commands import learn as _learn_cmd
 from irc_lens.cli._commands import overview as _overview_cmd
@@ -98,6 +99,8 @@ def _build_parser() -> argparse.ArgumentParser:
     # `irc-lens cli` with no verb prints the noun's own help instead of
     # raising AttributeError out of _dispatch.
     cli_noun.set_defaults(func=lambda _args: (cli_noun.print_help() or 0))
+
+    _config_cmd.register(sub)
 
     return parser
 
