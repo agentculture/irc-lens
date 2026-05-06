@@ -43,6 +43,16 @@ def _err(message: str, hint: str) -> AfiError:
     return AfiError(code=EXIT_USER_ERROR, message=message, remediation=hint)
 
 
+def _coerce_port(value: object, where: str) -> int:
+    try:
+        return int(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        raise _err(
+            f"{where} must be an integer, got {value!r}",
+            f"set `{where}:` to a port number like 6667 or 8765",
+        ) from None
+
+
 def _require(d: dict, key: str, where: str) -> object:
     if key not in d:
         raise _err(
@@ -129,13 +139,13 @@ def load_config(path: Path) -> LensConfig:
         raise _err("server: must be a mapping", "see docs/cli.md")
     server_name = str(_require(server, "name", "server"))
     server_host = str(server.get("host", "127.0.0.1"))
-    server_port = int(server.get("port", 6667))
+    server_port = _coerce_port(server.get("port", 6667), "server.port")
 
     web = raw.get("web", {}) or {}
     if not isinstance(web, dict):
         raise _err("web: must be a mapping", "see docs/cli.md")
     web_bind = str(web.get("bind", "127.0.0.1"))
-    web_port = int(web.get("port", 8765))
+    web_port = _coerce_port(web.get("port", 8765), "web.port")
 
     return LensConfig(
         auth_mode=mode,

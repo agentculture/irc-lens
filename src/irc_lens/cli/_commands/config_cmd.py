@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from irc_lens.cli._errors import EXIT_USER_ERROR, AfiError
+from irc_lens.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
 from irc_lens.cli._output import emit_diagnostic
 from irc_lens.config import default_config_path
 
@@ -41,8 +41,15 @@ def cmd_config_init(args: argparse.Namespace) -> int:
             message=f"config already exists at {target}",
             remediation="pass --force to overwrite, or pick a different --path",
         )
-    target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(_STARTER)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(_STARTER)
+    except OSError as exc:
+        raise AfiError(
+            code=EXIT_ENV_ERROR,
+            message=f"could not write config to {target}: {exc}",
+            remediation="check directory permissions or pick a different --path",
+        ) from exc
     emit_diagnostic(f"wrote starter config to {target}")
     return 0
 

@@ -107,6 +107,39 @@ def test_malformed_yaml_errors(tmp_path: Path) -> None:
     assert "YAML" in exc.value.message or "parse" in exc.value.message
 
 
+def test_invalid_port_errors(tmp_path: Path) -> None:
+    with pytest.raises(AfiError) as exc:
+        load_config(_write(tmp_path, """
+auth:
+  mode: dev
+  dev:
+    nick: lens
+    email: dev@local
+server:
+  name: spark
+  port: not-a-number
+"""))
+    assert exc.value.code == EXIT_USER_ERROR
+    assert "server.port" in exc.value.message
+    assert "integer" in exc.value.message
+
+
+def test_invalid_web_port_errors(tmp_path: Path) -> None:
+    with pytest.raises(AfiError) as exc:
+        load_config(_write(tmp_path, """
+auth:
+  mode: dev
+  dev:
+    nick: lens
+    email: dev@local
+server:
+  name: spark
+web:
+  port: nope
+"""))
+    assert "web.port" in exc.value.message
+
+
 def test_empty_allowed_emails_errors_in_cf_mode(tmp_path: Path) -> None:
     with pytest.raises(AfiError) as exc:
         load_config(_write(tmp_path, """
