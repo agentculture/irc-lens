@@ -59,10 +59,13 @@ _SECTIONS: dict[str, list[dict[str, object]]] = {
             "heading": "Nouns",
             "body_md": (
                 "- `cli` — meta-introspection of the CLI surface itself; "
-                "exposes `overview`."
+                "exposes `overview`.\n"
+                "- `config` — manage the lens config file; exposes "
+                "`init` and `overview`."
             ),
             "findings": [
                 {"noun": "cli", "verbs": ["overview"]},
+                {"noun": "config", "verbs": ["init", "overview"]},
             ],
         },
     ],
@@ -76,6 +79,20 @@ _SECTIONS: dict[str, list[dict[str, object]]] = {
             ),
             "findings": [
                 {"verb": "overview", "summary": "Rollup of the CLI surface."},
+            ],
+        },
+    ],
+    "config": [
+        {
+            "heading": "irc-lens config",
+            "body_md": (
+                "The `config` noun manages the lens YAML config file at "
+                "`~/.config/irc-lens/config.yaml` (XDG_CONFIG_HOME respected). "
+                "`init` writes a starter dev-mode file; `overview` prints help."
+            ),
+            "findings": [
+                {"verb": "init", "summary": "Write a starter dev-mode config."},
+                {"verb": "overview", "summary": "Help for the config noun."},
             ],
         },
     ],
