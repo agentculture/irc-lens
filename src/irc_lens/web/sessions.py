@@ -28,6 +28,9 @@ class SessionRegistry:
     def __init__(self, factory: SessionFactory) -> None:
         self._factory = factory
         self._sessions: dict[str, Any] = {}
+        # TODO(phase-3): evict stale locks after a session disconnects.
+        # In Phase 2 there is one principal (the dev identity); in CF mode
+        # an unbounded set of principals could each leave a lock behind.
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     def __contains__(self, principal: str) -> bool:

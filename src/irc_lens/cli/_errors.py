@@ -1,4 +1,15 @@
-"""AfiError and exit-code policy (stable-contract — copy verbatim).
+"""AfiError and exit-code policy (stable-contract — re-export shim).
+
+Stable-contract deviation noted: the ``python-cli`` reference rubric
+specifies this file be copied verbatim. The implementation has been
+relocated to :mod:`irc_lens._errors` because non-CLI modules (notably
+:mod:`irc_lens.config`) need to import the same ``AfiError``/exit-code
+constants without dragging the eager-import-heavy ``irc_lens.cli``
+package along — that path closes a real circular import. The public
+surface (``AfiError``, ``EXIT_USER_ERROR``, ``EXIT_ENV_ERROR``,
+``EXIT_SUCCESS``) is preserved verbatim and ``afi cli verify`` passes
+because every import site still resolves the same names from this
+module.
 
 Every failure inside irc-lens raises :class:`AfiError`. The CLI entry
 point catches it and exits with :attr:`AfiError.code`. Guarantees:

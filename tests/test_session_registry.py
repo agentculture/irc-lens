@@ -104,6 +104,28 @@ async def test_failed_open_does_not_register() -> None:
 
 
 @pytest.mark.asyncio
+async def test_register_short_circuits_get_or_open() -> None:
+    """register() pre-seeds; subsequent get_or_open MUST NOT call factory/connect."""
+    factory, created = _fake_session_factory()
+    reg = SessionRegistry(factory=factory)
+    pre_session = MagicMock()
+    pre_session.connect = AsyncMock()
+    pre_session.wait_for_welcome = AsyncMock()
+
+    reg.register("alice@example.com", pre_session)
+
+    ident = Identity(principal="alice@example.com", nick="spark-alice", raw_jwt_subject="s")
+    s = await reg.get_or_open(ident)
+
+    assert s is pre_session
+    pre_session.connect.assert_not_awaited()
+    pre_session.wait_for_welcome.assert_not_awaited()
+    assert created == []                     # factory never invoked
+    assert "alice@example.com" in reg
+    assert pre_session in reg.values()
+
+
+@pytest.mark.asyncio
 async def test_disconnect_all_calls_each_session() -> None:
     factory, created = _fake_session_factory()
     reg = SessionRegistry(factory=factory)
