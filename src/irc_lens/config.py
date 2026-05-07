@@ -39,6 +39,11 @@ def default_config_path() -> Path:
     return Path(base) / "irc-lens" / "config.yaml"
 
 
+# Reused remediation hint — extracted so SonarCloud S1192 (duplicate-literal)
+# stays quiet and so the wording stays consistent across every shape error.
+_HINT_CONFIG_INIT = "run `irc-lens config init` to see a working example"
+
+
 def _err(message: str, hint: str) -> AfiError:
     return AfiError(code=EXIT_USER_ERROR, message=message, remediation=hint)
 
@@ -102,7 +107,7 @@ def _load_dev_fields(auth: dict) -> tuple[str, str]:
     if not isinstance(dev, dict):
         raise _err(
             "auth.dev must be a mapping",
-            "run `irc-lens config init` to see a working example",
+            _HINT_CONFIG_INIT,
         )
     dev_nick = str(_require(dev, "nick", "auth.dev"))
     dev_email = str(_require(dev, "email", "auth.dev"))
@@ -117,7 +122,7 @@ def _load_cf_fields(
     if not isinstance(cf, dict):
         raise _err(
             "auth.cloudflare must be a mapping",
-            "run `irc-lens config init` to see a working example",
+            _HINT_CONFIG_INIT,
         )
     cf_aud = str(_require(cf, "aud", "auth.cloudflare"))
     cf_team_domain = str(_require(cf, "team_domain", "auth.cloudflare"))
@@ -164,7 +169,7 @@ def _validate_auth_section(raw: dict) -> dict:
     if not isinstance(auth, dict):
         raise _err(
             "auth: must be a mapping",
-            "run `irc-lens config init` to see a working example",
+            _HINT_CONFIG_INIT,
         )
     mode = _require(auth, "mode", "auth")
     if mode not in _AUTH_MODES:
@@ -181,7 +186,7 @@ def _validate_server_section(raw: dict) -> tuple[str, str, int]:
     if not isinstance(server, dict):
         raise _err(
             "server: must be a mapping",
-            "run `irc-lens config init` to see a working example",
+            _HINT_CONFIG_INIT,
         )
     server_name = str(_require(server, "name", "server"))
     server_host = str(server.get("host", "127.0.0.1"))
@@ -197,7 +202,7 @@ def _validate_web_section(raw: dict) -> tuple[str, int]:
     elif not isinstance(web_raw, dict):
         raise _err(
             "web: must be a mapping",
-            "run `irc-lens config init` to see a working example",
+            _HINT_CONFIG_INIT,
         )
     else:
         web = web_raw
@@ -221,7 +226,7 @@ def load_config(path: Path) -> LensConfig:
     except yaml.YAMLError as exc:
         raise _err(
             f"could not parse YAML in {path}: {exc}",
-            "fix the YAML syntax; run `irc-lens config init` to see a working example",
+            f"fix the YAML syntax; {_HINT_CONFIG_INIT}",
         ) from exc
     except OSError as exc:
         raise _err_env(
