@@ -243,3 +243,27 @@ without verifying the SSE event-listener API still matches what
 * [`CITATION.md`](../CITATION.md) — culture citations + divergences.
 * [`docs/superpowers/specs/2026-04-27-irc-lens-handover-design.md`](superpowers/specs/2026-04-27-irc-lens-handover-design.md) — spec.
 * [`docs/superpowers/plans/2026-04-27-irc-lens-build-plan.md`](superpowers/plans/2026-04-27-irc-lens-build-plan.md) — build plan.
+
+## Deployment modes
+
+irc-lens has two operational modes selected by `auth.mode` in the config:
+
+### `dev` mode
+
+A single `Session` opens at startup against the configured AgentIRC
+on `auth.dev.nick`. The identity middleware injects a synthetic
+`Identity` for every request. Existing tests run in this mode.
+
+### `cloudflare-access` mode
+
+Each authenticated user gets their own lazy-opened `Session` with a
+nick derived from their email's local part (sanitized to
+`[a-z0-9-]`). The identity middleware validates the
+Cloudflare-issued JWT against the team's JWKS, pins audience and
+issuer, and enforces the lens-side allowlist as a second line of
+defense behind the Cloudflare Access policy. JWKS is cached
+in-process with kid-miss-then-refresh semantics.
+
+The lens never opens an inbound port in CF mode; cloudflared
+terminates the tunnel locally and the lens listens on
+`127.0.0.1:<web.port>`.

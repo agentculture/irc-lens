@@ -223,3 +223,7 @@ __marimo__/
 # Per-user Claude Code config (settings, scheduled tasks, project-local
 # skills, etc. — none of these belong in the repo).
 .claude/
+
+# CF round-trip service-token secret (written by scripts/cf-roundtrip/setup.sh)
+.cf-roundtrip.env
+.cf-roundtrip.env.*
