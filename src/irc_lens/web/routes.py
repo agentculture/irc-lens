@@ -44,6 +44,13 @@ _UNHEALTHY_HINT = (
 )
 
 
+async def _resolve_session(request: web.Request):
+    """Look up (or lazily open) the Session for this request's identity."""
+    identity = request["identity"]
+    registry = request.app["registry"]
+    return await registry.get_or_open(identity)
+
+
 def _too_large() -> web.Response:
     return web.json_response(
         {"error": "input too large", "hint": f"max {_MAX_INPUT_BODY} bytes"},
@@ -66,7 +73,7 @@ async def get_index(request: web.Request) -> web.Response:
     in SQLite and the query is cheap; on timeout or transport failure we
     degrade to an empty log rather than 500ing the page.
     """
-    session = request.app["session"]
+    session = await _resolve_session(request)
     # `chat_log_html=None` lets `render_index` fall back to the
     # `MessageBuffer` — which is the seed-loader path. We only override
     # to a string when the live IRCd query actually ran, so `--seed`
@@ -134,7 +141,7 @@ async def post_input(request: web.Request) -> web.Response:
     if request.content_length is not None and request.content_length > _MAX_INPUT_BODY:
         return _too_large()
 
-    session = request.app["session"]
+    session = await _resolve_session(request)
     # Health gate before parsing: once the AgentIRC pipe is gone, the
     # spec mandates 503 on subsequent input rather than silently
     # no-oping (which is what `IRCTransport.send_raw` would do — its
@@ -158,7 +165,7 @@ async def post_input(request: web.Request) -> web.Response:
 
 async def get_events(request: web.Request) -> web.StreamResponse:
     """SSE stream — drains ``Session.event_bus`` until the client leaves."""
-    session = request.app["session"]
+    session = await _resolve_session(request)
     sub = session.event_bus.subscribe()
     response = web.StreamResponse(
         status=200,
@@ -189,3 +196,14 @@ async def get_events(request: web.Request) -> web.StreamResponse:
     finally:
         sub.close()
     return response
+
+
+async def get_healthz(_request: web.Request) -> web.Response:  # NOSONAR S7503
+    """Opaque health probe. No auth, no IRC state, no allowlist leak.
+
+    The body is sync but the signature must be ``async def`` —
+    aiohttp's router only accepts coroutine handlers. Sonar's S7503
+    ("use async features or remove the keyword") doesn't know about
+    that constraint; the inline ``# NOSONAR S7503`` silences it.
+    """
+    return web.json_response({"ok": True})

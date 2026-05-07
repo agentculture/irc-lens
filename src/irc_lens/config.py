@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from irc_lens.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
+from irc_lens._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
 
 _AUTH_MODES = ("dev", "cloudflare-access")
 

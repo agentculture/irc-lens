@@ -35,8 +35,10 @@ from aiohttp import web
 
 from irc_lens.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
 from irc_lens.cli._output import emit_diagnostic
+from irc_lens.config import LensConfig
 from irc_lens.session import LensConnectionLost, Session
 from irc_lens.web import make_app
+from irc_lens.web.sessions import disconnect_all
 
 # `irc_lens.seed` is imported function-locally inside `_serve_async`
 # to avoid a real-but-latent module-load cycle:
@@ -161,7 +163,32 @@ async def _serve_async(args: argparse.Namespace) -> None:
             await session.disconnect()
             raise
 
-    app = make_app(session)
+    # Build a dev-mode LensConfig from the CLI args so make_app gets
+    # the full Phase 2 signature. serve.py doesn't load a config file
+    # yet (Phase 4/5 will add --config support); construct the minimum
+    # viable LensConfig here so the factory wiring works today.
+    dev_email = f"{args.nick}@local"
+    config = LensConfig(
+        auth_mode="dev",
+        dev_nick=args.nick,
+        dev_email=dev_email,
+        cf_aud=None,
+        cf_team_domain=None,
+        allowed_emails=(),
+        allowed_service_tokens=(),
+        server_name="lens",
+        server_host=args.host,
+        server_port=args.port,
+        web_bind=args.bind,
+        web_port=args.web_port,
+    )
+    # Factory creates sessions for new principals; the already-connected
+    # CLI session is pre-seeded into the registry below (avoids re-connecting).
+    app = make_app(config, lambda nick: Session(host=args.host, port=args.port, nick=nick))
+    # Pre-seed the registry with the already-connected session so the
+    # dev-mode middleware's fixed identity (dev_email) resolves it
+    # immediately on the first request without calling connect() twice.
+    app["registry"].register(dev_email, session)
     runner = web.AppRunner(app, handle_signals=True)
     await runner.setup()
     site = web.TCPSite(runner, host=args.bind, port=args.web_port)
@@ -193,7 +220,11 @@ async def _serve_async(args: argparse.Namespace) -> None:
     try:
         await asyncio.Event().wait()
     finally:
-        await session.disconnect()
+        # Disconnect every registered Session, not just the pre-seeded one;
+        # Phase 3 will add lazily-opened per-user sessions, and this single
+        # call covers them too (return_exceptions=True so one failure doesn't
+        # strand the others).
+        await disconnect_all(app["registry"])
         await runner.cleanup()
 
 

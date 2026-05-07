@@ -13,7 +13,8 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from irc_lens.session import EntityItem, Session
-from irc_lens.web import make_app
+
+from helpers import DEV_CONFIG as _DEV_CONFIG, make_app_for as _make_app_for
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +29,7 @@ def session() -> Session:
 
 @pytest.fixture
 async def client(session: Session) -> TestClient:
-    app = make_app(session)
+    app = _make_app_for(session)
     server = TestServer(app)
     async with TestClient(server) as c:
         yield c
@@ -85,7 +86,7 @@ async def test_get_index_renders_sidebar_state(session: Session) -> None:
     session.set_current_channel("#ops")
     session.set_roster([EntityItem(nick="alice", type="human")])
 
-    app = make_app(session)
+    app = _make_app_for(session)
     async with TestClient(TestServer(app)) as c:
         body = await (await c.get("/")).text()
     assert 'data-testid="sidebar-channel"' in body
@@ -214,16 +215,24 @@ async def test_static_brand_assets_served(
 # ---------------------------------------------------------------------------
 
 
-def test_make_app_stashes_session(session: Session) -> None:
-    app = make_app(session)
-    assert app["session"] is session
+def test_make_app_stashes_registry_and_config(session: Session) -> None:
+    app = _make_app_for(session)
+    # Phase 2: app no longer stashes the session directly; it stashes the
+    # registry and config instead. The pre-seeded session is reachable via
+    # the registry.
+    assert "registry" in app
+    assert "config" in app
+    assert _DEV_CONFIG.dev_email in app["registry"]
+    # `values()` returns a list; the pre-seeded session is the only one.
+    assert session in app["registry"].values()
 
 
 def test_make_app_registers_expected_routes(session: Session) -> None:
-    app = make_app(session)
+    app = _make_app_for(session)
     paths = {(r.method, r.resource.canonical) for r in app.router.routes()}
     assert ("GET", "/") in paths
     assert ("POST", "/input") in paths
     assert ("GET", "/events") in paths
+    assert ("GET", "/healthz") in paths
     # Static is a prefix-mounted resource; check by name.
     assert any(r.name == "static" for r in app.router.resources() if r.name)

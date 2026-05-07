@@ -23,8 +23,9 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from irc_lens.commands import ParsedCommand
 from irc_lens.session import LensConnectionLost, Session, SessionEvent
-from irc_lens.web import make_app
 from irc_lens.web.events import format_sse
+
+from helpers import DEV_CONFIG as _DEV_CONFIG, make_app_for as _make_app_for
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +40,7 @@ def session() -> Session:
 
 @pytest.fixture
 async def client(session: Session) -> TestClient:
-    app = make_app(session)
+    app = _make_app_for(session)
     server = TestServer(app)
     async with TestClient(server) as c:
         yield c
@@ -125,7 +126,7 @@ async def test_post_input_503_on_lens_connection_lost(
         raise LensConnectionLost("broken pipe")
 
     monkeypatch.setattr(session, "execute", boom)
-    app = make_app(session)
+    app = _make_app_for(session)
     async with TestClient(TestServer(app)) as c:
         resp = await c.post("/input", json={"text": "/join #x"})
         assert resp.status == 503
@@ -218,7 +219,7 @@ async def test_post_input_503_when_session_unhealthy(
 
     monkeypatch.setattr(session, "execute", should_not_run)
 
-    app = make_app(session)
+    app = _make_app_for(session)
     async with TestClient(TestServer(app)) as c:
         resp = await c.post("/input", json={"text": "/join #ops"})
         assert resp.status == 503
