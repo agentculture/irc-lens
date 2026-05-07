@@ -132,3 +132,22 @@ async def seeded_lens_client(
     apply_seed(lens_session, _BASIC_SEED)
     async for client in _serve_lens(lens_session, agentirc_server.host, agentirc_server.port):
         yield client
+
+
+# ---------------------------------------------------------------------------
+# CF Access fixtures (shared across test_auth_middleware + test_audit_log)
+# ---------------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def jwks() -> AsyncIterator["FakeJWKS"]:
+    """An in-tree FakeJWKS server bound to a random port. See
+    `tests/_jwks_server.py` for the full surface."""
+    from _jwks_server import FakeJWKS
+
+    j = FakeJWKS()
+    await j.start()
+    try:
+        yield j
+    finally:
+        await j.stop()
