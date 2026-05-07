@@ -98,8 +98,8 @@ on `127.0.0.1:6667`. To deploy behind Cloudflare Access, switch
 In `auth.mode: dev`, `--nick` overrides `auth.dev.nick`. In
 `auth.mode: cloudflare-access`, passing `--nick` is a hard error: the
 nick is derived per authenticated user from `auth.allowed_emails`.
-A non-loopback `--bind` (or `web.bind`) under CF mode is silently
-coerced to `127.0.0.1` because cloudflared terminates locally.
+A non-loopback `--bind` (or `web.bind`) under CF mode is coerced to
+`127.0.0.1` with a `WARNING` log line, because cloudflared terminates locally.
 
 ## `irc-lens serve`
 

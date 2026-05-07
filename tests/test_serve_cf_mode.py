@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 import pytest
 
@@ -39,6 +40,20 @@ def test_bind_coerced_to_loopback_in_cf_mode(caplog) -> None:
     cfg = _cf_config()
     with caplog.at_level(logging.WARNING):
         coerced = _validate_cli_against_config(cfg, nick=None, bind="0.0.0.0")
+    assert coerced.web_bind == "127.0.0.1"
+    assert any("coerced" in r.getMessage().lower() for r in caplog.records)
+
+
+def test_config_bind_coerced_when_no_cli_flag_in_cf_mode(caplog) -> None:
+    """Config web_bind is non-loopback, no CLI --bind: still coerced.
+
+    Mirrors the explicit-CLI-flag case but proves the coercion fires
+    when the operator misconfigures `web.bind: 0.0.0.0` in YAML and
+    omits the CLI flag entirely.
+    """
+    cfg = replace(_cf_config(), web_bind="0.0.0.0")
+    with caplog.at_level(logging.WARNING):
+        coerced = _validate_cli_against_config(cfg, nick=None, bind=None)
     assert coerced.web_bind == "127.0.0.1"
     assert any("coerced" in r.getMessage().lower() for r in caplog.records)
 
