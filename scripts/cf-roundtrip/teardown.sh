@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Remove every resource setup.sh creates. Idempotent (404s ignored).
+set -euo pipefail
+
+: "${CF_API_TOKEN:?}"
+: "${CF_ACCOUNT_ID:?}"
+: "${CF_ZONE_ID:?}"
+: "${CF_TEST_HOSTNAME:?}"
+
+BASE="https://api.cloudflare.com/client/v4"
+HDR=(-H "Authorization: Bearer $CF_API_TOKEN")
+
+cf_del() { curl -sS "${HDR[@]}" -X DELETE "$BASE$1" || true; }
+cf_get() { curl -sS "${HDR[@]}" "$BASE$1"; }
+
+# Service token
+TOK_ID="$(cf_get "/accounts/$CF_ACCOUNT_ID/access/service_tokens" \
+  | jq -r '.result[] | select(.name=="irc-lens-roundtrip") | .id' | head -1)"
+[[ -n "$TOK_ID" ]] && cf_del "/accounts/$CF_ACCOUNT_ID/access/service_tokens/$TOK_ID"
+
+# Access app
+APP_ID="$(cf_get "/accounts/$CF_ACCOUNT_ID/access/apps?name=irc-lens%20roundtrip" \
+  | jq -r '.result[0].id // empty')"
+[[ -n "$APP_ID" ]] && cf_del "/accounts/$CF_ACCOUNT_ID/access/apps/$APP_ID"
+
+# DNS
+DNS_ID="$(cf_get "/zones/$CF_ZONE_ID/dns_records?name=$CF_TEST_HOSTNAME" \
+  | jq -r '.result[0].id // empty')"
+[[ -n "$DNS_ID" ]] && cf_del "/zones/$CF_ZONE_ID/dns_records/$DNS_ID"
+
+# Tunnel
+TUN_ID="$(cf_get "/accounts/$CF_ACCOUNT_ID/cfd_tunnel?name=irc-lens-roundtrip" \
+  | jq -r '.result[0].id // empty')"
+[[ -n "$TUN_ID" ]] && cf_del "/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$TUN_ID"
+
+rm -f "${HOME}/.config/irc-lens/cf-roundtrip-token.json"
+echo "teardown complete" >&2
