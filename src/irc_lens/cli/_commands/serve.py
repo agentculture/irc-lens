@@ -1,9 +1,16 @@
 """``irc-lens serve`` — launch the aiohttp web console.
 
-Phase 4 ships the skeleton: parse flags, construct ``Session``,
-fail-fast on connect, then ``aiohttp.web.run_app``. The Phase 5 wiring
-(SSE bus, parser dispatch on POST /input) is invisible from here —
-``make_app`` just gets a richer Session.
+Loads a ``LensConfig`` from ``--config`` (or ``default_config_path()`` if
+it exists). When no config file is found, falls back to building a synthetic
+dev ``LensConfig`` from the CLI args — this preserves backward compatibility
+with the existing ``irc-lens serve --nick lens`` invocation. Phase 4 (T4.4)
+makes the config file required.
+
+In ``auth.mode: dev``, opens one Session at startup against the configured
+AgentIRC and pre-seeds the registry. In ``auth.mode: cloudflare-access``,
+warms the JWKS endpoint at startup (fail-fast on unreachable Cloudflare →
+``EXIT_ENV_ERROR``) and lazy-opens per-user Sessions on first authenticated
+request.
 
 Spec contract enforced:
 
@@ -35,10 +42,11 @@ from aiohttp import web
 
 from irc_lens.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
 from irc_lens.cli._output import emit_diagnostic
-from irc_lens.config import LensConfig
+from irc_lens.config import LensConfig, default_config_path, load_config
 from irc_lens.session import LensConnectionLost, Session
 from irc_lens.web import make_app
-from irc_lens.web.sessions import disconnect_all
+from irc_lens.web.auth import warm_jwks
+from irc_lens.web.sessions import SessionFactory, disconnect_all
 
 # `irc_lens.seed` is imported function-locally inside `_serve_async`
 # to avoid a real-but-latent module-load cycle:
@@ -103,22 +111,83 @@ def _display_url(bind: str, port: int) -> str:
     return f"http://{host}:{port}/"
 
 
-async def _serve_async(args: argparse.Namespace) -> None:
-    """Run connect → bind → forever inside one event loop.
+def _build_dev_config_from_args(args: argparse.Namespace) -> LensConfig:
+    """Build a synthetic dev-mode ``LensConfig`` from the CLI arguments.
 
-    Doing the IRC connect in a separate ``asyncio.run`` would create
-    background read tasks tied to a loop that exits before
-    ``aiohttp.web.run_app`` starts — the IRC connection would die
-    before the web UI ever serves a request. This coroutine keeps
-    everything on one loop until shutdown.
+    This is the Phase-3 backward-compatibility fallback: when no config file
+    is found at ``--config`` (or ``default_config_path()``), the serve command
+    constructs a minimal ``LensConfig`` from the legacy ``--host``, ``--port``,
+    ``--nick``, ``--bind``, and ``--web-port`` flags so that the existing
+    ``irc-lens serve --nick lens`` invocation keeps working without a config
+    file. Phase 4 (T4.4) removes this fallback and makes ``--config`` (or the
+    default path) required.
     """
-    session = Session(host=args.host, port=args.port, nick=args.nick, icon=args.icon)
+    dev_email = f"{args.nick}@local"
+    return LensConfig(
+        auth_mode="dev",
+        dev_nick=args.nick,
+        dev_email=dev_email,
+        cf_aud=None,
+        cf_team_domain=None,
+        allowed_emails=(),
+        allowed_service_tokens=(),
+        server_name="lens",
+        server_host=args.host,
+        server_port=args.port,
+        web_bind=args.bind,
+        web_port=args.web_port,
+    )
+
+
+def _resolve_config(args: argparse.Namespace) -> LensConfig:
+    """Load a LensConfig from `--config` / default path, or fall back
+    to the synthetic dev config from CLI args.
+
+    Phase 4 (T4.4) removes the fallback so the file becomes required.
+
+    If the user *explicitly* passes ``--config <path>``, the path must
+    exist — silently dropping to the synthetic dev config on a missed
+    typo would risk starting an unauthenticated server when the user
+    intended a CF-mode deploy. The fallback only applies when no
+    ``--config`` was passed AND the default location is empty.
+    """
+    if args.config:
+        explicit = Path(args.config)
+        if not explicit.exists():
+            raise AfiError(
+                code=EXIT_USER_ERROR,
+                message=f"--config {args.config!r} does not exist",
+                remediation=(
+                    "fix the path, or run `irc-lens config init "
+                    f"--path {args.config}` to drop a starter config there"
+                ),
+            )
+        return load_config(explicit)
+    default = default_config_path()
+    if default.exists():
+        return load_config(default)
+    return _build_dev_config_from_args(args)
+
+
+async def _connect_dev_session(args: argparse.Namespace, config: LensConfig) -> Session:
+    """Open the dev-mode IRC session: connect → wait_for_welcome → seed.
+
+    Translates `LensConnectionLost` into the canonical `AfiError`
+    pair (host/port unreachable vs. nick rejected) and propagates
+    `apply_seed`'s errors after disconnecting cleanly.
+    """
+    session = Session(
+        host=config.server_host,
+        port=config.server_port,
+        nick=config.dev_nick,
+        icon=args.icon,
+    )
     try:
         await session.connect()
     except LensConnectionLost as exc:
         raise AfiError(
             code=EXIT_USER_ERROR,
-            message=f"cannot reach AgentIRC at {args.host}:{args.port}: {exc}",
+            message=f"cannot reach AgentIRC at {config.server_host}:{config.server_port}: {exc}",
             remediation=(
                 "verify the AgentIRC server is running and reachable, then "
                 "retry. e.g. `culture server start --name local && culture "
@@ -128,7 +197,7 @@ async def _serve_async(args: argparse.Namespace) -> None:
     # Block until 001 RPL_WELCOME (or 432/433 rejection). AgentIRC
     # enforces a server-name prefix on nicks (e.g. `spark-`); without
     # this gate a rejected nick produces a silently broken session
-    # where every query times out at 10s and the chat pane stays empty.
+    # where every query times out at 10 s and the chat pane stays empty.
     try:
         await session.wait_for_welcome()
     except LensConnectionLost as exc:
@@ -143,87 +212,141 @@ async def _serve_async(args: argparse.Namespace) -> None:
                 "config for the expected prefix."
             ),
         ) from exc
-
     if args.seed:
-        # Spec line 261: connection is real; seed only overlays UI
-        # state. apply_seed raises AfiError on shape errors which the
-        # dispatcher renders as `error:` + `hint:`. Broad except so
-        # connection cleanup runs on every failure path — leaking a
-        # connected IRC session past process exit would orphan state
-        # in the AgentIRC server. BaseException (KeyboardInterrupt,
-        # SystemExit) still propagates untouched. The function-local
-        # import lives INSIDE the try so an import-time failure on
-        # `irc_lens.seed` (or any module it loads) also triggers the
-        # disconnect cleanup branch.
+        # apply_seed raises AfiError on shape errors which the dispatcher
+        # renders as `error:` + `hint:`. Broad except so connection
+        # cleanup runs on every failure path — leaking a connected IRC
+        # session past process exit would orphan state in the AgentIRC
+        # server. BaseException (KeyboardInterrupt, SystemExit) still
+        # propagates untouched. Function-local import to keep the same
+        # cycle break documented at the module top.
         try:
-            from irc_lens.seed import apply_seed  # see module top comment
-
+            from irc_lens.seed import apply_seed
             apply_seed(session, Path(args.seed))
         except Exception:
             await session.disconnect()
             raise
+    return session
 
-    # Build a dev-mode LensConfig from the CLI args so make_app gets
-    # the full Phase 2 signature. serve.py doesn't load a config file
-    # yet (Phase 4/5 will add --config support); construct the minimum
-    # viable LensConfig here so the factory wiring works today.
-    dev_email = f"{args.nick}@local"
-    config = LensConfig(
-        auth_mode="dev",
-        dev_nick=args.nick,
-        dev_email=dev_email,
-        cf_aud=None,
-        cf_team_domain=None,
-        allowed_emails=(),
-        allowed_service_tokens=(),
-        server_name="lens",
-        server_host=args.host,
-        server_port=args.port,
-        web_bind=args.bind,
-        web_port=args.web_port,
+
+async def _warm_cf_or_raise(config: LensConfig) -> None:
+    """Pre-flight the Cloudflare JWKS endpoint. Fail-fast at startup
+    so a misconfigured CF deploy can't bind a port that returns 502
+    on every request."""
+    try:
+        await warm_jwks(config)
+    except Exception as exc:
+        raise AfiError(
+            code=EXIT_ENV_ERROR,
+            message=f"could not reach Cloudflare JWKS at {config.cf_team_domain}: {exc}",
+            remediation="verify network egress and team_domain spelling",
+        ) from exc
+
+
+async def _build_app(
+    args: argparse.Namespace, config: LensConfig
+) -> tuple[web.Application, Session | None]:
+    """Construct the aiohttp Application for the active auth mode.
+
+    Returns the app plus, in dev mode, the pre-seeded `Session` (so
+    the bind-failure path can clean it up). CF mode returns `None`
+    for the session: per-user sessions open lazily on first
+    authenticated request.
+    """
+    if config.auth_mode == "dev":
+        session = await _connect_dev_session(args, config)
+        factory: SessionFactory = lambda _nick: session  # noqa: E731
+        app = make_app(config, factory)
+        # Pre-seed so the dev-mode middleware's fixed identity
+        # (config.dev_email) resolves immediately without re-connecting.
+        app["registry"].register(config.dev_email, session)
+        return app, session
+    if config.auth_mode == "cloudflare-access":
+        # No session at startup — per-user sessions open lazily on
+        # first authenticated request.
+        await _warm_cf_or_raise(config)
+
+        def cf_factory(nick: str) -> Session:
+            return Session(
+                host=config.server_host, port=config.server_port, nick=nick
+            )
+
+        app = make_app(config, cf_factory)
+        # No pre-seed; --nick / --seed / --icon are ignored (Phase 4
+        # T4.1 will reject --nick with a hard error in CF mode).
+        return app, None
+    # Future-mode guard: load_config only allows "dev" or
+    # "cloudflare-access", but a caller bypassing load_config (or a
+    # future mode added without updating this branch) lands here. Fail
+    # loud rather than silently routing through the CF path.
+    raise AfiError(
+        code=EXIT_USER_ERROR,
+        message=f"unsupported auth.mode={config.auth_mode!r}",
+        remediation="set `auth.mode:` to either `dev` or `cloudflare-access`",
     )
-    # Factory creates sessions for new principals; the already-connected
-    # CLI session is pre-seeded into the registry below (avoids re-connecting).
-    app = make_app(config, lambda nick: Session(host=args.host, port=args.port, nick=nick))
-    # Pre-seed the registry with the already-connected session so the
-    # dev-mode middleware's fixed identity (dev_email) resolves it
-    # immediately on the first request without calling connect() twice.
-    app["registry"].register(dev_email, session)
-    runner = web.AppRunner(app, handle_signals=True)
-    await runner.setup()
-    site = web.TCPSite(runner, host=args.bind, port=args.web_port)
+
+
+async def _bind_site_or_raise(
+    runner: web.AppRunner, config: LensConfig, dev_session: Session | None
+) -> None:
+    """Start the TCPSite or raise `AfiError(EXIT_ENV_ERROR)`.
+
+    On `OSError` (port in use, etc.), tear down the runner AND any
+    dev-mode session that's already connected, so the process doesn't
+    exit holding open fds.
+    """
+    site = web.TCPSite(runner, host=config.web_bind, port=config.web_port)
     try:
         await site.start()
     except OSError as exc:
-        await session.disconnect()
+        if dev_session is not None:
+            await dev_session.disconnect()
         await runner.cleanup()
         raise AfiError(
             code=EXIT_ENV_ERROR,
-            message=f"cannot bind web port {args.bind}:{args.web_port}: {exc}",
+            message=f"cannot bind web port {config.web_bind}:{config.web_port}: {exc}",
             remediation=(
                 "pick a different --web-port, or stop whatever is already "
                 "bound to this port"
             ),
         ) from exc
 
-    url = _display_url(args.bind, args.web_port)
-    emit_diagnostic(f"irc-lens serving on {url}")
-    if args.open:
-        try:
-            webbrowser.open(url)
-        except webbrowser.Error as exc:
-            emit_diagnostic(f"warning: --open failed: {exc}")
 
+def _maybe_open_browser(args: argparse.Namespace, url: str) -> None:
+    if not args.open:
+        return
+    try:
+        webbrowser.open(url)
+    except webbrowser.Error as exc:
+        emit_diagnostic(f"warning: --open failed: {exc}")
+
+
+async def _serve_async(args: argparse.Namespace) -> None:
+    """Run connect → bind → forever inside one event loop.
+
+    Doing the IRC connect in a separate ``asyncio.run`` would create
+    background read tasks tied to a loop that exits before
+    ``aiohttp.web.run_app`` starts — the IRC connection would die
+    before the web UI ever serves a request. This coroutine keeps
+    everything on one loop until shutdown.
+    """
+    config = _resolve_config(args)
+    app, dev_session = await _build_app(args, config)
+    runner = web.AppRunner(app, handle_signals=True)
+    await runner.setup()
+    await _bind_site_or_raise(runner, config, dev_session)
+    url = _display_url(config.web_bind, config.web_port)
+    emit_diagnostic(f"irc-lens serving on {url}")
+    _maybe_open_browser(args, url)
     # Sleep forever until the runtime cancels us (SIGINT / SIGTERM via
-    # AppRunner.handle_signals=True, or the test harness cancelling the
-    # task).
+    # AppRunner.handle_signals=True, or the test harness cancelling
+    # the task).
     try:
         await asyncio.Event().wait()
     finally:
-        # Disconnect every registered Session, not just the pre-seeded one;
-        # Phase 3 will add lazily-opened per-user sessions, and this single
-        # call covers them too (return_exceptions=True so one failure doesn't
-        # strand the others).
+        # Disconnect every registered Session (covers dev pre-seeded
+        # session and any lazily-opened per-user CF sessions alike).
+        # return_exceptions=True so one failure doesn't strand the others.
         await disconnect_all(app["registry"])
         await runner.cleanup()
 
@@ -266,6 +389,14 @@ def register(sub: argparse._SubParsersAction) -> None:
             "      Point at a remote AgentIRC server.\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    p.add_argument(
+        "--config",
+        default=None,
+        help=(
+            "Path to irc-lens config.yaml (default: ~/.config/irc-lens/config.yaml). "
+            "When absent, builds a synthetic dev config from the other CLI flags."
+        ),
     )
     # `%(default)s` lets argparse render the actual default at help-time,
     # so the rendered "(default: …)" string can never drift from the

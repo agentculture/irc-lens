@@ -348,3 +348,27 @@ def test_serve_seed_missing_file_exits_user_error(
     assert "error:" in err
     assert "hint:" in err
     assert "Traceback" not in err
+
+
+def test_serve_explicit_config_missing_exits_user_error(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--config /missing/path` MUST error rather than silently fall
+    back to the synthetic dev config — a typo'd path could otherwise
+    quietly start an unauthenticated server when a CF deploy was
+    intended (Copilot PR #34 review)."""
+    rc = main(
+        [
+            "serve",
+            "--config", "/tmp/irc-lens-does-not-exist-12345.yaml",
+            "--nick", "lens",
+            "--web-port", "65002",
+        ]
+    )
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "error:" in err
+    assert "does not exist" in err
+    assert "hint:" in err
+    assert "config init" in err
+    assert "Traceback" not in err
