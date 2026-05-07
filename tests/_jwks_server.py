@@ -6,7 +6,6 @@ lens at this server's URL. Mirrors the in-tree
 """
 from __future__ import annotations
 
-import json
 from typing import Any
 
 import jwt

@@ -240,6 +240,127 @@ async def test_jwks_unreachable_mid_request_returns_502(jwks: FakeJWKS) -> None:
         await client.close()
 
 
+async def test_jwks_timeout_returns_502(jwks: FakeJWKS, monkeypatch) -> None:
+    """`aiohttp.ClientTimeout` raises `asyncio.TimeoutError`, which is
+    NOT a subclass of `aiohttp.ClientError`. The middleware must catch
+    both and surface a 502 — without it, a slow JWKS endpoint would
+    return an unhandled 500 (Qodo PR #34 review)."""
+    import asyncio
+    from irc_lens.web import auth as auth_module
+
+    config = _cf_config(jwks, allowed=["alice@example.com"])
+
+    def boom_factory(_n: str):
+        raise AssertionError("session factory must not run during auth tests")
+
+    app = make_app(config, boom_factory)
+    app.router.add_get(_AUTH_CANARY_PATH, _auth_canary_handler)
+
+    # Patch the JWKSCache._refresh to raise asyncio.TimeoutError.
+    async def fake_refresh(self):
+        raise asyncio.TimeoutError("simulated JWKS slow response")
+
+    monkeypatch.setattr(auth_module._JWKSCache, "_refresh", fake_refresh)
+
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+    try:
+        token = jwks.mint(
+            aud="aud-test",
+            claims={"email": "alice@example.com", "sub": "s"},
+        )
+        r = await client.get(
+            _AUTH_CANARY_PATH,
+            headers={"Cf-Access-Jwt-Assertion": token},
+        )
+        assert r.status == 502
+        body = await r.json()
+        assert "could not reach Cloudflare JWKS" in body["error"]
+        assert "TimeoutError" in body["hint"]
+    finally:
+        await client.close()
+
+
+async def test_jwks_concurrent_misses_share_one_refresh(jwks: FakeJWKS) -> None:
+    """Concurrent `get_key` calls with the same unknown kid must NOT
+    each fire a separate JWKS fetch — single-flight via the lock means
+    one refresh, then the others see the populated cache (Copilot
+    PR #34 thundering-herd review)."""
+    import asyncio
+    from irc_lens.web.auth import _JWKSCache
+
+    cache = _JWKSCache(jwks.team_domain)
+    fetch_count = 0
+    original_refresh = cache._refresh
+
+    async def counting_refresh():
+        nonlocal fetch_count
+        fetch_count += 1
+        await original_refresh()
+
+    cache._refresh = counting_refresh
+    # Fire 5 concurrent get_key calls for the kid the FakeJWKS is
+    # serving. Without the lock they would each call _refresh; with
+    # it, exactly one call fetches.
+    results = await asyncio.gather(
+        *(cache.get_key("test-kid-1") for _ in range(5))
+    )
+    assert all(r is not None for r in results)
+    assert fetch_count == 1, (
+        f"expected exactly 1 JWKS refresh under contention, got {fetch_count}"
+    )
+
+
+async def test_build_cloudflare_middleware_invalid_mode_raises_afierror(
+    jwks: FakeJWKS,
+) -> None:
+    """If a caller bypasses load_config and hands in a non-CF mode,
+    the build-time guard must raise AfiError (so the dispatcher
+    renders error/hint), not a bare ValueError that would land in the
+    catch-all `file a bug` arm (Qodo PR #34 review)."""
+    from irc_lens._errors import EXIT_USER_ERROR, AfiError
+    from irc_lens.web.auth import build_cloudflare_middleware
+
+    bad_config = LensConfig(
+        auth_mode="dev",  # wrong for build_cloudflare_middleware
+        dev_nick="x",
+        dev_email="x@x",
+        cf_aud=None,
+        cf_team_domain=None,
+        allowed_emails=(),
+        allowed_service_tokens=(),
+        server_name="testsrv",
+        server_host="127.0.0.1",
+        server_port=6667,
+        web_bind="127.0.0.1",
+        web_port=0,
+    )
+    with pytest.raises(AfiError) as exc:
+        build_cloudflare_middleware(bad_config)
+    assert exc.value.code == EXIT_USER_ERROR
+
+    # Also: missing aud / team_domain in CF mode → AfiError, not ValueError.
+    incomplete = LensConfig(
+        auth_mode="cloudflare-access",
+        dev_nick=None,
+        dev_email=None,
+        cf_aud=None,         # missing
+        cf_team_domain=None, # missing
+        allowed_emails=("a@example.com",),
+        allowed_service_tokens=(),
+        server_name="testsrv",
+        server_host="127.0.0.1",
+        server_port=6667,
+        web_bind="127.0.0.1",
+        web_port=0,
+    )
+    with pytest.raises(AfiError) as exc2:
+        build_cloudflare_middleware(incomplete)
+    assert exc2.value.code == EXIT_USER_ERROR
+    assert "auth.cloudflare.aud" in exc2.value.message
+
+
 async def test_service_token_common_name_accepted(jwks: FakeJWKS) -> None:
     """A JWT with `common_name` (no `email`) is accepted iff CN is in
     auth.allowed_service_tokens. A rogue CN gets 403 from the

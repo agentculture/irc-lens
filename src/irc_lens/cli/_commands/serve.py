@@ -144,10 +144,28 @@ def _resolve_config(args: argparse.Namespace) -> LensConfig:
     to the synthetic dev config from CLI args.
 
     Phase 4 (T4.4) removes the fallback so the file becomes required.
+
+    If the user *explicitly* passes ``--config <path>``, the path must
+    exist — silently dropping to the synthetic dev config on a missed
+    typo would risk starting an unauthenticated server when the user
+    intended a CF-mode deploy. The fallback only applies when no
+    ``--config`` was passed AND the default location is empty.
     """
-    config_path = Path(args.config) if args.config else default_config_path()
-    if config_path.exists():
-        return load_config(config_path)
+    if args.config:
+        explicit = Path(args.config)
+        if not explicit.exists():
+            raise AfiError(
+                code=EXIT_USER_ERROR,
+                message=f"--config {args.config!r} does not exist",
+                remediation=(
+                    "fix the path, or run `irc-lens config init "
+                    f"--path {args.config}` to drop a starter config there"
+                ),
+            )
+        return load_config(explicit)
+    default = default_config_path()
+    if default.exists():
+        return load_config(default)
     return _build_dev_config_from_args(args)
 
 
@@ -243,16 +261,29 @@ async def _build_app(
         # (config.dev_email) resolves immediately without re-connecting.
         app["registry"].register(config.dev_email, session)
         return app, session
-    # cloudflare-access mode — no session at startup.
-    await _warm_cf_or_raise(config)
+    if config.auth_mode == "cloudflare-access":
+        # No session at startup — per-user sessions open lazily on
+        # first authenticated request.
+        await _warm_cf_or_raise(config)
 
-    def cf_factory(nick: str) -> Session:
-        return Session(host=config.server_host, port=config.server_port, nick=nick)
+        def cf_factory(nick: str) -> Session:
+            return Session(
+                host=config.server_host, port=config.server_port, nick=nick
+            )
 
-    app = make_app(config, cf_factory)
-    # No pre-seed; --nick / --seed / --icon are ignored (Phase 4
-    # T4.1 will reject --nick with a hard error in CF mode).
-    return app, None
+        app = make_app(config, cf_factory)
+        # No pre-seed; --nick / --seed / --icon are ignored (Phase 4
+        # T4.1 will reject --nick with a hard error in CF mode).
+        return app, None
+    # Future-mode guard: load_config only allows "dev" or
+    # "cloudflare-access", but a caller bypassing load_config (or a
+    # future mode added without updating this branch) lands here. Fail
+    # loud rather than silently routing through the CF path.
+    raise AfiError(
+        code=EXIT_USER_ERROR,
+        message=f"unsupported auth.mode={config.auth_mode!r}",
+        remediation="set `auth.mode:` to either `dev` or `cloudflare-access`",
+    )
 
 
 async def _bind_site_or_raise(

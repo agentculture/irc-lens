@@ -9,6 +9,7 @@ deny → 403.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -18,6 +19,7 @@ import jwt
 from aiohttp import web
 from jwt.algorithms import RSAAlgorithm
 
+from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
 from irc_lens.web.identity import Identity, derive_nick
 
@@ -56,7 +58,16 @@ class _JWKSCache:
     def __init__(self, team_domain: str) -> None:
         self._url = _build_jwks_url(team_domain)
         self._keys: dict[str, Any] = {}
+        # Use ``time.monotonic()`` rather than ``time.time()`` for the
+        # flood-window arithmetic — wall-clock adjustments (NTP, leap
+        # seconds, manual time changes) can otherwise produce negative
+        # or huge deltas that collapse or extend the window unexpectedly.
         self._last_fetch: float = 0.0
+        # Single-flight: a thundering herd of requests with an unknown
+        # ``kid`` would otherwise each kick off their own JWKS refetch.
+        # The lock serialises refreshes; the post-lock cache check
+        # short-circuits everyone after the first.
+        self._refresh_lock: asyncio.Lock = asyncio.Lock()
 
     async def _refresh(self) -> None:
         async with aiohttp.ClientSession() as session:
@@ -66,24 +77,30 @@ class _JWKSCache:
                 r.raise_for_status()
                 payload = await r.json()
         self._keys = {k["kid"]: k for k in payload.get("keys", [])}
-        self._last_fetch = time.time()
+        self._last_fetch = time.monotonic()
 
     async def get_key(self, kid: str) -> Any:
         if kid in self._keys:
             return self._keys[kid]
-        # Anti-flood: only refresh if cache is empty OR the last fetch
-        # was longer ago than the flood window.  A malformed-kid storm
-        # would otherwise drive request-time fetches every request.
-        within_flood_window = (
-            self._keys
-            and (time.time() - self._last_fetch) < _KID_MISS_FLOOD_WINDOW_SECONDS
-        )
-        if within_flood_window:
-            raise KeyError(kid)
-        await self._refresh()
-        if kid not in self._keys:
-            raise KeyError(kid)
-        return self._keys[kid]
+        # Anti-flood + single-flight: only one coroutine refreshes per
+        # window. A malformed-kid storm would otherwise drive
+        # request-time fetches every request.
+        async with self._refresh_lock:
+            # Double-check inside the lock: another coroutine may have
+            # just refreshed and populated the kid we want.
+            if kid in self._keys:
+                return self._keys[kid]
+            within_flood_window = (
+                self._keys
+                and (time.monotonic() - self._last_fetch)
+                < _KID_MISS_FLOOD_WINDOW_SECONDS
+            )
+            if within_flood_window:
+                raise KeyError(kid)
+            await self._refresh()
+            if kid not in self._keys:
+                raise KeyError(kid)
+            return self._keys[kid]
 
     async def warm(self) -> None:
         await self._refresh()
@@ -182,11 +199,15 @@ async def _decode_and_verify_jwt(
             _ERR_JWT_VERIFICATION,
             f"verify the request came through cloudflared ({type(exc).__name__})",
         )) from exc
-    except aiohttp.ClientError as exc:
+    except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+        # ``aiohttp.ClientTimeout`` raises ``asyncio.TimeoutError``,
+        # which is NOT a subclass of ``aiohttp.ClientError`` — without
+        # the explicit catch it would bubble to a 500. Both surface
+        # the same operator-facing 502.
         raise _AuthDenied(_http_error(
             502,
             "could not reach Cloudflare JWKS",
-            f"check connectivity to {team_domain} ({exc})",
+            f"check connectivity to {team_domain} ({type(exc).__name__}: {exc})",
         )) from exc
 
 
@@ -246,13 +267,27 @@ def build_cloudflare_middleware(config: LensConfig):
     ``request['identity']`` so downstream handlers stay mode-agnostic.
     """
     if config.auth_mode != "cloudflare-access":
-        raise ValueError(
-            f"build_cloudflare_middleware called with auth_mode={config.auth_mode!r}"
+        # AfiError (not ValueError) so the dispatcher renders an
+        # `error:`/`hint:` pair and exits with code 1 instead of
+        # falling into the catch-all "file a bug" path. Reachable
+        # only if a caller bypasses load_config's auth_mode check;
+        # belt-and-suspenders for that case.
+        raise AfiError(
+            code=EXIT_USER_ERROR,
+            message=f"build_cloudflare_middleware called with auth_mode={config.auth_mode!r}",
+            remediation="set `auth.mode: cloudflare-access` in the lens config",
         )
     if not config.cf_aud or not config.cf_team_domain:
-        raise ValueError(
-            "auth.mode='cloudflare-access' requires both "
-            "auth.cloudflare.aud and auth.cloudflare.team_domain"
+        raise AfiError(
+            code=EXIT_USER_ERROR,
+            message=(
+                "auth.mode='cloudflare-access' requires both "
+                "auth.cloudflare.aud and auth.cloudflare.team_domain"
+            ),
+            remediation=(
+                "fill in both `auth.cloudflare.aud` and "
+                "`auth.cloudflare.team_domain` in the lens config"
+            ),
         )
     cache = _JWKSCache(config.cf_team_domain)
     issuer = _build_issuer(config.cf_team_domain)
