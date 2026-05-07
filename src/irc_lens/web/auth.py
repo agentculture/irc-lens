@@ -105,6 +105,139 @@ def _principal_from_claims(claims: dict[str, Any]) -> tuple[str | None, bool]:
     return None, False
 
 
+class _AuthDenied(Exception):
+    """Internal control-flow exception carrying the HTTP response.
+
+    Lets the verification + authorization helpers surface rich
+    ``web.Response`` objects upward without forcing the middleware to
+    branch on union return types (which Sonar S3776 counts as
+    cognitive complexity). Internal to this module — never propagates
+    past ``build_cloudflare_middleware``'s closure.
+    """
+
+    __slots__ = ("response",)
+
+    def __init__(self, response: web.Response) -> None:
+        super().__init__()
+        self.response = response
+
+
+def _extract_token(request: web.Request) -> str | None:
+    """Pull the JWT from the header (preferred) or the cookie.
+
+    Returns ``None`` only when neither carrier holds a token.
+    """
+    token = request.headers.get("Cf-Access-Jwt-Assertion")
+    if token:
+        return token
+    return request.cookies.get("CF_Authorization") or None
+
+
+async def _decode_and_verify_jwt(
+    cache: _JWKSCache,
+    token: str,
+    aud: str,
+    issuer: str,
+    team_domain: str,
+) -> dict[str, Any]:
+    """Verify signature + audience + issuer; return the claims dict.
+
+    Pinned to ``RS256``. Raises :class:`_AuthDenied` carrying the
+    appropriate HTTP response on every failure path so the middleware
+    body stays linear.
+    """
+    try:
+        unverified_header = jwt.get_unverified_header(token)
+        kid = unverified_header.get("kid")
+        if not kid:
+            raise jwt.InvalidTokenError("missing kid in JWT header")
+        jwk_data = await cache.get_key(kid)
+        public_key = RSAAlgorithm.from_jwk(jwk_data)
+        return jwt.decode(
+            token,
+            public_key,
+            algorithms=["RS256"],
+            audience=aud,
+            issuer=issuer,
+        )
+    except jwt.ExpiredSignatureError as exc:
+        raise _AuthDenied(_http_error(
+            401, "Cloudflare Access JWT expired", "sign in again"
+        )) from exc
+    except jwt.InvalidAudienceError as exc:
+        raise _AuthDenied(_http_error(
+            401,
+            _ERR_JWT_VERIFICATION,
+            "audience mismatch — verify auth.cloudflare.aud in the lens config",
+        )) from exc
+    except jwt.InvalidIssuerError as exc:
+        raise _AuthDenied(_http_error(
+            401,
+            _ERR_JWT_VERIFICATION,
+            "issuer mismatch — verify auth.cloudflare.team_domain in the lens config",
+        )) from exc
+    except (KeyError, jwt.InvalidTokenError) as exc:
+        raise _AuthDenied(_http_error(
+            401,
+            _ERR_JWT_VERIFICATION,
+            f"verify the request came through cloudflared ({type(exc).__name__})",
+        )) from exc
+    except aiohttp.ClientError as exc:
+        raise _AuthDenied(_http_error(
+            502,
+            "could not reach Cloudflare JWKS",
+            f"check connectivity to {team_domain} ({exc})",
+        )) from exc
+
+
+def _authorize_principal(
+    claims: dict[str, Any],
+    allowed_emails: set[str],
+    allowed_tokens: set[str],
+    server_name: str,
+) -> Identity:
+    """Extract the principal, enforce the allowlist, derive the nick.
+
+    Emails and service tokens are sibling lists. The ``is_email`` flag
+    prevents a service-token JWT from accidentally matching an entry
+    in ``allowed_emails`` (or vice versa) just because the strings
+    happen to match. Raises :class:`_AuthDenied` on every deny path.
+    """
+    principal, is_email = _principal_from_claims(claims)
+    if not principal:
+        raise _AuthDenied(_http_error(
+            401,
+            "JWT carried neither email nor common_name",
+            "verify the Access policy issues an email or service-token JWT",
+        ))
+    if is_email and principal not in allowed_emails:
+        raise _AuthDenied(_http_error(
+            403,
+            f"{principal} not on allowlist",
+            "add to auth.allowed_emails in the lens config",
+        ))
+    if (not is_email) and principal not in allowed_tokens:
+        raise _AuthDenied(_http_error(
+            403,
+            f"service token {principal} not on allowlist",
+            "add to auth.allowed_service_tokens in the lens config",
+        ))
+    try:
+        nick = derive_nick(server_name, principal)
+    except ValueError as exc:
+        logger.error("nick derivation failed: %s", exc)
+        raise _AuthDenied(_http_error(
+            500,
+            "nick derivation failed",
+            "principal sanitizes to empty; pick a different identity",
+        )) from exc
+    return Identity(
+        principal=principal,
+        nick=nick,
+        raw_jwt_subject=str(claims.get("sub", "")),
+    )
+
+
 def build_cloudflare_middleware(config: LensConfig):
     """Build the @web.middleware coroutine for cloudflare-access mode.
 
@@ -124,115 +257,41 @@ def build_cloudflare_middleware(config: LensConfig):
     cache = _JWKSCache(config.cf_team_domain)
     issuer = _build_issuer(config.cf_team_domain)
     aud = config.cf_aud
+    team_domain = config.cf_team_domain
     allowed_emails = set(config.allowed_emails)
     allowed_tokens = set(config.allowed_service_tokens)
     server_name = config.server_name
 
     @web.middleware
     async def middleware(request: web.Request, handler):
-        # Static assets never require identity (browser fetches them before
-        # the SSO redirect lands on every page load). `/healthz` is also
-        # unauthenticated by spec — cloudflared and external uptime
-        # probes hit it without a JWT, and the response is opaque
+        # Static assets never require identity (browser fetches them
+        # before the SSO redirect lands on every page load). `/healthz`
+        # is also unauthenticated by spec — cloudflared and external
+        # uptime probes hit it without a JWT, and the response is opaque
         # (`{"ok": true}`) so it doesn't leak any allowlist state.
         if request.path.startswith("/static/") or request.path == "/healthz":
             return await handler(request)
-
-        token = request.headers.get("Cf-Access-Jwt-Assertion")
-        if not token:
-            token = request.cookies.get("CF_Authorization")
+        token = _extract_token(request)
         if not token:
             return _http_error(
                 401,
                 "missing Cloudflare Access identity",
                 "ensure this request is reaching the lens through cloudflared",
             )
-
         try:
-            unverified_header = jwt.get_unverified_header(token)
-            kid = unverified_header.get("kid")
-            if not kid:
-                raise jwt.InvalidTokenError("missing kid in JWT header")
-            jwk_data = await cache.get_key(kid)
-            public_key = RSAAlgorithm.from_jwk(jwk_data)
-            claims = jwt.decode(
-                token,
-                public_key,
-                algorithms=["RS256"],
-                audience=aud,
-                issuer=issuer,
+            claims = await _decode_and_verify_jwt(
+                cache, token, aud, issuer, team_domain
             )
-        except jwt.ExpiredSignatureError:
-            return _http_error(401, "Cloudflare Access JWT expired", "sign in again")
-        except jwt.InvalidAudienceError:
-            return _http_error(
-                401,
-                _ERR_JWT_VERIFICATION,
-                "audience mismatch — verify auth.cloudflare.aud in the lens config",
+            identity = _authorize_principal(
+                claims, allowed_emails, allowed_tokens, server_name
             )
-        except jwt.InvalidIssuerError:
-            return _http_error(
-                401,
-                _ERR_JWT_VERIFICATION,
-                "issuer mismatch — verify auth.cloudflare.team_domain in the lens config",
-            )
-        except (KeyError, jwt.InvalidTokenError) as exc:
-            return _http_error(
-                401,
-                _ERR_JWT_VERIFICATION,
-                f"verify the request came through cloudflared ({type(exc).__name__})",
-            )
-        except aiohttp.ClientError as exc:
-            return _http_error(
-                502,
-                "could not reach Cloudflare JWKS",
-                f"check connectivity to {config.cf_team_domain} ({exc})",
-            )
-
-        principal, is_email = _principal_from_claims(claims)
-        if not principal:
-            return _http_error(
-                401,
-                "JWT carried neither email nor common_name",
-                "verify the Access policy issues an email or service-token JWT",
-            )
-
-        # Allowlist enforcement — emails and service tokens are sibling
-        # lists.  The ``is_email`` flag prevents a service-token JWT from
-        # accidentally matching an entry in ``allowed_emails`` (or vice
-        # versa) just because both happen to be string-identical.
-        if is_email and principal not in allowed_emails:
-            return _http_error(
-                403,
-                f"{principal} not on allowlist",
-                "add to auth.allowed_emails in the lens config",
-            )
-        if (not is_email) and principal not in allowed_tokens:
-            return _http_error(
-                403,
-                f"service token {principal} not on allowlist",
-                "add to auth.allowed_service_tokens in the lens config",
-            )
-
-        try:
-            nick = derive_nick(server_name, principal)
-        except ValueError as exc:
-            logger.error("nick derivation failed: %s", exc)
-            return _http_error(
-                500,
-                "nick derivation failed",
-                "principal sanitizes to empty; pick a different identity",
-            )
-
-        request["identity"] = Identity(
-            principal=principal,
-            nick=nick,
-            raw_jwt_subject=str(claims.get("sub", "")),
-        )
+        except _AuthDenied as denied:
+            return denied.response
+        request["identity"] = identity
         logger.info(
             "auth=ok principal=%s nick=%s method=%s path=%s",
-            principal,
-            nick,
+            identity.principal,
+            identity.nick,
             request.method,
             request.path,
         )
