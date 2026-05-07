@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from irc_lens.cli._errors import EXIT_USER_ERROR, AfiError
+from irc_lens.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig, load_config
 
 
@@ -121,7 +121,7 @@ server:
 """))
     assert exc.value.code == EXIT_USER_ERROR
     assert "server.port" in exc.value.message
-    assert "integer" in exc.value.message
+    assert "between 1 and 65535" in exc.value.message
 
 
 def test_invalid_web_port_errors(tmp_path: Path) -> None:
@@ -138,6 +138,7 @@ web:
   port: nope
 """))
     assert "web.port" in exc.value.message
+    assert "between 1 and 65535" in exc.value.message
 
 
 def test_empty_allowed_emails_errors_in_cf_mode(tmp_path: Path) -> None:
@@ -154,3 +155,59 @@ server:
 """))
     assert "allowed_emails" in exc.value.message
     assert "empty" in exc.value.message.lower()
+
+
+@pytest.mark.parametrize("port_value,expected_substring", [
+    ("8765.9", "must be an integer between 1 and 65535"),
+    ("true", "must be an integer between 1 and 65535"),
+    ("0", "must be an integer between 1 and 65535"),
+    ("70000", "must be an integer between 1 and 65535"),
+    ("-1", "must be an integer between 1 and 65535"),
+])
+def test_port_validation_rejects_bad_values(
+    tmp_path: Path, port_value: str, expected_substring: str
+) -> None:
+    yaml_body = f"""
+auth:
+  mode: dev
+  dev:
+    nick: lens
+    email: dev@local
+server:
+  name: spark
+  port: {port_value}
+"""
+    with pytest.raises(AfiError) as exc:
+        load_config(_write(tmp_path, yaml_body))
+    assert expected_substring in exc.value.message
+
+
+def test_falsy_web_section_rejected(tmp_path: Path) -> None:
+    """web: [] (or 0, or false) must NOT silently become {}."""
+    with pytest.raises(AfiError) as exc:
+        load_config(_write(tmp_path, """
+auth:
+  mode: dev
+  dev:
+    nick: lens
+    email: dev@local
+server:
+  name: spark
+web: []
+"""))
+    assert "web" in exc.value.message
+    assert "mapping" in exc.value.message
+
+
+def test_unreadable_config_raises_env_error(tmp_path: Path) -> None:
+    """A path that exists but can't be read fails with EXIT_ENV_ERROR."""
+    p = tmp_path / "config.yaml"
+    p.write_text("auth: {}")
+    p.chmod(0o000)
+    try:
+        with pytest.raises(AfiError) as exc:
+            load_config(p)
+        assert exc.value.code == EXIT_ENV_ERROR
+        assert "could not read" in exc.value.message
+    finally:
+        p.chmod(0o600)  # so cleanup works

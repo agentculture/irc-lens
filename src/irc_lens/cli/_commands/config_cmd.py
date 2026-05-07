@@ -10,7 +10,7 @@ from irc_lens.config import default_config_path
 
 _STARTER = """\
 # irc-lens — local dev config
-# Written by `irc-lens config init`. See docs/cli.md for the full schema.
+# Written by `irc-lens config init`. See the spec in docs/superpowers/specs/ for the full schema.
 
 auth:
   mode: dev
