@@ -187,7 +187,7 @@ async def _serve_async(args: argparse.Namespace) -> None:
     # Pre-seed the registry with the already-connected session so the
     # dev-mode middleware's fixed identity (dev_email) resolves it
     # immediately on the first request without calling connect() twice.
-    app["registry"]._sessions[dev_email] = session
+    app["registry"].register(dev_email, session)
     runner = web.AppRunner(app, handle_signals=True)
     await runner.setup()
     site = web.TCPSite(runner, host=args.bind, port=args.web_port)

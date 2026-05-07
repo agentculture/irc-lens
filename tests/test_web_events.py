@@ -47,7 +47,7 @@ def _make_app_for(session: Session):
     """Build an app pre-seeded with ``session`` so get_or_open returns it
     without calling connect() again."""
     app = make_app(_DEV_CONFIG, lambda _nick: session)
-    app["registry"]._sessions[_DEV_CONFIG.dev_email] = session
+    app["registry"].register(_DEV_CONFIG.dev_email, session)
     return app
 
 

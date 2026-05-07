@@ -36,7 +36,7 @@ def _make_app_for(session: Session):
     """Build an app pre-seeded with ``session`` so get_or_open returns it
     without calling connect() again."""
     app = make_app(_DEV_CONFIG, lambda _nick: session)
-    app["registry"]._sessions[_DEV_CONFIG.dev_email] = session
+    app["registry"].register(_DEV_CONFIG.dev_email, session)
     return app
 
 
@@ -245,7 +245,9 @@ def test_make_app_stashes_registry_and_config(session: Session) -> None:
     # the registry.
     assert "registry" in app
     assert "config" in app
-    assert app["registry"]._sessions.get(_DEV_CONFIG.dev_email) is session
+    assert _DEV_CONFIG.dev_email in app["registry"]
+    # `values()` returns a list; the pre-seeded session is the only one.
+    assert session in app["registry"].values()
 
 
 def test_make_app_registers_expected_routes(session: Session) -> None:

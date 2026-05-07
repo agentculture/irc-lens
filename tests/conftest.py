@@ -72,7 +72,7 @@ async def _serve_lens(session: Session, host: str, port: int) -> AsyncIterator[T
     # Pre-seed the registry so the test session is returned immediately
     # on the first request without re-connecting. dev_email is the
     # principal the dev-mode middleware stamps on every request.
-    app["registry"]._sessions[config.dev_email] = session
+    app["registry"].register(config.dev_email, session)
     test_server = TestServer(app)
     client = TestClient(test_server)
     await client.start_server()

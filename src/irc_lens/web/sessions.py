@@ -36,6 +36,18 @@ class SessionRegistry:
     def values(self) -> list[Any]:
         return list(self._sessions.values())
 
+    def register(self, principal: str, session: Any) -> None:
+        """Insert an already-connected session under *principal*.
+
+        Used by dev-mode startup paths (and tests) where the Session is
+        opened ahead of time for fail-fast behaviour, then handed to the
+        registry so subsequent ``get_or_open`` calls short-circuit
+        without re-running ``connect()`` / ``wait_for_welcome()``. CF
+        mode's lazy-open path does not call this — every principal goes
+        through ``get_or_open`` on first request.
+        """
+        self._sessions[principal] = session
+
     async def get_or_open(self, identity: Identity) -> Any:
         if identity.principal in self._sessions:
             return self._sessions[identity.principal]
