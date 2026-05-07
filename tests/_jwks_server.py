@@ -70,6 +70,18 @@ class FakeJWKS:
             headers={"kid": kid or self._kid},
         )
 
+    def rotate(self, new_kid: str) -> None:
+        """Replace the keypair + kid; subsequent /certs returns the new key only.
+
+        Used by T3.4 to simulate Cloudflare's signing-key rotation. After
+        a `rotate("new-kid")`, JWTs minted with the default kid will be
+        signed with the *new* private key (because we replaced the
+        keypair), and the JWKS endpoint will publish only the new public
+        key under the new kid.
+        """
+        self._kid = new_kid
+        self._key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+
     async def start(self) -> None:
         app = web.Application()
 

@@ -61,4 +61,5 @@ addopts = "-m 'not playwright and not cloudflare'"
 markers = [
     "playwright: opt-in browser end-to-end tests (requires `playwright install chromium`).",
     "cloudflare: opt-in real-Cloudflare round-trip tests (requires CF_API_TOKEN and friends).",
+    "slow: tests with intentional sleeps (kept in default suite — labels only).",
 ]

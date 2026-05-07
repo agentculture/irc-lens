@@ -44,16 +44,6 @@ def _cf_config(jwks: FakeJWKS, allowed: list[str]) -> LensConfig:
 
 
 @pytest_asyncio.fixture
-async def jwks() -> AsyncIterator[FakeJWKS]:
-    j = FakeJWKS()
-    await j.start()
-    try:
-        yield j
-    finally:
-        await j.stop()
-
-
-@pytest_asyncio.fixture
 async def cf_client(jwks: FakeJWKS) -> AsyncIterator[TestClient]:
     """A lens TestClient in cloudflare-access mode wired to FakeJWKS.
 
@@ -162,3 +152,92 @@ async def test_kid_miss_then_refresh_fails_when_kid_truly_unknown(
     )
     r2 = await cf_client.get(_AUTH_CANARY_PATH, headers={"Cf-Access-Jwt-Assertion": t2})
     assert r2.status == 401
+
+
+@pytest.mark.slow
+async def test_rotated_kid_accepted_after_refresh(
+    cf_client: TestClient, jwks: FakeJWKS
+) -> None:
+    """JWT signed with a NEW key after rotation must validate
+    post-refresh.
+
+    Without the wait, the lens's anti-flood window (5 s) would
+    reject the second request without re-fetching JWKS. Sleeping
+    past the window forces the lens to actually re-fetch and
+    discover the rotated key.
+    """
+    import asyncio
+
+    # Warm cache with the original kid.
+    t1 = jwks.mint(aud="aud-test", claims={"email": "alice@example.com", "sub": "s"})
+    r1 = await cf_client.get(_AUTH_CANARY_PATH, headers={"Cf-Access-Jwt-Assertion": t1})
+    assert r1.status == 200
+
+    # Sleep past the 5 s anti-flood window so the next miss triggers
+    # a real refetch instead of an immediate KeyError.
+    await asyncio.sleep(5.1)
+
+    # Rotate FakeJWKS, mint with the new key, expect success after
+    # the lens refetches and discovers the new kid.
+    jwks.rotate("kid-after-rotation")
+    t2 = jwks.mint(aud="aud-test", claims={"email": "alice@example.com", "sub": "s"})
+    r2 = await cf_client.get(_AUTH_CANARY_PATH, headers={"Cf-Access-Jwt-Assertion": t2})
+    assert r2.status == 200
+
+
+async def test_service_token_common_name_accepted(jwks: FakeJWKS) -> None:
+    """A JWT with `common_name` (no `email`) is accepted iff CN is in
+    auth.allowed_service_tokens. A rogue CN gets 403 from the
+    service-token allowlist branch."""
+    config = LensConfig(
+        auth_mode="cloudflare-access",
+        dev_nick=None,
+        dev_email=None,
+        cf_aud="aud-test",
+        cf_team_domain=jwks.team_domain,
+        allowed_emails=(),
+        allowed_service_tokens=("ci-bot",),
+        server_name="testsrv",
+        server_host="127.0.0.1",
+        server_port=6667,
+        web_bind="127.0.0.1",
+        web_port=0,
+    )
+
+    def boom_factory(_n: str):
+        raise AssertionError("session factory must not run during auth tests")
+
+    app = make_app(config, boom_factory)
+    app.router.add_get(_AUTH_CANARY_PATH, _auth_canary_handler)
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+    try:
+        # Allowed common_name → middleware accepts, principal echoes back.
+        token = jwks.mint(
+            aud="aud-test",
+            claims={"common_name": "ci-bot", "sub": "svc"},
+        )
+        r = await client.get(
+            _AUTH_CANARY_PATH,
+            headers={"Cf-Access-Jwt-Assertion": token},
+        )
+        assert r.status == 200
+        body = await r.json()
+        assert body == {"ok": True, "principal": "ci-bot"}
+
+        # Rogue common_name (NOT in allowed_service_tokens) → 403.
+        bad = jwks.mint(
+            aud="aud-test",
+            claims={"common_name": "rogue", "sub": "svc"},
+        )
+        r2 = await client.get(
+            _AUTH_CANARY_PATH,
+            headers={"Cf-Access-Jwt-Assertion": bad},
+        )
+        assert r2.status == 403
+        body2 = await r2.json()
+        assert "service token" in body2["error"]
+        assert "rogue" in body2["error"]
+    finally:
+        await client.close()
