@@ -13,6 +13,7 @@ from importlib.resources import files
 
 from aiohttp import web
 
+from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
 from irc_lens.web import routes
 from irc_lens.web.identity import Identity
@@ -47,9 +48,17 @@ def _dev_identity_middleware(config: LensConfig):
 
 def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Application:
     if config.auth_mode != "dev":
-        # Phase 3 will branch here. Until then, callers must pass dev mode.
-        raise RuntimeError(
-            f"make_app: only auth.mode='dev' is wired in Phase 2, got {config.auth_mode!r}"
+        # Intentional failure path → AfiError (the dispatcher renders this
+        # as `error:` + `hint:` and exits with code 1, instead of falling
+        # into the catch-all "file a bug" path that RuntimeError produces).
+        # Phase 3 will replace this branch with the CF-mode middleware.
+        raise AfiError(
+            code=EXIT_USER_ERROR,
+            message=f"auth.mode={config.auth_mode!r} is not yet supported",
+            remediation=(
+                "set `auth.mode: dev` in your config; "
+                "cloudflare-access support lands in a later phase"
+            ),
         )
 
     middleware = _dev_identity_middleware(config)

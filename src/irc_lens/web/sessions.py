@@ -58,8 +58,22 @@ class SessionRegistry:
             if identity.principal in self._sessions:           # double-check
                 return self._sessions[identity.principal]
             session = self._factory(identity.nick)
-            await session.connect()
-            await session.wait_for_welcome()
+            # Two-step open: connect() opens the TCP socket and starts the
+            # read task; wait_for_welcome() blocks for 001 RPL_WELCOME (or
+            # raises on 432/433 nick rejection / timeout). If the second
+            # step raises after the first succeeded, the socket and read
+            # task are still alive — disconnect to avoid leaking transport
+            # state on every failed handshake. Mirrors serve.py's startup
+            # path, which already has the same try/except shape.
+            try:
+                await session.connect()
+                await session.wait_for_welcome()
+            except BaseException:
+                try:
+                    await session.disconnect()
+                except Exception:  # noqa: BLE001 — never mask the original
+                    pass
+                raise
             self._sessions[identity.principal] = session
             return session
 

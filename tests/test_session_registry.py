@@ -104,6 +104,64 @@ async def test_failed_open_does_not_register() -> None:
 
 
 @pytest.mark.asyncio
+async def test_failed_welcome_disconnects_session() -> None:
+    """If connect() succeeds but wait_for_welcome() fails, the partially-open
+    session must be disconnected — otherwise the TCP socket and read task
+    leak (Qodo PR #31 review)."""
+    factory, created = _fake_session_factory()
+
+    class Boom(Exception):
+        pass
+
+    def half_open_factory(nick: str) -> MagicMock:
+        s = factory(nick)
+        s.connect = AsyncMock()                                 # succeeds
+        s.wait_for_welcome = AsyncMock(side_effect=Boom("nope"))  # fails
+        return s
+
+    reg = SessionRegistry(factory=half_open_factory)
+    ident = Identity(principal="alice@example.com", nick="spark-alice", raw_jwt_subject="s")
+
+    with pytest.raises(Boom):
+        await reg.get_or_open(ident)
+
+    # The session that was partially opened must have been cleaned up.
+    assert len(created) == 1
+    created[0].connect.assert_awaited_once()
+    created[0].wait_for_welcome.assert_awaited_once()
+    created[0].disconnect.assert_awaited_once()
+    # And it must NOT be registered (so disconnect_all won't touch it twice
+    # at shutdown, and a retry builds a fresh session).
+    assert "alice@example.com" not in reg
+
+
+@pytest.mark.asyncio
+async def test_disconnect_failure_during_cleanup_does_not_mask_original() -> None:
+    """If disconnect() itself fails during cleanup, the original error must
+    still propagate — disconnect failures don't get to silently swallow the
+    real diagnostic."""
+    factory, created = _fake_session_factory()
+
+    class WelcomeBoom(Exception):
+        pass
+
+    def factory_with_failing_disconnect(nick: str) -> MagicMock:
+        s = factory(nick)
+        s.connect = AsyncMock()
+        s.wait_for_welcome = AsyncMock(side_effect=WelcomeBoom("nick rejected"))
+        s.disconnect = AsyncMock(side_effect=RuntimeError("disconnect also fails"))
+        return s
+
+    reg = SessionRegistry(factory=factory_with_failing_disconnect)
+    ident = Identity(principal="alice@example.com", nick="spark-alice", raw_jwt_subject="s")
+
+    # Original WelcomeBoom must surface, NOT the disconnect's RuntimeError.
+    with pytest.raises(WelcomeBoom):
+        await reg.get_or_open(ident)
+    created[0].disconnect.assert_awaited_once()
+
+
+@pytest.mark.asyncio
 async def test_register_short_circuits_get_or_open() -> None:
     """register() pre-seeds; subsequent get_or_open MUST NOT call factory/connect."""
     factory, created = _fake_session_factory()
