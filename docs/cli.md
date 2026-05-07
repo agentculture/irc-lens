@@ -91,7 +91,8 @@ The starter file is in `auth.mode: dev`, suitable for a local AgentIRC
 on `127.0.0.1:6667`. To deploy behind Cloudflare Access, switch
 `auth.mode` to `cloudflare-access` and set `auth.cloudflare.aud`,
 `auth.cloudflare.team_domain`, and `auth.allowed_emails`. See
-[deployment-cloudflare-access.md](deployment-cloudflare-access.md).
+[deployment-cloudflare-access.md](deployment-cloudflare-access.md)
+(lands in the next release).
 
 ### `--nick` and `--bind`
 
