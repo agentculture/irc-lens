@@ -36,6 +36,7 @@ import json
 import logging
 import sys
 import webbrowser
+from dataclasses import replace
 from pathlib import Path
 
 from aiohttp import web
@@ -47,6 +48,10 @@ from irc_lens.session import LensConnectionLost, Session
 from irc_lens.web import make_app
 from irc_lens.web.auth import warm_jwks
 from irc_lens.web.sessions import SessionFactory, disconnect_all
+
+logger = logging.getLogger("irc_lens.serve")
+
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
 # `irc_lens.seed` is imported function-locally inside `_serve_async`
 # to avoid a real-but-latent module-load cycle:
@@ -111,6 +116,40 @@ def _display_url(bind: str, port: int) -> str:
     return f"http://{host}:{port}/"
 
 
+def _validate_cli_against_config(
+    config: LensConfig,
+    nick: str | None,
+    bind: str | None,
+) -> LensConfig:
+    """Apply CF-mode CLI rules. Returns a possibly-coerced config.
+
+    In dev mode this is a no-op.  In cloudflare-access mode:
+    - ``--nick`` is rejected (nick is derived per user from the JWT).
+    - A non-loopback ``--bind`` is coerced to ``127.0.0.1`` with a WARNING,
+      because cloudflared terminates locally and a public bind would bypass auth.
+    """
+    if config.auth_mode != "cloudflare-access":
+        return config
+    if nick is not None:
+        raise AfiError(
+            code=EXIT_USER_ERROR,
+            message="--nick is not valid when auth.mode is cloudflare-access",
+            remediation=(
+                "remove --nick — in CF mode the nick is derived per "
+                "authenticated user from auth.allowed_emails"
+            ),
+        )
+    effective_bind = bind if bind is not None else config.web_bind
+    if effective_bind not in _LOOPBACK:
+        logger.warning(
+            "web.bind=%s is not loopback; coerced to 127.0.0.1 because "
+            "cloudflared terminates locally",
+            effective_bind,
+        )
+        return replace(config, web_bind="127.0.0.1")
+    return config
+
+
 def _build_dev_config_from_args(args: argparse.Namespace) -> LensConfig:
     """Build a synthetic dev-mode ``LensConfig`` from the CLI arguments.
 
@@ -122,7 +161,17 @@ def _build_dev_config_from_args(args: argparse.Namespace) -> LensConfig:
     file. Phase 4 (T4.4) removes this fallback and makes ``--config`` (or the
     default path) required.
     """
+    if args.nick is None:
+        raise AfiError(
+            code=EXIT_USER_ERROR,
+            message="the following arguments are required: --nick",
+            remediation=(
+                "try 'irc-lens serve --nick <name>' (e.g. --nick lens); "
+                "run 'irc-lens serve --help' for all flags"
+            ),
+        )
     dev_email = f"{args.nick}@local"
+    web_bind = args.bind if args.bind is not None else "127.0.0.1"
     return LensConfig(
         auth_mode="dev",
         dev_nick=args.nick,
@@ -134,7 +183,7 @@ def _build_dev_config_from_args(args: argparse.Namespace) -> LensConfig:
         server_name="lens",
         server_host=args.host,
         server_port=args.port,
-        web_bind=args.bind,
+        web_bind=web_bind,
         web_port=args.web_port,
     )
 
@@ -331,6 +380,7 @@ async def _serve_async(args: argparse.Namespace) -> None:
     everything on one loop until shutdown.
     """
     config = _resolve_config(args)
+    config = _validate_cli_against_config(config, nick=args.nick, bind=args.bind)
     app, dev_session = await _build_app(args, config)
     runner = web.AppRunner(app, handle_signals=True)
     await runner.setup()
@@ -415,8 +465,12 @@ def register(sub: argparse._SubParsersAction) -> None:
     )
     p.add_argument(
         "--nick",
-        required=True,
-        help="Nick to register on AgentIRC (e.g. --nick lens).",
+        default=None,
+        help=(
+            "Nick to register on AgentIRC (e.g. --nick lens). "
+            "Required in dev mode (no config file). "
+            "Invalid in cloudflare-access mode — nick is derived from the JWT."
+        ),
     )
     p.add_argument(
         "--web-port",
@@ -426,10 +480,12 @@ def register(sub: argparse._SubParsersAction) -> None:
     )
     p.add_argument(
         "--bind",
-        default="127.0.0.1",
+        default=None,
         help=(
-            "Bind address for the local web app (default: %(default)s). "
-            "Using 0.0.0.0 prints a warning — there is no auth in v1."
+            "Bind address for the local web app "
+            "(default: web.bind from config, or 127.0.0.1). "
+            "Using 0.0.0.0 prints a warning — there is no auth in v1. "
+            "In cloudflare-access mode a non-loopback bind is coerced to 127.0.0.1."
         ),
     )
     p.add_argument("--icon", default=None, help="Optional emoji passed to AgentIRC ICON.")

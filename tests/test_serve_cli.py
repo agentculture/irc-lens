@@ -109,17 +109,15 @@ def test_serve_requires_only_nick(
     is required. The bare ``irc-lens serve`` invocation still must error via
     the AfiError + hint contract (no argparse traceback) and the hint must
     point at the concrete fix — supplying ``--nick``."""
-    with pytest.raises(SystemExit) as exc:
-        main(["serve"])
-    assert exc.value.code != 0
+    rc = main(["serve"])
+    assert rc != 0
     err = capsys.readouterr().err
     assert "error:" in err
     assert "hint:" in err
     assert "--nick" in err
     assert "Traceback" not in err
-    # The argparse "required" complaint must mention nick and ONLY nick now
-    # that host/port have defaults — guards against silent regression of the
-    # defaults.
+    # The error must mention nick and ONLY nick now that host/port have
+    # defaults — guards against silent regression of the defaults.
     assert "--host" not in err
     assert "--port" not in err
     # The hint must be the serve-specific copy-pasteable form, NOT the
