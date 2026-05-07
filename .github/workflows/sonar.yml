@@ -36,6 +36,17 @@ jobs:
           # most "new code" attribution.
           fetch-depth: 0
 
+      # Coverage feeds the `new_coverage` quality-gate metric. Without
+      # a coverage report, Sonar reports 0% on new code and the gate
+      # always fails. Mirrors the deps + python pin in ci.yml so the
+      # report Sonar reads is the same one ci.yml's pytest produces.
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
+      - run: uv python install 3.12
+      - run: uv venv
+      - run: uv pip install -e ".[dev]"
+      - name: pytest with coverage
+        run: uv run pytest --cov=src/irc_lens --cov-report=xml --cov-report=term
+
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8  # v5.0.0
         env:

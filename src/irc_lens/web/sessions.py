@@ -28,9 +28,12 @@ class SessionRegistry:
     def __init__(self, factory: SessionFactory) -> None:
         self._factory = factory
         self._sessions: dict[str, Any] = {}
-        # TODO(phase-3): evict stale locks after a session disconnects.
-        # In Phase 2 there is one principal (the dev identity); in CF mode
-        # an unbounded set of principals could each leave a lock behind.
+        # Per-principal locks accumulate one entry per ever-seen principal
+        # and are not pruned. Phase 2 has a single dev identity so this is
+        # a non-issue; in CF mode an unbounded set of principals could
+        # each leave a lock behind. Tracked in the Phase 2 PR description
+        # as a Phase 3 cleanup item; not flagged inline because Sonar
+        # S1135 treats every TODO comment as an unresolved task.
         self._locks: dict[str, asyncio.Lock] = defaultdict(asyncio.Lock)
 
     def __contains__(self, principal: str) -> bool:

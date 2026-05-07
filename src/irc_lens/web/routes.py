@@ -198,6 +198,12 @@ async def get_events(request: web.Request) -> web.StreamResponse:
     return response
 
 
-async def get_healthz(_request: web.Request) -> web.Response:
-    """Opaque health probe. No auth, no IRC state, no allowlist leak."""
+async def get_healthz(_request: web.Request) -> web.Response:  # NOSONAR S7503
+    """Opaque health probe. No auth, no IRC state, no allowlist leak.
+
+    The body is sync but the signature must be ``async def`` —
+    aiohttp's router only accepts coroutine handlers. Sonar's S7503
+    ("use async features or remove the keyword") doesn't know about
+    that constraint; the inline ``# NOSONAR S7503`` silences it.
+    """
     return web.json_response({"ok": True})
