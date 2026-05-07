@@ -80,6 +80,27 @@ irc-lens overview --json
 irc-lens cli overview
 ```
 
+## Configuration
+
+irc-lens reads `~/.config/irc-lens/config.yaml` by default (override with
+`--config <path>`, respecting `$XDG_CONFIG_HOME`). Initialize with:
+
+    irc-lens config init
+
+The starter file is in `auth.mode: dev`, suitable for a local AgentIRC
+on `127.0.0.1:6667`. To deploy behind Cloudflare Access, switch
+`auth.mode` to `cloudflare-access` and set `auth.cloudflare.aud`,
+`auth.cloudflare.team_domain`, and `auth.allowed_emails`. See
+[deployment-cloudflare-access.md](deployment-cloudflare-access.md).
+
+### `--nick` and `--bind`
+
+In `auth.mode: dev`, `--nick` overrides `auth.dev.nick`. In
+`auth.mode: cloudflare-access`, passing `--nick` is a hard error: the
+nick is derived per authenticated user from `auth.allowed_emails`.
+A non-loopback `--bind` (or `web.bind`) under CF mode is silently
+coerced to `127.0.0.1` because cloudflared terminates locally.
+
 ## `irc-lens serve`
 
 Launch the aiohttp web console against an AgentIRC server. The

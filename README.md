@@ -43,6 +43,11 @@ uv run pytest -m playwright -v           # browser e2e
   topology, module layout, decision log.
 * [`CITATION.md`](CITATION.md) — culture citations + divergences.
 
+## Production deployment
+
+To host irc-lens behind Cloudflare Access on your own domain, see
+[docs/deployment-cloudflare-access.md](docs/deployment-cloudflare-access.md).
+
 ## License
 
 See [LICENSE](LICENSE).
