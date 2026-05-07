@@ -32,8 +32,18 @@ Access application, allow-policy, and service token for the
 
 ## Run
 
+The `CF_*` inputs live in a gitignored `.env` at the repo root (copy
+from the committed `.env.example`); `cfafi` mints the API token and
+reports the account/zone/team values. `setup.sh` reads them, writes
+`IRC_LENS_TEST_*` outputs to `.cf-roundtrip.env`, which the test reads.
+
+**Run all commands below from the repo root** (the parent of
+`scripts/`). The `.env` and `.cf-roundtrip.env` paths and the script
+invocation are all relative to it.
+
+    set -a; source .env; set +a                # CF_* inputs (from .env.example)
     ./scripts/cf-roundtrip/setup.sh
-    set -a; source .cf-roundtrip.env; set +a
+    set -a; source .cf-roundtrip.env; set +a   # IRC_LENS_TEST_* outputs from setup.sh
     cloudflared tunnel run --token "$IRC_LENS_TEST_TUNNEL_TOKEN" &  # in another terminal
     uv run pytest -m cloudflare -v
 
