@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import urllib.parse
 
 from aiohttp import web
 
@@ -63,6 +64,24 @@ def _connection_lost(message: str) -> web.Response:
         {"error": message, "hint": _UNHEALTHY_HINT},
         status=503,
     )
+
+
+def _origin_ok(request: web.Request) -> bool:
+    """CSRF defense-in-depth: verify the Origin header matches the request host.
+
+    - Origin absent → allow (curl, cloudflared probes, internal monitors).
+    - Origin present → parse netloc (host:port) and compare against the
+      ``Host`` request header. Match → allow. Mismatch → deny.
+
+    ``Referer`` is intentionally NOT checked here — Origin is the only
+    signal in this iteration. A proper CSRF-token scheme is tracked in
+    issue #27 and will replace this floor in a later phase.
+    """
+    origin = request.headers.get("Origin")
+    if origin is None:
+        return True
+    parsed = urllib.parse.urlparse(origin)
+    return parsed.netloc == request.headers.get("Host", "")
 
 
 async def get_index(request: web.Request) -> web.Response:
@@ -140,6 +159,18 @@ async def post_input(request: web.Request) -> web.Response:
     # was honest about the Content-Length.
     if request.content_length is not None and request.content_length > _MAX_INPUT_BODY:
         return _too_large()
+
+    # CSRF defense floor: reject cross-origin POSTs. Origin-absent requests
+    # (curl, cloudflared probes, internal monitors) pass through unchanged.
+    # A full CSRF-token scheme is tracked in issue #27.
+    if not _origin_ok(request):
+        return web.json_response(
+            {
+                "error": "Origin does not match request host",
+                "hint": "this is a CSRF defense; submit from the lens UI itself",
+            },
+            status=403,
+        )
 
     session = await _resolve_session(request)
     # Health gate before parsing: once the AgentIRC pipe is gone, the
