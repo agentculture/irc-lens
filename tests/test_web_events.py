@@ -22,9 +22,33 @@ import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from irc_lens.commands import ParsedCommand
+from irc_lens.config import LensConfig
 from irc_lens.session import LensConnectionLost, Session, SessionEvent
 from irc_lens.web import make_app
 from irc_lens.web.events import format_sse
+
+_DEV_CONFIG = LensConfig(
+    auth_mode="dev",
+    dev_nick="lens-test",
+    dev_email="dev@local",
+    cf_aud=None,
+    cf_team_domain=None,
+    allowed_emails=(),
+    allowed_service_tokens=(),
+    server_name="testsrv",
+    server_host="127.0.0.1",
+    server_port=6667,
+    web_bind="127.0.0.1",
+    web_port=0,
+)
+
+
+def _make_app_for(session: Session):
+    """Build an app pre-seeded with ``session`` so get_or_open returns it
+    without calling connect() again."""
+    app = make_app(_DEV_CONFIG, lambda _nick: session)
+    app["registry"]._sessions[_DEV_CONFIG.dev_email] = session
+    return app
 
 
 # ---------------------------------------------------------------------------
@@ -39,7 +63,7 @@ def session() -> Session:
 
 @pytest.fixture
 async def client(session: Session) -> TestClient:
-    app = make_app(session)
+    app = _make_app_for(session)
     server = TestServer(app)
     async with TestClient(server) as c:
         yield c
@@ -125,7 +149,7 @@ async def test_post_input_503_on_lens_connection_lost(
         raise LensConnectionLost("broken pipe")
 
     monkeypatch.setattr(session, "execute", boom)
-    app = make_app(session)
+    app = _make_app_for(session)
     async with TestClient(TestServer(app)) as c:
         resp = await c.post("/input", json={"text": "/join #x"})
         assert resp.status == 503
@@ -218,7 +242,7 @@ async def test_post_input_503_when_session_unhealthy(
 
     monkeypatch.setattr(session, "execute", should_not_run)
 
-    app = make_app(session)
+    app = _make_app_for(session)
     async with TestClient(TestServer(app)) as c:
         resp = await c.post("/input", json={"text": "/join #ops"})
         assert resp.status == 503

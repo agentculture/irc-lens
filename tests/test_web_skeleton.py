@@ -12,8 +12,32 @@ from __future__ import annotations
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
+from irc_lens.config import LensConfig
 from irc_lens.session import EntityItem, Session
 from irc_lens.web import make_app
+
+_DEV_CONFIG = LensConfig(
+    auth_mode="dev",
+    dev_nick="lens-test",
+    dev_email="dev@local",
+    cf_aud=None,
+    cf_team_domain=None,
+    allowed_emails=(),
+    allowed_service_tokens=(),
+    server_name="testsrv",
+    server_host="127.0.0.1",
+    server_port=6667,
+    web_bind="127.0.0.1",
+    web_port=0,
+)
+
+
+def _make_app_for(session: Session):
+    """Build an app pre-seeded with ``session`` so get_or_open returns it
+    without calling connect() again."""
+    app = make_app(_DEV_CONFIG, lambda _nick: session)
+    app["registry"]._sessions[_DEV_CONFIG.dev_email] = session
+    return app
 
 
 # ---------------------------------------------------------------------------
@@ -28,7 +52,7 @@ def session() -> Session:
 
 @pytest.fixture
 async def client(session: Session) -> TestClient:
-    app = make_app(session)
+    app = _make_app_for(session)
     server = TestServer(app)
     async with TestClient(server) as c:
         yield c
@@ -85,7 +109,7 @@ async def test_get_index_renders_sidebar_state(session: Session) -> None:
     session.set_current_channel("#ops")
     session.set_roster([EntityItem(nick="alice", type="human")])
 
-    app = make_app(session)
+    app = _make_app_for(session)
     async with TestClient(TestServer(app)) as c:
         body = await (await c.get("/")).text()
     assert 'data-testid="sidebar-channel"' in body
@@ -214,16 +238,22 @@ async def test_static_brand_assets_served(
 # ---------------------------------------------------------------------------
 
 
-def test_make_app_stashes_session(session: Session) -> None:
-    app = make_app(session)
-    assert app["session"] is session
+def test_make_app_stashes_registry_and_config(session: Session) -> None:
+    app = _make_app_for(session)
+    # Phase 2: app no longer stashes the session directly; it stashes the
+    # registry and config instead. The pre-seeded session is reachable via
+    # the registry.
+    assert "registry" in app
+    assert "config" in app
+    assert app["registry"]._sessions.get(_DEV_CONFIG.dev_email) is session
 
 
 def test_make_app_registers_expected_routes(session: Session) -> None:
-    app = make_app(session)
+    app = _make_app_for(session)
     paths = {(r.method, r.resource.canonical) for r in app.router.routes()}
     assert ("GET", "/") in paths
     assert ("POST", "/input") in paths
     assert ("GET", "/events") in paths
+    assert ("GET", "/healthz") in paths
     # Static is a prefix-mounted resource; check by name.
     assert any(r.name == "static" for r in app.router.resources() if r.name)
