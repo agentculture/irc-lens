@@ -185,6 +185,61 @@ async def test_rotated_kid_accepted_after_refresh(
     assert r2.status == 200
 
 
+async def test_warm_jwks_succeeds_against_live_server(jwks: FakeJWKS) -> None:
+    """`warm_jwks(config)` is the startup fail-fast contract. With the
+    FakeJWKS server live, it must complete without raising."""
+    from irc_lens.web.auth import warm_jwks
+
+    config = _cf_config(jwks, allowed=["alice@example.com"])
+    await warm_jwks(config)  # no raise = success
+
+
+async def test_warm_jwks_raises_when_server_unreachable(jwks: FakeJWKS) -> None:
+    """If the JWKS endpoint can't be reached, `warm_jwks` raises a
+    `ClientError` (which `serve.py` wraps as `AfiError(EXIT_ENV_ERROR)`)."""
+    import aiohttp
+
+    from irc_lens.web.auth import warm_jwks
+
+    config = _cf_config(jwks, allowed=["alice@example.com"])
+    await jwks.stop()  # tear down the JWKS server before warming
+    with pytest.raises(aiohttp.ClientError):
+        await warm_jwks(config)
+
+
+async def test_jwks_unreachable_mid_request_returns_502(jwks: FakeJWKS) -> None:
+    """If the JWKS server is reachable at startup but goes away before
+    the first request triggers a refresh, the middleware must surface
+    a 502, not crash with an unhandled exception."""
+    config = _cf_config(jwks, allowed=["alice@example.com"])
+
+    def boom_factory(_n: str):
+        raise AssertionError("session factory must not run during auth tests")
+
+    app = make_app(config, boom_factory)
+    app.router.add_get(_AUTH_CANARY_PATH, _auth_canary_handler)
+    server = TestServer(app)
+    client = TestClient(server)
+    await client.start_server()
+    try:
+        # Tear down the JWKS server BEFORE the first request, so the
+        # cache is empty and the refresh attempt fails with ClientError.
+        await jwks.stop()
+        token = jwks.mint(
+            aud="aud-test",
+            claims={"email": "alice@example.com", "sub": "s"},
+        )
+        r = await client.get(
+            _AUTH_CANARY_PATH,
+            headers={"Cf-Access-Jwt-Assertion": token},
+        )
+        assert r.status == 502
+        body = await r.json()
+        assert "could not reach Cloudflare JWKS" in body["error"]
+    finally:
+        await client.close()
+
+
 async def test_service_token_common_name_accepted(jwks: FakeJWKS) -> None:
     """A JWT with `common_name` (no `email`) is accepted iff CN is in
     auth.allowed_service_tokens. A rogue CN gets 403 from the

@@ -16,6 +16,7 @@ from typing import Any
 import aiohttp
 import jwt
 from aiohttp import web
+from jwt.algorithms import RSAAlgorithm
 
 from irc_lens.config import LensConfig
 from irc_lens.web.identity import Identity, derive_nick
@@ -33,6 +34,12 @@ def _http_error(status: int, error: str, hint: str) -> web.Response:
 def _scheme_for(team_domain: str) -> str:
     """HTTP for tests (FakeJWKS uses host:port), HTTPS otherwise."""
     return "http" if ":" in team_domain else "https"
+
+
+# Reused error message — extracted so SonarCloud S1192 (duplicate-literal,
+# default threshold 3) stays quiet and so the wording can't drift across
+# the three jwt-decode failure arms below.
+_ERR_JWT_VERIFICATION = "Cloudflare Access JWT failed verification"
 
 
 def _build_jwks_url(team_domain: str) -> str:
@@ -147,7 +154,6 @@ def build_cloudflare_middleware(config: LensConfig):
             if not kid:
                 raise jwt.InvalidTokenError("missing kid in JWT header")
             jwk_data = await cache.get_key(kid)
-            from jwt.algorithms import RSAAlgorithm
             public_key = RSAAlgorithm.from_jwk(jwk_data)
             claims = jwt.decode(
                 token,
@@ -161,19 +167,19 @@ def build_cloudflare_middleware(config: LensConfig):
         except jwt.InvalidAudienceError:
             return _http_error(
                 401,
-                "Cloudflare Access JWT failed verification",
+                _ERR_JWT_VERIFICATION,
                 "audience mismatch — verify auth.cloudflare.aud in the lens config",
             )
         except jwt.InvalidIssuerError:
             return _http_error(
                 401,
-                "Cloudflare Access JWT failed verification",
+                _ERR_JWT_VERIFICATION,
                 "issuer mismatch — verify auth.cloudflare.team_domain in the lens config",
             )
         except (KeyError, jwt.InvalidTokenError) as exc:
             return _http_error(
                 401,
-                "Cloudflare Access JWT failed verification",
+                _ERR_JWT_VERIFICATION,
                 f"verify the request came through cloudflared ({type(exc).__name__})",
             )
         except aiohttp.ClientError as exc:
