@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import urllib.parse
 
 from aiohttp import web
 
@@ -63,6 +64,39 @@ def _connection_lost(message: str) -> web.Response:
         {"error": message, "hint": _UNHEALTHY_HINT},
         status=503,
     )
+
+
+def _origin_ok(request: web.Request) -> bool:
+    """CSRF defense-in-depth: verify Origin matches the request host.
+
+    Compares ``(hostname.lower(), port_or_default_for_scheme)`` tuples
+    rather than raw header strings so that case, default-port elision,
+    and IPv6 bracket formatting don't cause false 403s.
+
+    - Origin absent → allow (curl, cloudflared probes, internal monitors).
+    - Origin present → match → allow; mismatch → deny.
+
+    A proper CSRF-token scheme is tracked in issue #27 and will replace
+    this floor in a later phase.
+    """
+    origin = request.headers.get("Origin")
+    if origin is None:
+        return True
+    parsed = urllib.parse.urlparse(origin)
+    if not parsed.hostname:
+        return False
+    origin_host = parsed.hostname.lower()
+    origin_port = _effective_port(parsed.port, parsed.scheme)
+    request_host = (request.url.host or "").lower()
+    request_port = _effective_port(request.url.port, request.url.scheme)
+    return (origin_host, origin_port) == (request_host, request_port)
+
+
+def _effective_port(port: int | None, scheme: str) -> int:
+    """Resolve an explicit port, defaulting to the scheme's standard port."""
+    if port is not None:
+        return port
+    return 443 if scheme == "https" else 80
 
 
 async def get_index(request: web.Request) -> web.Response:
@@ -140,6 +174,18 @@ async def post_input(request: web.Request) -> web.Response:
     # was honest about the Content-Length.
     if request.content_length is not None and request.content_length > _MAX_INPUT_BODY:
         return _too_large()
+
+    # CSRF defense floor: reject cross-origin POSTs. Origin-absent requests
+    # (curl, cloudflared probes, internal monitors) pass through unchanged.
+    # A full CSRF-token scheme is tracked in issue #27.
+    if not _origin_ok(request):
+        return web.json_response(
+            {
+                "error": "Origin does not match request host",
+                "hint": "this is a CSRF defense; submit from the lens UI itself",
+            },
+            status=403,
+        )
 
     session = await _resolve_session(request)
     # Health gate before parsing: once the AgentIRC pipe is gone, the

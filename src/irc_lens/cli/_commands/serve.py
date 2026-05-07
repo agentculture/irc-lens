@@ -1,10 +1,8 @@
 """``irc-lens serve`` — launch the aiohttp web console.
 
-Loads a ``LensConfig`` from ``--config`` (or ``default_config_path()`` if
-it exists). When no config file is found, falls back to building a synthetic
-dev ``LensConfig`` from the CLI args — this preserves backward compatibility
-with the existing ``irc-lens serve --nick lens`` invocation. Phase 4 (T4.4)
-makes the config file required.
+Loads a ``LensConfig`` from ``--config`` (or ``default_config_path()``).
+The config file is required; if it is absent the command exits 1 with an
+``error:`` / ``hint:`` pair that points at ``irc-lens config init``.
 
 In ``auth.mode: dev``, opens one Session at startup against the configured
 AgentIRC and pre-seeds the registry. In ``auth.mode: cloudflare-access``,
@@ -14,10 +12,13 @@ request.
 
 Spec contract enforced:
 
-* ``--nick`` is required (identity is the user's choice — no safe default).
-* ``--host`` / ``--port`` default to ``127.0.0.1`` / ``6667`` so a bare
-  ``irc-lens serve --nick <name>`` reaches a local AgentIRC out of the
-  box. Override either flag to point at a remote server.
+* Config file required — pass ``--config <path>`` or place a config at
+  ``~/.config/irc-lens/config.yaml``. Run ``irc-lens config init`` to
+  create one.
+* ``--nick`` in dev mode overrides ``auth.dev.nick`` from the config.
+  ``--nick`` is rejected in cloudflare-access mode.
+* ``--host`` / ``--port`` / ``--bind`` / ``--web-port`` supplement the
+  loaded config values.
 * ``--bind 0.0.0.0`` prints a loud stderr warning (no auth in v1).
 * AgentIRC unreachable → ``error:`` + ``hint:`` on stderr, exit 1,
   aiohttp never binds.
@@ -36,7 +37,9 @@ import json
 import logging
 import sys
 import webbrowser
+from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 from aiohttp import web
 
@@ -47,6 +50,11 @@ from irc_lens.session import LensConnectionLost, Session
 from irc_lens.web import make_app
 from irc_lens.web.auth import warm_jwks
 from irc_lens.web.sessions import SessionFactory, disconnect_all
+
+logger = logging.getLogger("irc_lens.serve")
+
+_LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+_LOOPBACK_DEFAULT = "127.0.0.1"
 
 # `irc_lens.seed` is imported function-locally inside `_serve_async`
 # to avoid a real-but-latent module-load cycle:
@@ -111,45 +119,49 @@ def _display_url(bind: str, port: int) -> str:
     return f"http://{host}:{port}/"
 
 
-def _build_dev_config_from_args(args: argparse.Namespace) -> LensConfig:
-    """Build a synthetic dev-mode ``LensConfig`` from the CLI arguments.
+def _validate_cli_against_config(
+    config: LensConfig,
+    nick: str | None,
+    bind: str | None,
+) -> LensConfig:
+    """Apply CF-mode CLI rules. Returns a possibly-coerced config.
 
-    This is the Phase-3 backward-compatibility fallback: when no config file
-    is found at ``--config`` (or ``default_config_path()``), the serve command
-    constructs a minimal ``LensConfig`` from the legacy ``--host``, ``--port``,
-    ``--nick``, ``--bind``, and ``--web-port`` flags so that the existing
-    ``irc-lens serve --nick lens`` invocation keeps working without a config
-    file. Phase 4 (T4.4) removes this fallback and makes ``--config`` (or the
-    default path) required.
+    In dev mode this is a no-op.  In cloudflare-access mode:
+    - ``--nick`` is rejected (nick is derived per user from the JWT).
+    - A non-loopback ``--bind`` is coerced to ``127.0.0.1`` with a WARNING,
+      because cloudflared terminates locally and a public bind would bypass auth.
     """
-    dev_email = f"{args.nick}@local"
-    return LensConfig(
-        auth_mode="dev",
-        dev_nick=args.nick,
-        dev_email=dev_email,
-        cf_aud=None,
-        cf_team_domain=None,
-        allowed_emails=(),
-        allowed_service_tokens=(),
-        server_name="lens",
-        server_host=args.host,
-        server_port=args.port,
-        web_bind=args.bind,
-        web_port=args.web_port,
-    )
+    if config.auth_mode != "cloudflare-access":
+        return config
+    if nick is not None:
+        raise AfiError(
+            code=EXIT_USER_ERROR,
+            message="--nick is not valid when auth.mode is cloudflare-access",
+            remediation=(
+                "remove --nick — in CF mode the nick is derived per authenticated "
+                "user from the JWT principal (email or service-token common-name)"
+            ),
+        )
+    effective_bind = bind if bind is not None else config.web_bind
+    if effective_bind not in _LOOPBACK:
+        logger.warning(
+            "web.bind=%s is not loopback; coerced to %s because "
+            "cloudflared terminates locally",
+            effective_bind,
+            _LOOPBACK_DEFAULT,
+        )
+        return cast(LensConfig, replace(config, web_bind=_LOOPBACK_DEFAULT))
+    return config
 
 
 def _resolve_config(args: argparse.Namespace) -> LensConfig:
-    """Load a LensConfig from `--config` / default path, or fall back
-    to the synthetic dev config from CLI args.
+    """Load a LensConfig from ``--config`` or the default path.
 
-    Phase 4 (T4.4) removes the fallback so the file becomes required.
-
-    If the user *explicitly* passes ``--config <path>``, the path must
-    exist — silently dropping to the synthetic dev config on a missed
-    typo would risk starting an unauthenticated server when the user
-    intended a CF-mode deploy. The fallback only applies when no
-    ``--config`` was passed AND the default location is empty.
+    The config file is required (T4.4). If the user passes ``--config
+    <path>`` that path must exist. If no ``--config`` is given, the default
+    location (``~/.config/irc-lens/config.yaml``) must exist. Either way,
+    a missing file exits 1 with ``error:`` / ``hint:`` pointing at
+    ``irc-lens config init``.
     """
     if args.config:
         explicit = Path(args.config)
@@ -164,9 +176,16 @@ def _resolve_config(args: argparse.Namespace) -> LensConfig:
             )
         return load_config(explicit)
     default = default_config_path()
-    if default.exists():
-        return load_config(default)
-    return _build_dev_config_from_args(args)
+    if not default.exists():
+        raise AfiError(
+            code=EXIT_USER_ERROR,
+            message=f"no config at {default}",
+            remediation=(
+                "run 'irc-lens config init' to create one, "
+                "or pass --config <path>"
+            ),
+        )
+    return load_config(default)
 
 
 async def _connect_dev_session(args: argparse.Namespace, config: LensConfig) -> Session:
@@ -273,7 +292,7 @@ async def _build_app(
 
         app = make_app(config, cf_factory)
         # No pre-seed; --nick / --seed / --icon are ignored (Phase 4
-        # T4.1 will reject --nick with a hard error in CF mode).
+        # T4.1 rejects --nick with a hard error in CF mode).
         return app, None
     # Future-mode guard: load_config only allows "dev" or
     # "cloudflare-access", but a caller bypassing load_config (or a
@@ -331,6 +350,44 @@ async def _serve_async(args: argparse.Namespace) -> None:
     everything on one loop until shutdown.
     """
     config = _resolve_config(args)
+    # Apply explicit CLI overrides on top of the loaded config.  Each flag
+    # uses `is not None` (or `!= default`) so that an absent flag leaves the
+    # config value intact while an explicit flag always wins.
+    overrides: dict[str, object] = {}
+    # Each flag defaults to None (sentinel). Only override the config value
+    # when the flag was explicitly supplied on the command line.
+    if args.host is not None:
+        overrides["server_host"] = args.host
+    if args.port is not None:
+        overrides["server_port"] = args.port
+    if args.web_port is not None:
+        overrides["web_port"] = args.web_port
+    if args.bind is not None:
+        overrides["web_bind"] = args.bind
+    if overrides:
+        config = replace(config, **overrides)
+    # Apply CF-mode guards (rejects --nick in CF; coerces non-loopback --bind).
+    # CF mode's coercion to 127.0.0.1 happens inside this call, so the
+    # 0.0.0.0 / :: warning below fires on the *effective* bind, not the raw
+    # CLI flag — an operator who sets `web.bind: 0.0.0.0` in YAML without
+    # passing --bind will still see the warning.
+    config = _validate_cli_against_config(config, nick=args.nick, bind=args.bind)
+    # Warn when the effective bind address is a wildcard — the lens has no
+    # built-in authentication in v1 and a wildcard bind exposes it to every
+    # network interface. CF mode will have already coerced this to loopback;
+    # this warning therefore only fires in dev mode.
+    if config.web_bind in ("0.0.0.0", "::"):
+        emit_diagnostic(
+            f"warning: binding to {config.web_bind} exposes the lens with NO "
+            "authentication (0.0.0.0 / :: means reachable from any network "
+            "interface — there is no built-in authentication in v1). "
+            "Use --bind 127.0.0.1 unless you know what you're doing."
+        )
+    # Dev-mode nick override: --nick <name> replaces auth.dev.nick from the
+    # config.  This path is intentionally reached only when mode is dev
+    # (CF mode already raised above).
+    if config.auth_mode == "dev" and args.nick is not None:
+        config = replace(config, dev_nick=args.nick)
     app, dev_session = await _build_app(args, config)
     runner = web.AppRunner(app, handle_signals=True)
     await runner.setup()
@@ -352,13 +409,6 @@ async def _serve_async(args: argparse.Namespace) -> None:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
-    if args.bind == "0.0.0.0":
-        emit_diagnostic(
-            "warning: --bind 0.0.0.0 exposes the lens with NO authentication "
-            "(v1 has no auth). Use --bind 127.0.0.1 unless you know what "
-            "you're doing."
-        )
-
     _configure_logging(args.log_json)
 
     try:
@@ -375,8 +425,8 @@ def register(sub: argparse._SubParsersAction) -> None:
         help="Launch the aiohttp web console against an AgentIRC server.",
         description=(
             "Launch the aiohttp web console against an AgentIRC server. "
-            "Defaults target a local culture server on 127.0.0.1:6667 — only "
-            "--nick is required for the common case."
+            "A config file is required — run 'irc-lens config init' to create one. "
+            "Defaults target a local culture server on 127.0.0.1:6667."
         ),
         epilog=(
             "examples:\n"
@@ -395,7 +445,7 @@ def register(sub: argparse._SubParsersAction) -> None:
         default=None,
         help=(
             "Path to irc-lens config.yaml (default: ~/.config/irc-lens/config.yaml). "
-            "When absent, builds a synthetic dev config from the other CLI flags."
+            "Required — run 'irc-lens config init' to create one."
         ),
     )
     # `%(default)s` lets argparse render the actual default at help-time,
@@ -404,32 +454,47 @@ def register(sub: argparse._SubParsersAction) -> None:
     # tests/test_serve_cli.py::test_serve_help_renders_defaults_from_argparse.
     p.add_argument(
         "--host",
-        default="127.0.0.1",
-        help="AgentIRC server host (default: %(default)s).",
+        default=None,
+        help=(
+            "AgentIRC server host "
+            "(default: from config; falls back to 127.0.0.1 if config doesn't set it)."
+        ),
     )
     p.add_argument(
         "--port",
         type=int,
-        default=6667,
-        help="AgentIRC server port (default: %(default)s).",
+        default=None,
+        help=(
+            "AgentIRC server port "
+            "(default: from config; falls back to 6667 if config doesn't set it)."
+        ),
     )
     p.add_argument(
         "--nick",
-        required=True,
-        help="Nick to register on AgentIRC (e.g. --nick lens).",
+        default=None,
+        help=(
+            "Nick to register on AgentIRC (e.g. --nick lens). "
+            "Overrides auth.dev.nick from the config in dev mode. "
+            "Invalid in cloudflare-access mode — nick is derived from the JWT."
+        ),
     )
     p.add_argument(
         "--web-port",
         type=int,
-        default=8765,
-        help="Local HTTP port for the lens UI (default: %(default)s).",
+        default=None,
+        help=(
+            "Local HTTP port for the lens UI "
+            "(default: from config; falls back to 8765 if config doesn't set it)."
+        ),
     )
     p.add_argument(
         "--bind",
-        default="127.0.0.1",
+        default=None,
         help=(
-            "Bind address for the local web app (default: %(default)s). "
-            "Using 0.0.0.0 prints a warning — there is no auth in v1."
+            "Bind address for the local web app "
+            "(default: web.bind from config, or 127.0.0.1). "
+            "Using 0.0.0.0 prints a warning — there is no auth in v1. "
+            "In cloudflare-access mode a non-loopback bind is coerced to 127.0.0.1."
         ),
     )
     p.add_argument("--icon", default=None, help="Optional emoji passed to AgentIRC ICON.")
