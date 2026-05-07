@@ -16,6 +16,12 @@ Access application, allow-policy, and service token for the
 | `CF_TEST_HOSTNAME` | the hostname the test will hit |
 | `CF_TEAM_DOMAIN` | `<team>.cloudflareaccess.com` |
 
+## Optional env
+
+| Var | Purpose |
+| --- | --- |
+| `CF_ALLOWED_EMAILS` | comma-separated emails to admit via interactive SSO. When set, `setup.sh` creates a second `allow-emails` policy on the Access app alongside the service-token policy. Requires an IdP configured in Cloudflare Zero Trust. Leave unset for service-token-only access. |
+
 ## Env file written by setup.sh
 
 `setup.sh` writes `.cf-roundtrip.env` (gitignored, `chmod 600`) with these variables:

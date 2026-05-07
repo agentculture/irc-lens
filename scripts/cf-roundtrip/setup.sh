@@ -81,6 +81,32 @@ if [[ -z "$EXISTING" ]]; then
           include:[{service_token:{token_id:$cid}}]}')" >/dev/null
 fi
 
+# Optional second policy: allow listed emails via interactive SSO.
+# Active only when CF_ALLOWED_EMAILS is set (comma-separated). Leaving
+# it unset keeps the deployment service-token-only (round-trip default).
+# Idempotent: only created if a policy named "allow-emails" doesn't yet
+# exist on the app. To change the allowlist, delete the policy via the
+# dashboard (or teardown the whole app) and re-run setup.
+if [[ -n "${CF_ALLOWED_EMAILS:-}" ]]; then
+  # Parse + validate first so we don't post `include: []` to the CF API
+  # if the operator's value trims down to nothing (e.g. " , , , ").
+  EMAILS_INCLUDE="$(jq -nc --arg csv "$CF_ALLOWED_EMAILS" \
+    '$csv | split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length>0)) | map({email:{email:.}})')"
+  if [[ "$(jq length <<<"$EMAILS_INCLUDE")" -eq 0 ]]; then
+    echo "error: CF_ALLOWED_EMAILS is set but contains no valid emails after trim/empty-filter" >&2
+    echo "hint: format is comma-separated, e.g. alice@example.com,bob@example.com" >&2
+    exit 1
+  fi
+  echo "[5b/5] email-allow policy" >&2
+  EMAIL_EXISTING="$(cf_get "/accounts/$CF_ACCOUNT_ID/access/apps/$APP_ID/policies" \
+    | jq -r '.result[] | select(.name=="allow-emails") | .id' | head -1)"
+  if [[ -z "$EMAIL_EXISTING" ]]; then
+    cf_post "/accounts/$CF_ACCOUNT_ID/access/apps/$APP_ID/policies" \
+      "$(jq -nc --argjson inc "$EMAILS_INCLUDE" \
+          '{name:"allow-emails", decision:"allow", precedence:2, include:$inc}')" >/dev/null
+  fi
+fi
+
 cat >"$ENV_OUT" <<EOF
 IRC_LENS_TEST_AUD=$AUD
 IRC_LENS_TEST_HOSTNAME=$CF_TEST_HOSTNAME
