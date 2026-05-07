@@ -52,6 +52,7 @@ from irc_lens.web.sessions import SessionFactory, disconnect_all
 logger = logging.getLogger("irc_lens.serve")
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
+_LOOPBACK_DEFAULT = "127.0.0.1"
 
 # `irc_lens.seed` is imported function-locally inside `_serve_async`
 # to avoid a real-but-latent module-load cycle:
@@ -142,11 +143,12 @@ def _validate_cli_against_config(
     effective_bind = bind if bind is not None else config.web_bind
     if effective_bind not in _LOOPBACK:
         logger.warning(
-            "web.bind=%s is not loopback; coerced to 127.0.0.1 because "
+            "web.bind=%s is not loopback; coerced to %s because "
             "cloudflared terminates locally",
             effective_bind,
+            _LOOPBACK_DEFAULT,
         )
-        return replace(config, web_bind="127.0.0.1")
+        return replace(config, web_bind=_LOOPBACK_DEFAULT)
     return config
 
 
@@ -171,7 +173,7 @@ def _build_dev_config_from_args(args: argparse.Namespace) -> LensConfig:
             ),
         )
     dev_email = f"{args.nick}@local"
-    web_bind = args.bind if args.bind is not None else "127.0.0.1"
+    web_bind = args.bind if args.bind is not None else _LOOPBACK_DEFAULT
     return LensConfig(
         auth_mode="dev",
         dev_nick=args.nick,
@@ -322,7 +324,7 @@ async def _build_app(
 
         app = make_app(config, cf_factory)
         # No pre-seed; --nick / --seed / --icon are ignored (Phase 4
-        # T4.1 will reject --nick with a hard error in CF mode).
+        # T4.1 rejects --nick with a hard error in CF mode).
         return app, None
     # Future-mode guard: load_config only allows "dev" or
     # "cloudflare-access", but a caller bypassing load_config (or a

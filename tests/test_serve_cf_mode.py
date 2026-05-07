@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import pytest
 
@@ -28,7 +27,7 @@ def _cf_config() -> LensConfig:
     )
 
 
-def test_nick_rejected_in_cf_mode(tmp_path: Path) -> None:
+def test_nick_rejected_in_cf_mode() -> None:
     cfg = _cf_config()
     with pytest.raises(AfiError) as exc:
         _validate_cli_against_config(cfg, nick="something", bind="127.0.0.1")
@@ -44,10 +43,11 @@ def test_bind_coerced_to_loopback_in_cf_mode(caplog) -> None:
     assert any("coerced" in r.getMessage().lower() for r in caplog.records)
 
 
-def test_loopback_bind_unchanged_in_cf_mode() -> None:
+@pytest.mark.parametrize("loopback_bind", ["127.0.0.1", "::1", "localhost"])
+def test_loopback_bind_unchanged_in_cf_mode(loopback_bind: str) -> None:
     cfg = _cf_config()
-    coerced = _validate_cli_against_config(cfg, nick=None, bind="127.0.0.1")
-    assert coerced.web_bind == "127.0.0.1"
+    coerced = _validate_cli_against_config(cfg, nick=None, bind=loopback_bind)
+    assert coerced.web_bind == cfg.web_bind
 
 
 def test_dev_mode_passes_through_unchanged() -> None:
