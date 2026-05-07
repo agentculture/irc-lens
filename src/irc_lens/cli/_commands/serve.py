@@ -38,6 +38,7 @@ from irc_lens.cli._output import emit_diagnostic
 from irc_lens.config import LensConfig
 from irc_lens.session import LensConnectionLost, Session
 from irc_lens.web import make_app
+from irc_lens.web.sessions import disconnect_all
 
 # `irc_lens.seed` is imported function-locally inside `_serve_async`
 # to avoid a real-but-latent module-load cycle:
@@ -219,7 +220,11 @@ async def _serve_async(args: argparse.Namespace) -> None:
     try:
         await asyncio.Event().wait()
     finally:
-        await session.disconnect()
+        # Disconnect every registered Session, not just the pre-seeded one;
+        # Phase 3 will add lazily-opened per-user sessions, and this single
+        # call covers them too (return_exceptions=True so one failure doesn't
+        # strand the others).
+        await disconnect_all(app["registry"])
         await runner.cleanup()
 
 
