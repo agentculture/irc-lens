@@ -1,11 +1,10 @@
 """aiohttp ``Application`` factory for irc-lens.
 
-Phase 2: takes a :class:`LensConfig` and a session factory rather than
-a single connected Session. Builds the per-principal
-:class:`SessionRegistry`, mounts the dev-mode identity middleware, and
-exposes a `/healthz` endpoint.
-
-CF-mode middleware lands in Phase 3.
+Phase 3: dev-mode and cloudflare-access modes both wired. Takes a
+:class:`LensConfig` and a session factory rather than a single connected
+Session. Builds the per-principal :class:`SessionRegistry`, mounts the
+appropriate identity middleware for the configured auth mode, and exposes
+a ``/healthz`` endpoint.
 """
 from __future__ import annotations
 
@@ -16,6 +15,7 @@ from aiohttp import web
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
 from irc_lens.web import routes
+from irc_lens.web.auth import build_cloudflare_middleware
 from irc_lens.web.identity import Identity
 from irc_lens.web.routes import _MAX_INPUT_BODY
 from irc_lens.web.sessions import SessionFactory, SessionRegistry
@@ -56,21 +56,17 @@ def _dev_identity_middleware(config: LensConfig):
 
 
 def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Application:
-    if config.auth_mode != "dev":
-        # Intentional failure path → AfiError (the dispatcher renders this
-        # as `error:` + `hint:` and exits with code 1, instead of falling
-        # into the catch-all "file a bug" path that RuntimeError produces).
-        # Phase 3 will replace this branch with the CF-mode middleware.
+    if config.auth_mode == "dev":
+        middleware = _dev_identity_middleware(config)
+    elif config.auth_mode == "cloudflare-access":
+        middleware = build_cloudflare_middleware(config)
+    else:
         raise AfiError(
             code=EXIT_USER_ERROR,
-            message=f"auth.mode={config.auth_mode!r} is not yet supported",
-            remediation=(
-                "set `auth.mode: dev` in your config; "
-                "cloudflare-access support lands in a later phase"
-            ),
+            message=f"auth.mode={config.auth_mode!r} is not supported",
+            remediation="set `auth.mode:` to either `dev` or `cloudflare-access`",
         )
 
-    middleware = _dev_identity_middleware(config)
     app = web.Application(client_max_size=_MAX_INPUT_BODY, middlewares=[middleware])
 
     registry = SessionRegistry(factory=session_factory)
