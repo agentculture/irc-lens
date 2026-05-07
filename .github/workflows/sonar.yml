@@ -1,0 +1,43 @@
+# SonarCloud Code Analysis — CI-based.
+#
+# Replaces SonarCloud's automatic-analysis path, which silently stopped
+# decorating PRs after #29 (only main-branch refresh tasks fire,
+# tagged "Anonymous", ~2-3s; PR diffs are skipped). CI-based scanning
+# is the SonarCloud-recommended fallback when auto-analysis breaks.
+#
+# Required repo secret:
+#   SONAR_TOKEN  — generated at sonarcloud.io → My Account → Security.
+#
+# Job is gated on the secret being present so contributor PRs without
+# access to the secret skip cleanly instead of hard-failing the check.
+
+name: SonarCloud
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  sonarcloud:
+    name: SonarCloud Code Analysis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    if: ${{ github.event.pull_request.head.repo.full_name == github.repository || github.event_name == 'push' }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          # Full history is required for accurate blame and PR-diff
+          # baselines. The default shallow clone makes Sonar miss
+          # most "new code" attribution.
+          fetch-depth: 0
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@ffc3010689be73b8e5ae0c57ce35968afd7909e8  # v5.0.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
