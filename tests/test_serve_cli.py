@@ -15,6 +15,7 @@ replaces `aiohttp.web.AppRunner`, `aiohttp.web.TCPSite`, and
 from __future__ import annotations
 
 import asyncio
+from pathlib import Path
 
 import pytest
 
@@ -81,6 +82,24 @@ def stub_aiohttp_runtime(monkeypatch: pytest.MonkeyPatch):
 
 
 @pytest.fixture
+def dev_config_path(tmp_path: Path) -> Path:
+    """Write a minimal valid dev-mode config to a tmp file and return its path."""
+    p = tmp_path / "config.yaml"
+    p.write_text(
+        "auth:\n"
+        "  mode: dev\n"
+        "  dev:\n"
+        "    nick: lens-test\n"
+        "    email: dev@local\n"
+        "server:\n"
+        "  name: spark\n"
+        "  host: 127.0.0.1\n"
+        "  port: 6667\n"
+    )
+    return p
+
+
+@pytest.fixture
 def successful_connect(monkeypatch: pytest.MonkeyPatch):
     async def ok(self) -> None:
         return None
@@ -102,30 +121,23 @@ def successful_connect(monkeypatch: pytest.MonkeyPatch):
 # ---------------------------------------------------------------------------
 
 
-def test_serve_requires_only_nick(
+def test_serve_missing_config_errors(
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """``--host`` / ``--port`` default to a local AgentIRC, so only ``--nick``
-    is required. The bare ``irc-lens serve`` invocation still must error via
-    the AfiError + hint contract (no argparse traceback) and the hint must
-    point at the concrete fix — supplying ``--nick``."""
+    """Bare ``irc-lens serve`` with no --config and no config at the default
+    path must exit 1 via the AfiError+hint contract (no argparse traceback).
+    The hint must mention ``config init`` so the user knows how to fix it."""
+    # Point the default config path at a non-existent location so the test
+    # is hermetic regardless of the developer's local config.
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/irc-lens-no-such-dir-t44")
     rc = main(["serve"])
-    assert rc != 0
+    assert rc == 1
     err = capsys.readouterr().err
     assert "error:" in err
     assert "hint:" in err
-    assert "--nick" in err
+    assert "config init" in err
     assert "Traceback" not in err
-    # The error must mention nick and ONLY nick now that host/port have
-    # defaults — guards against silent regression of the defaults.
-    assert "--host" not in err
-    assert "--port" not in err
-    # The hint must be the serve-specific copy-pasteable form, NOT the
-    # generic `run '<prog> --help'` fallback. This is the regression
-    # Copilot flagged on PR #16: a weaker assertion would silently pass
-    # if `_hint_for` regressed to the generic branch.
-    hint_line = next(line for line in err.splitlines() if "hint:" in line)
-    assert "try 'irc-lens serve --nick" in hint_line
 
 
 def test_serve_help_lists_all_flags(capsys: pytest.CaptureFixture[str]) -> None:
@@ -196,6 +208,7 @@ def test_serve_help_renders_defaults_from_argparse(
 def test_serve_fails_fast_on_unreachable_agentirc(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
+    dev_config_path: Path,
 ) -> None:
     """AgentIRC unreachable → exit 1, error + hint on stderr; the aiohttp
     runner is never even constructed (tripwire below)."""
@@ -210,7 +223,7 @@ def test_serve_fails_fast_on_unreachable_agentirc(
 
     monkeypatch.setattr("aiohttp.web.AppRunner", tripwire)
 
-    rc = main(["serve", "--host", "127.0.0.1", "--port", "1", "--nick", "lens"])
+    rc = main(["serve", "--config", str(dev_config_path), "--host", "127.0.0.1", "--port", "1", "--nick", "lens"])
     assert rc == 1
     err = capsys.readouterr().err
     assert "error:" in err
@@ -223,13 +236,14 @@ def test_serve_translates_port_in_use_to_exit_2(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
     successful_connect,
+    dev_config_path: Path,
 ) -> None:
     """Web port in use → exit 2 (env error per the policy)."""
     monkeypatch.setattr("aiohttp.web.AppRunner", _FakeRunner)
     monkeypatch.setattr("aiohttp.web.TCPSite", _BoomSite)
     monkeypatch.setattr("asyncio.Event", _ImmediateEvent)
 
-    rc = main(["serve", "--host", "x", "--port", "1", "--nick", "lens"])
+    rc = main(["serve", "--config", str(dev_config_path), "--host", "x", "--port", "1", "--nick", "lens"])
     assert rc == 2
     err = capsys.readouterr().err
     assert "error:" in err
@@ -241,11 +255,13 @@ def test_serve_warns_on_bind_zero(
     capsys: pytest.CaptureFixture[str],
     stub_aiohttp_runtime,
     successful_connect,
+    dev_config_path: Path,
 ) -> None:
     """`--bind 0.0.0.0` prints the loud no-auth warning before binding."""
     rc = main(
         [
             "serve",
+            "--config", str(dev_config_path),
             "--host", "x", "--port", "1", "--nick", "lens",
             "--bind", "0.0.0.0",
             "--web-port", "65000",
@@ -261,12 +277,14 @@ def test_serve_displays_routable_url_when_binding_to_zero(
     capsys: pytest.CaptureFixture[str],
     stub_aiohttp_runtime,
     successful_connect,
+    dev_config_path: Path,
 ) -> None:
     """When binding to 0.0.0.0, the printed URL must use 127.0.0.1 — most
     browsers won't navigate to http://0.0.0.0:port/."""
     rc = main(
         [
             "serve",
+            "--config", str(dev_config_path),
             "--host", "x", "--port", "1", "--nick", "lens",
             "--bind", "0.0.0.0",
             "--web-port", "65010",
@@ -282,11 +300,13 @@ def test_serve_displays_bind_url_for_localhost(
     capsys: pytest.CaptureFixture[str],
     stub_aiohttp_runtime,
     successful_connect,
+    dev_config_path: Path,
 ) -> None:
     """For non-wildcard binds, the URL uses the bind value as-is."""
     rc = main(
         [
             "serve",
+            "--config", str(dev_config_path),
             "--host", "x", "--port", "1", "--nick", "lens",
             "--web-port", "65011",
         ]
@@ -301,6 +321,7 @@ def test_serve_seed_loads_yaml_fixture(
     stub_aiohttp_runtime,
     successful_connect,
     monkeypatch: pytest.MonkeyPatch,
+    dev_config_path: Path,
 ) -> None:
     """Phase 8: `--seed <path>` overlays YAML state onto Session before
     `make_app` runs. Verify by spying on the loader."""
@@ -317,6 +338,7 @@ def test_serve_seed_loads_yaml_fixture(
     rc = main(
         [
             "serve",
+            "--config", str(dev_config_path),
             "--host", "x", "--port", "1", "--nick", "lens",
             "--seed", "tests/fixtures/basic.yaml",
             "--web-port", "65001",
@@ -330,12 +352,14 @@ def test_serve_seed_missing_file_exits_user_error(
     capsys: pytest.CaptureFixture[str],
     stub_aiohttp_runtime,
     successful_connect,
+    dev_config_path: Path,
 ) -> None:
     """A bad --seed path surfaces as `error:`/`hint:` per the rubric;
     no aiohttp bind, no traceback."""
     rc = main(
         [
             "serve",
+            "--config", str(dev_config_path),
             "--host", "x", "--port", "1", "--nick", "lens",
             "--seed", "tests/fixtures/does_not_exist.yaml",
             "--web-port", "65001",
