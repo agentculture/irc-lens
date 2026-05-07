@@ -96,8 +96,7 @@ on `127.0.0.1:6667`. To deploy behind Cloudflare Access, switch
 ### `--nick` and `--bind`
 
 In `auth.mode: dev`, `--nick` overrides `auth.dev.nick`. In
-`auth.mode: cloudflare-access`, passing `--nick` is a hard error: the
-nick is derived per authenticated user from `auth.allowed_emails`.
+`auth.mode: cloudflare-access`, passing `--nick` is a hard error: the nick is derived per authenticated user from the JWT principal (email or service-token common-name). `auth.allowed_emails` is only the allowlist.
 A non-loopback `--bind` (or `web.bind`) under CF mode is coerced to
 `127.0.0.1` with a `WARNING` log line, because cloudflared terminates locally.
 

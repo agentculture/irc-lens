@@ -67,21 +67,33 @@ def _connection_lost(message: str) -> web.Response:
 
 
 def _origin_ok(request: web.Request) -> bool:
-    """CSRF defense-in-depth: verify the Origin header matches the request host.
+    """CSRF defense-in-depth: verify Origin matches the request host.
+
+    Compares ``(hostname.lower(), port_or_default_for_scheme)`` tuples
+    rather than raw header strings so that case, default-port elision,
+    and IPv6 bracket formatting don't cause false 403s.
 
     - Origin absent → allow (curl, cloudflared probes, internal monitors).
-    - Origin present → parse netloc (host:port) and compare against the
-      ``Host`` request header. Match → allow. Mismatch → deny.
+    - Origin present → match → allow; mismatch → deny.
 
-    ``Referer`` is intentionally NOT checked here — Origin is the only
-    signal in this iteration. A proper CSRF-token scheme is tracked in
-    issue #27 and will replace this floor in a later phase.
+    A proper CSRF-token scheme is tracked in issue #27 and will replace
+    this floor in a later phase.
     """
     origin = request.headers.get("Origin")
     if origin is None:
         return True
     parsed = urllib.parse.urlparse(origin)
-    return parsed.netloc == request.headers.get("Host", "")
+    if not parsed.hostname:
+        return False
+    origin_host = parsed.hostname.lower()
+    origin_port = parsed.port if parsed.port is not None else (
+        443 if parsed.scheme == "https" else 80
+    )
+    request_host = (request.url.host or "").lower()
+    request_port = request.url.port if request.url.port is not None else (
+        443 if request.url.scheme == "https" else 80
+    )
+    return (origin_host, origin_port) == (request_host, request_port)
 
 
 async def get_index(request: web.Request) -> web.Response:

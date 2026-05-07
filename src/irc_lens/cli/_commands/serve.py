@@ -137,8 +137,8 @@ def _validate_cli_against_config(
             code=EXIT_USER_ERROR,
             message="--nick is not valid when auth.mode is cloudflare-access",
             remediation=(
-                "remove --nick — in CF mode the nick is derived per "
-                "authenticated user from auth.allowed_emails"
+                "remove --nick — in CF mode the nick is derived per authenticated "
+                "user from the JWT principal (email or service-token common-name)"
             ),
         )
     effective_bind = bind if bind is not None else config.web_bind
@@ -353,28 +353,40 @@ async def _serve_async(args: argparse.Namespace) -> None:
     # uses `is not None` (or `!= default`) so that an absent flag leaves the
     # config value intact while an explicit flag always wins.
     overrides: dict[str, object] = {}
-    # --host / --port supplement server.{host,port} from the config.
-    # argparse sets these to their defaults (127.0.0.1 / 6667) even when the
-    # flag is absent, so we cannot distinguish "flag absent" from "flag
-    # matches default".  We always apply them — the config author who wants
-    # a different default can set it in the file; the CLI flag always wins.
-    overrides["server_host"] = args.host
-    overrides["server_port"] = args.port
-    # --web-port: argparse default is 8765; always apply.
-    overrides["web_port"] = args.web_port
-    # --bind: None means "use config value"; any explicit string overrides it.
+    # Each flag defaults to None (sentinel). Only override the config value
+    # when the flag was explicitly supplied on the command line.
+    if args.host is not None:
+        overrides["server_host"] = args.host
+    if args.port is not None:
+        overrides["server_port"] = args.port
+    if args.web_port is not None:
+        overrides["web_port"] = args.web_port
     if args.bind is not None:
         overrides["web_bind"] = args.bind
     if overrides:
         config = replace(config, **overrides)
     # Apply CF-mode guards (rejects --nick in CF; coerces non-loopback --bind).
+    # CF mode's coercion to 127.0.0.1 happens inside this call, so the
+    # 0.0.0.0 / :: warning below fires on the *effective* bind, not the raw
+    # CLI flag — an operator who sets `web.bind: 0.0.0.0` in YAML without
+    # passing --bind will still see the warning.
     config = _validate_cli_against_config(config, nick=args.nick, bind=args.bind)
+    # Warn when the effective bind address is a wildcard — the lens has no
+    # built-in authentication in v1 and a wildcard bind exposes it to every
+    # network interface. CF mode will have already coerced this to loopback;
+    # this warning therefore only fires in dev mode.
+    if config.web_bind in ("0.0.0.0", "::"):
+        emit_diagnostic(
+            f"warning: binding to {config.web_bind} exposes the lens with NO "
+            "authentication (0.0.0.0 / :: means reachable from any network "
+            "interface — there is no built-in authentication in v1). "
+            "Use --bind 127.0.0.1 unless you know what you're doing."
+        )
     # Dev-mode nick override: --nick <name> replaces auth.dev.nick from the
     # config.  This path is intentionally reached only when mode is dev
     # (CF mode already raised above).
     if config.auth_mode == "dev" and args.nick is not None:
-        dev_email = f"{args.nick}@local"
-        config = replace(config, dev_nick=args.nick, dev_email=dev_email)
+        config = replace(config, dev_nick=args.nick)
     app, dev_session = await _build_app(args, config)
     runner = web.AppRunner(app, handle_signals=True)
     await runner.setup()
@@ -396,13 +408,6 @@ async def _serve_async(args: argparse.Namespace) -> None:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
-    if args.bind == "0.0.0.0":
-        emit_diagnostic(
-            "warning: --bind 0.0.0.0 exposes the lens with NO authentication "
-            "(v1 has no auth). Use --bind 127.0.0.1 unless you know what "
-            "you're doing."
-        )
-
     _configure_logging(args.log_json)
 
     try:
@@ -448,14 +453,20 @@ def register(sub: argparse._SubParsersAction) -> None:
     # tests/test_serve_cli.py::test_serve_help_renders_defaults_from_argparse.
     p.add_argument(
         "--host",
-        default="127.0.0.1",
-        help="AgentIRC server host (default: %(default)s).",
+        default=None,
+        help=(
+            "AgentIRC server host "
+            "(default: from config; falls back to 127.0.0.1 if config doesn't set it)."
+        ),
     )
     p.add_argument(
         "--port",
         type=int,
-        default=6667,
-        help="AgentIRC server port (default: %(default)s).",
+        default=None,
+        help=(
+            "AgentIRC server port "
+            "(default: from config; falls back to 6667 if config doesn't set it)."
+        ),
     )
     p.add_argument(
         "--nick",
@@ -469,8 +480,11 @@ def register(sub: argparse._SubParsersAction) -> None:
     p.add_argument(
         "--web-port",
         type=int,
-        default=8765,
-        help="Local HTTP port for the lens UI (default: %(default)s).",
+        default=None,
+        help=(
+            "Local HTTP port for the lens UI "
+            "(default: from config; falls back to 8765 if config doesn't set it)."
+        ),
     )
     p.add_argument(
         "--bind",

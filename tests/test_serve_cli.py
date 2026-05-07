@@ -124,13 +124,15 @@ def successful_connect(monkeypatch: pytest.MonkeyPatch):
 def test_serve_missing_config_errors(
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     """Bare ``irc-lens serve`` with no --config and no config at the default
     path must exit 1 via the AfiError+hint contract (no argparse traceback).
     The hint must mention ``config init`` so the user knows how to fix it."""
     # Point the default config path at a non-existent location so the test
-    # is hermetic regardless of the developer's local config.
-    monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/irc-lens-no-such-dir-t44")
+    # is hermetic regardless of the developer's local config. Use tmp_path
+    # so the directory is guaranteed not to exist (created fresh per test).
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "no-config-dir"))
     rc = main(["serve"])
     assert rc == 1
     err = capsys.readouterr().err
@@ -394,3 +396,109 @@ def test_serve_explicit_config_missing_exits_user_error(
     assert "hint:" in err
     assert "config init" in err
     assert "Traceback" not in err
+
+
+def test_serve_uses_config_host_port_when_no_cli_flags(
+    capsys: pytest.CaptureFixture[str],
+    stub_aiohttp_runtime,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When --host / --port are omitted, the server host/port come from the
+    config file (sentinel-default fix, FIX A). Uses TEST-NET-1 (RFC 5737)
+    to ensure the address cannot accidentally match a real host.
+
+    ``Session.connect`` is patched to capture the (host, port) that were
+    passed to the Session constructor; ``wait_for_welcome`` is patched to
+    return immediately so the flow doesn't block.
+    """
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "auth:\n"
+        "  mode: dev\n"
+        "  dev:\n"
+        "    nick: lens-test\n"
+        "    email: dev@local\n"
+        "server:\n"
+        "  name: spark\n"
+        "  host: 192.0.2.42\n"
+        "  port: 7777\n"
+    )
+
+    captured: dict[str, object] = {}
+
+    async def spy_connect(self) -> None:
+        captured["host"] = self.host
+        captured["port"] = self.port
+
+    async def noop_welcome(self) -> None:
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr("irc_lens.session.Session.connect", spy_connect)
+    monkeypatch.setattr("irc_lens.session.Session.wait_for_welcome", noop_welcome)
+
+    rc = main(
+        [
+            "serve",
+            "--config", str(cfg),
+            # no --host / --port — config values must be used
+            "--web-port", "65020",
+        ]
+    )
+    assert rc == 0
+    assert captured.get("host") == "192.0.2.42", (
+        f"Expected config host 192.0.2.42, got {captured.get('host')!r}"
+    )
+    assert captured.get("port") == 7777, (
+        f"Expected config port 7777, got {captured.get('port')!r}"
+    )
+
+
+def test_serve_warns_on_config_bind_zero(
+    capsys: pytest.CaptureFixture[str],
+    stub_aiohttp_runtime,
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """When `web.bind: 0.0.0.0` is in the config and --bind is not passed,
+    the 0.0.0.0 warning must still fire (FIX C: key off effective config
+    bind, not the CLI flag).
+    """
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        "auth:\n"
+        "  mode: dev\n"
+        "  dev:\n"
+        "    nick: lens-test\n"
+        "    email: dev@local\n"
+        "server:\n"
+        "  name: spark\n"
+        "  host: 127.0.0.1\n"
+        "  port: 6667\n"
+        "web:\n"
+        "  bind: 0.0.0.0\n"
+    )
+
+    async def ok(self) -> None:
+        return None
+
+    async def welcomed(self) -> None:
+        await asyncio.sleep(0)
+
+    monkeypatch.setattr("irc_lens.session.Session.connect", ok)
+    monkeypatch.setattr("irc_lens.session.Session.wait_for_welcome", welcomed)
+
+    rc = main(
+        [
+            "serve",
+            "--config", str(cfg),
+            "--web-port", "65030",
+            # no --bind: warning must fire from config.web_bind
+        ]
+    )
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "0.0.0.0" in err, f"Expected 0.0.0.0 warning in stderr, got: {err!r}"
+    assert "no auth" in err.lower() or "no authentication" in err.lower(), (
+        f"Expected no-auth warning text in stderr, got: {err!r}"
+    )

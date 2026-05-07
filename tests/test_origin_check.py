@@ -69,3 +69,55 @@ async def test_post_input_foreign_origin_rejected(lens_client: TestClient) -> No
     assert "origin" in body["error"].lower(), (
         f"Expected 'origin' in error message, got: {body['error']!r}"
     )
+    assert "hint" in body, f"Response body missing 'hint' key: {body}"
+    assert body["hint"], f"Expected non-empty 'hint', got: {body['hint']!r}"
+
+
+@pytest.mark.asyncio
+async def test_post_input_origin_default_port_omitted(lens_client: TestClient) -> None:
+    """Origin with default port omitted for a foreign host still 403s.
+
+    Verifies that default-port elision (no :80 in the Origin header)
+    doesn't break the foreign-origin rejection path.  The lens fixture
+    binds on a non-standard port so the comparison tuple always differs.
+    """
+    resp = await lens_client.post(
+        "/input",
+        data={"text": "hello"},
+        headers={"Origin": "http://evil.example.com"},  # no port → default 80
+    )
+    assert resp.status == 403, (
+        f"Expected 403 for default-port-omitted foreign Origin, got {resp.status}"
+    )
+    body = await resp.json()
+    assert "error" in body
+    assert "hint" in body
+    assert body["hint"]
+
+
+@pytest.mark.asyncio
+async def test_post_input_origin_with_path_component(lens_client: TestClient) -> None:
+    """Origin with a path component is allowed when the host+port matches.
+
+    The Origin header normally doesn't include a path, but this defensive
+    test confirms the helper only compares (hostname, port) — a spurious
+    path in the header doesn't break the match.
+    """
+    port = lens_client.port
+    origin = f"http://127.0.0.1:{port}/some/path"
+    resp = await lens_client.post(
+        "/input",
+        data={"text": "hello"},
+        headers={"Origin": origin},
+    )
+    assert resp.status in (204, 503), (
+        f"Expected 204 or 503 for matching-host Origin-with-path, got {resp.status}"
+    )
+
+
+# omitted: test_post_input_origin_case_insensitive — the aiohttp TestServer
+# binds on 127.0.0.1 (IP literal); constructing an Origin with an uppercase
+# hostname like 'LOCALHOST' that maps to the same address would require DNS
+# mocking or a second server bind.  The implementation handles it (hostname
+# comparison is lowercased on both sides) but the fixture mechanics make an
+# in-test assertion impractical.
