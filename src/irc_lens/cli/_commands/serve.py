@@ -39,6 +39,7 @@ import sys
 import webbrowser
 from dataclasses import replace
 from pathlib import Path
+from typing import cast
 
 from aiohttp import web
 
@@ -149,7 +150,7 @@ def _validate_cli_against_config(
             effective_bind,
             _LOOPBACK_DEFAULT,
         )
-        return replace(config, web_bind=_LOOPBACK_DEFAULT)
+        return cast(LensConfig, replace(config, web_bind=_LOOPBACK_DEFAULT))
     return config
 
 

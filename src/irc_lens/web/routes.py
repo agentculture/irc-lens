@@ -86,14 +86,17 @@ def _origin_ok(request: web.Request) -> bool:
     if not parsed.hostname:
         return False
     origin_host = parsed.hostname.lower()
-    origin_port = parsed.port if parsed.port is not None else (
-        443 if parsed.scheme == "https" else 80
-    )
+    origin_port = _effective_port(parsed.port, parsed.scheme)
     request_host = (request.url.host or "").lower()
-    request_port = request.url.port if request.url.port is not None else (
-        443 if request.url.scheme == "https" else 80
-    )
+    request_port = _effective_port(request.url.port, request.url.scheme)
     return (origin_host, origin_port) == (request_host, request_port)
+
+
+def _effective_port(port: int | None, scheme: str) -> int:
+    """Resolve an explicit port, defaulting to the scheme's standard port."""
+    if port is not None:
+        return port
+    return 443 if scheme == "https" else 80
 
 
 async def get_index(request: web.Request) -> web.Response:
