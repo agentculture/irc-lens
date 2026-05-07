@@ -13,7 +13,9 @@ set -euo pipefail
 BASE="https://api.cloudflare.com/client/v4"
 HDR=(-H "Authorization: Bearer $CF_API_TOKEN" -H "Content-Type: application/json")
 TUNNEL_NAME="irc-lens-roundtrip"
+TOKEN_NAME="irc-lens-roundtrip"
 APP_NAME="irc-lens roundtrip"
+APP_NAME_ENCODED="irc-lens%20roundtrip"
 TOKEN_FILE="${HOME}/.config/irc-lens/cf-roundtrip-token.json"
 ENV_OUT="${ENV_OUT:-.cf-roundtrip.env}"
 
@@ -42,7 +44,7 @@ if [[ -z "$DNS_ID" ]]; then
 fi
 
 echo "[3/5] access app" >&2
-APP_ID="$(cf_get "/accounts/$CF_ACCOUNT_ID/access/apps?name=$APP_NAME" \
+APP_ID="$(cf_get "/accounts/$CF_ACCOUNT_ID/access/apps?name=$APP_NAME_ENCODED" \
   | jq -r '.result[0].id // empty')"
 if [[ -z "$APP_ID" ]]; then
   APP_ID="$(cf_post "/accounts/$CF_ACCOUNT_ID/access/apps" \
@@ -60,7 +62,7 @@ if [[ -f "$TOKEN_FILE" ]]; then
   CLIENT_SECRET="$(jq -r .client_secret "$TOKEN_FILE")"
 else
   TOKEN_JSON="$(cf_post "/accounts/$CF_ACCOUNT_ID/access/service_tokens" \
-    "$(jq -n '{name:"irc-lens-roundtrip"}')" | jq -r '.result')"
+    "$(jq -n --arg n "$TOKEN_NAME" '{name:$n}')" | jq -r '.result')"
   CLIENT_ID="$(echo "$TOKEN_JSON" | jq -r .client_id)"
   CLIENT_SECRET="$(echo "$TOKEN_JSON" | jq -r .client_secret)"
   mkdir -p "$(dirname "$TOKEN_FILE")"
@@ -84,5 +86,7 @@ IRC_LENS_TEST_HOSTNAME=$CF_TEST_HOSTNAME
 IRC_LENS_TEST_TEAM_DOMAIN=$CF_TEAM_DOMAIN
 IRC_LENS_TEST_CLIENT_ID=$CLIENT_ID
 IRC_LENS_TEST_CLIENT_SECRET=$CLIENT_SECRET
+IRC_LENS_TEST_TOKEN_NAME=$TOKEN_NAME
 EOF
+chmod 600 "$ENV_OUT"
 echo "wrote $ENV_OUT" >&2

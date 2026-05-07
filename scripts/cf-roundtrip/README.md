@@ -16,6 +16,19 @@ Access application, allow-policy, and service token for the
 | `CF_TEST_HOSTNAME` | the hostname the test will hit |
 | `CF_TEAM_DOMAIN` | `<team>.cloudflareaccess.com` |
 
+## Env file written by setup.sh
+
+`setup.sh` writes `.cf-roundtrip.env` (gitignored, `chmod 600`) with these variables:
+
+| Var | Purpose |
+| --- | --- |
+| `IRC_LENS_TEST_AUD` | Cloudflare Access application audience tag |
+| `IRC_LENS_TEST_HOSTNAME` | public hostname the test hits |
+| `IRC_LENS_TEST_TEAM_DOMAIN` | `<team>.cloudflareaccess.com` |
+| `IRC_LENS_TEST_CLIENT_ID` | service-token client ID (`<uuid>.access`), used in `CF-Access-Client-Id` request header |
+| `IRC_LENS_TEST_CLIENT_SECRET` | service-token client secret, used in `CF-Access-Client-Secret` request header |
+| `IRC_LENS_TEST_TOKEN_NAME` | service-token display name written by setup.sh; the test puts this value in `auth.allowed_service_tokens` (Cloudflare populates `common_name` with the token's display name, not the UUID client_id) |
+
 ## Run
 
     ./scripts/cf-roundtrip/setup.sh

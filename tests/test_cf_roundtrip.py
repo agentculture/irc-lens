@@ -23,6 +23,7 @@ REQUIRED_ENV = (
     "IRC_LENS_TEST_TEAM_DOMAIN",
     "IRC_LENS_TEST_CLIENT_ID",
     "IRC_LENS_TEST_CLIENT_SECRET",
+    "IRC_LENS_TEST_TOKEN_NAME",
 )
 
 
@@ -50,7 +51,7 @@ auth:
     team_domain: {os.environ['IRC_LENS_TEST_TEAM_DOMAIN']}
   allowed_emails: []
   allowed_service_tokens:
-    - {os.environ['IRC_LENS_TEST_CLIENT_ID']}
+    - {os.environ['IRC_LENS_TEST_TOKEN_NAME']}
 server:
   name: roundtrip
   host: 127.0.0.1
