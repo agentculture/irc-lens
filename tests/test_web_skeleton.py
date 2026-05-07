@@ -12,32 +12,9 @@ from __future__ import annotations
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
-from irc_lens.config import LensConfig
 from irc_lens.session import EntityItem, Session
-from irc_lens.web import make_app
 
-_DEV_CONFIG = LensConfig(
-    auth_mode="dev",
-    dev_nick="lens-test",
-    dev_email="dev@local",
-    cf_aud=None,
-    cf_team_domain=None,
-    allowed_emails=(),
-    allowed_service_tokens=(),
-    server_name="testsrv",
-    server_host="127.0.0.1",
-    server_port=6667,
-    web_bind="127.0.0.1",
-    web_port=0,
-)
-
-
-def _make_app_for(session: Session):
-    """Build an app pre-seeded with ``session`` so get_or_open returns it
-    without calling connect() again."""
-    app = make_app(_DEV_CONFIG, lambda _nick: session)
-    app["registry"].register(_DEV_CONFIG.dev_email, session)
-    return app
+from helpers import DEV_CONFIG as _DEV_CONFIG, make_app_for as _make_app_for
 
 
 # ---------------------------------------------------------------------------

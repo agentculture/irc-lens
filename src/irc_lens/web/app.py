@@ -27,9 +27,18 @@ def _dev_identity_middleware(config: LensConfig):
     Real-world dev mode has a single human at the keyboard; the lens
     treats every request as them. CF mode (Phase 3) replaces this.
     """
-    assert config.auth_mode == "dev"
-    assert config.dev_email is not None
-    assert config.dev_nick is not None
+    # Explicit checks rather than `assert`: `python -O` strips assertions,
+    # and a config with auth_mode='dev' but missing dev_email/dev_nick
+    # would silently produce an Identity(None, None, "dev") and fail
+    # opaquely deep in session creation.
+    if config.auth_mode != "dev":
+        raise ValueError(
+            f"_dev_identity_middleware called with auth_mode={config.auth_mode!r}"
+        )
+    if not config.dev_email or not config.dev_nick:
+        raise ValueError(
+            "auth.mode='dev' requires both auth.dev.email and auth.dev.nick"
+        )
     identity = Identity(
         principal=config.dev_email,
         nick=config.dev_nick,
