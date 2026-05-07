@@ -65,11 +65,25 @@ web:
         env={**os.environ, "IRC_LENS_TEST_HOOKS": "1"},
     )
     try:
-        # Wait for local /healthz before yielding.
+        # Wait for local /healthz before yielding; fail fast if the process dies.
+        healthz_ok = False
         for _ in range(30):
+            if proc.poll() is not None:
+                pytest.fail(
+                    f"lens subprocess exited prematurely with code "
+                    f"{proc.returncode}; cannot run round-trip"
+                )
             if _local_healthz():
+                healthz_ok = True
                 break
             time.sleep(1)
+        if not healthz_ok:
+            proc.terminate()
+            proc.wait(timeout=5)
+            pytest.fail(
+                f"local /healthz never came up after 30s; "
+                f"proc.poll()={proc.poll()}"
+            )
         yield proc
     finally:
         proc.terminate()

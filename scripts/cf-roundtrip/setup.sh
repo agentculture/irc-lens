@@ -33,6 +33,7 @@ if [[ -z "$TUNNEL_ID" ]]; then
     | jq -r '.result.id')"
 fi
 echo "  tunnel_id=$TUNNEL_ID" >&2
+TUNNEL_TOKEN="$(cf_get "/accounts/$CF_ACCOUNT_ID/cfd_tunnel/$TUNNEL_ID/token" | jq -r '.result')"
 
 echo "[2/5] dns" >&2
 DNS_ID="$(cf_get "/zones/$CF_ZONE_ID/dns_records?name=$CF_TEST_HOSTNAME" \
@@ -87,6 +88,7 @@ IRC_LENS_TEST_TEAM_DOMAIN=$CF_TEAM_DOMAIN
 IRC_LENS_TEST_CLIENT_ID=$CLIENT_ID
 IRC_LENS_TEST_CLIENT_SECRET=$CLIENT_SECRET
 IRC_LENS_TEST_TOKEN_NAME=$TOKEN_NAME
+IRC_LENS_TEST_TUNNEL_TOKEN=$TUNNEL_TOKEN
 EOF
 chmod 600 "$ENV_OUT"
 echo "wrote $ENV_OUT" >&2

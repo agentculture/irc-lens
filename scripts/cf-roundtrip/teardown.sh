@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Remove every resource setup.sh creates. Idempotent (404s ignored).
+# Remove every resource setup.sh creates. Idempotent (404s and 2xx ignored; other statuses logged as warnings).
 set -euo pipefail
 
 : "${CF_API_TOKEN:?}"
@@ -13,7 +13,14 @@ TOKEN_NAME="irc-lens-roundtrip"
 TUNNEL_NAME="irc-lens-roundtrip"
 APP_NAME_ENCODED="irc-lens%20roundtrip"
 
-cf_del() { curl -sS "${HDR[@]}" -X DELETE "$BASE$1" || true; }
+cf_del() {
+  local resp
+  resp="$(curl -sS -o /dev/null -w '%{http_code}' "${HDR[@]}" -X DELETE "$BASE$1" 2>/dev/null || echo "000")"
+  case "$resp" in
+    2*|404) ;;  # success or already gone — both fine for teardown
+    *) printf 'warning: DELETE %s returned HTTP %s\n' "$1" "$resp" >&2 ;;
+  esac
+}
 cf_get() { curl -sS "${HDR[@]}" "$BASE$1"; }
 
 # Service token

@@ -110,6 +110,18 @@ Reverse on shutdown.
 
 - Visit `https://<your-hostname>/healthz` → `{"ok": true}` (no auth
   required; safe for uptime probes).
+
+  > **Note on `/healthz`**: The lens itself bypasses auth on `/healthz`
+  > (so cloudflared-local probes work). Cloudflare Access at the edge,
+  > however, gates **all** paths under the protected hostname by default —
+  > so an unauthenticated browser hitting `https://<your-hostname>/healthz`
+  > from the public internet will be redirected to SSO. If you want
+  > unauthenticated uptime probes to reach the lens, add a Bypass policy
+  > in the Access app (Cloudflare dashboard → Access → Applications →
+  > your app → Policies → Add policy → Action: **Bypass** → Include:
+  > Everyone → Path: `/healthz`). With the bypass policy in place,
+  > external probes get the lens's `{"ok": true}` directly.
+
 - Visit `https://<your-hostname>/` → SSO redirect → lens UI.
 - Send a slash-command — it dispatches into AgentIRC under the
   derived nick `<agentirc-server-name>-<sanitized-email-local>`.

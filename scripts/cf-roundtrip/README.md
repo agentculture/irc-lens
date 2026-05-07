@@ -28,12 +28,16 @@ Access application, allow-policy, and service token for the
 | `IRC_LENS_TEST_CLIENT_ID` | service-token client ID (`<uuid>.access`), used in `CF-Access-Client-Id` request header |
 | `IRC_LENS_TEST_CLIENT_SECRET` | service-token client secret, used in `CF-Access-Client-Secret` request header |
 | `IRC_LENS_TEST_TOKEN_NAME` | service-token display name written by setup.sh; the test puts this value in `auth.allowed_service_tokens` (Cloudflare populates `common_name` with the token's display name, not the UUID client_id) |
+| `IRC_LENS_TEST_TUNNEL_TOKEN` | tunnel run token; use with `cloudflared tunnel run --token "$IRC_LENS_TEST_TUNNEL_TOKEN"` to start the tunnel against this test setup |
 
 ## Run
 
     ./scripts/cf-roundtrip/setup.sh
     set -a; source .cf-roundtrip.env; set +a
-    pytest -m cloudflare -v
+    cloudflared tunnel run --token "$IRC_LENS_TEST_TUNNEL_TOKEN" &  # in another terminal
+    uv run pytest -m cloudflare -v
+
+> **Note**: AgentIRC must also be running on `127.0.0.1:6667` for the round-trip to land beyond the auth check.
 
 ## Teardown
 

@@ -8,7 +8,8 @@ item is a yes/no.
 - [ ] AgentIRC is bound to `127.0.0.1` (or a private mesh interface),
       never `0.0.0.0`.
 - [ ] `irc-lens serve`'s `web.bind` is `127.0.0.1`. CF mode coerces
-      this automatically; verify with `ss -lntp | grep 8765`.
+      this automatically; verify with `ss -lntp | grep <web.port>`
+      (the port you set in the lens config; default 8765).
 - [ ] No firewall rule forwards an inbound port to either service.
       cloudflared is the only reachable surface.
 
