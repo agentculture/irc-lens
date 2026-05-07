@@ -92,6 +92,22 @@ def _require(d: dict, key: str, where: str) -> object:
     return d[key]
 
 
+def _require_str_list(value: object, where: str, hint: str) -> list[str]:
+    """Assert *value* is a list of strings; raise with a single shared message.
+
+    The two-step shape check (list, then per-element string) is needed for
+    SonarCloud S5864 (type narrowing) but produced duplicated message+hint
+    literals when each step had its own ``raise``. Centralizing here keeps
+    the narrowing while collapsing the duplication.
+    """
+    msg = f"{where} must be a list of strings"
+    if not isinstance(value, list):
+        raise _err(msg, hint)
+    if not all(isinstance(x, str) for x in value):
+        raise _err(msg, hint)
+    return value
+
+
 # ---------------------------------------------------------------------------
 # Section validators (extracted to keep load_config's cognitive complexity low)
 # ---------------------------------------------------------------------------
@@ -127,18 +143,11 @@ def _load_cf_fields(
     cf_aud = str(_require(cf, "aud", "auth.cloudflare"))
     cf_team_domain = str(_require(cf, "team_domain", "auth.cloudflare"))
 
-    emails_raw = _require(auth, "allowed_emails", "auth")
-    if not isinstance(emails_raw, list):
-        raise _err(
-            "auth.allowed_emails must be a list of strings",
-            "set `auth.allowed_emails: [you@example.com]`",
-        )
-    if not all(isinstance(x, str) for x in emails_raw):
-        raise _err(
-            "auth.allowed_emails must be a list of strings",
-            "set `auth.allowed_emails: [you@example.com]`",
-        )
-
+    emails_raw = _require_str_list(
+        _require(auth, "allowed_emails", "auth"),
+        "auth.allowed_emails",
+        "set `auth.allowed_emails: [you@example.com]`",
+    )
     if len(emails_raw) == 0 and not auth.get("allowed_service_tokens"):
         raise _err(
             "auth.allowed_emails is empty and no service tokens configured",
@@ -147,17 +156,11 @@ def _load_cf_fields(
         )
     allowed_emails = tuple(emails_raw)
 
-    ts_raw = auth.get("allowed_service_tokens", [])
-    if not isinstance(ts_raw, list):
-        raise _err(
-            "auth.allowed_service_tokens must be a list of strings",
-            "set `auth.allowed_service_tokens: []` or add client-ids",
-        )
-    if not all(isinstance(x, str) for x in ts_raw):
-        raise _err(
-            "auth.allowed_service_tokens must be a list of strings",
-            "set `auth.allowed_service_tokens: []` or add client-ids",
-        )
+    ts_raw = _require_str_list(
+        auth.get("allowed_service_tokens", []),
+        "auth.allowed_service_tokens",
+        "set `auth.allowed_service_tokens: []` or add client-ids",
+    )
     allowed_service_tokens = tuple(ts_raw)
 
     return cf_aud, cf_team_domain, allowed_emails, allowed_service_tokens
