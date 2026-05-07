@@ -124,8 +124,11 @@ def build_cloudflare_middleware(config: LensConfig):
     @web.middleware
     async def middleware(request: web.Request, handler):
         # Static assets never require identity (browser fetches them before
-        # the SSO redirect lands on every page load).
-        if request.path.startswith("/static/"):
+        # the SSO redirect lands on every page load). `/healthz` is also
+        # unauthenticated by spec — cloudflared and external uptime
+        # probes hit it without a JWT, and the response is opaque
+        # (`{"ok": true}`) so it doesn't leak any allowlist state.
+        if request.path.startswith("/static/") or request.path == "/healthz":
             return await handler(request)
 
         token = request.headers.get("Cf-Access-Jwt-Assertion")

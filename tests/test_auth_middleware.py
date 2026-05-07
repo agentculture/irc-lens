@@ -5,12 +5,25 @@ from collections.abc import AsyncIterator
 
 import pytest
 import pytest_asyncio
+from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from irc_lens.config import LensConfig
 from irc_lens.web import make_app
 
 from _jwks_server import FakeJWKS
+
+# Test-only path that triggers the auth middleware but bypasses
+# `_resolve_session` so we don't need a real (or mocked) Session.
+# `/healthz` and `/static/*` are both bypassed by the middleware
+# per spec, so neither can serve as the "did the middleware run?"
+# canary — hence the dedicated route mounted by `cf_client`.
+_AUTH_CANARY_PATH = "/test/auth-canary"
+
+
+async def _auth_canary_handler(request: web.Request) -> web.Response:
+    identity = request["identity"]
+    return web.json_response({"ok": True, "principal": identity.principal})
 
 
 def _cf_config(jwks: FakeJWKS, allowed: list[str]) -> LensConfig:
@@ -47,6 +60,10 @@ async def cf_client(jwks: FakeJWKS) -> AsyncIterator[TestClient]:
     Sessions never actually open in these tests — the middleware
     intercepts before any handler that would call get_or_open.
     The factory raises if invoked, to catch accidental routing.
+    A test-only `/test/auth-canary` route is mounted to give us a
+    path that triggers the middleware without reaching the
+    SessionRegistry (so the boom_factory contract holds for both
+    accept and reject cases).
     """
     config = _cf_config(jwks, allowed=["alice@example.com"])
 
@@ -54,6 +71,7 @@ async def cf_client(jwks: FakeJWKS) -> AsyncIterator[TestClient]:
         raise AssertionError("session factory must not run during auth tests")
 
     app = make_app(config, boom_factory)
+    app.router.add_get(_AUTH_CANARY_PATH, _auth_canary_handler)
     server = TestServer(app)
     client = TestClient(server)
     await client.start_server()
@@ -72,18 +90,30 @@ async def test_missing_jwt_returns_401(cf_client: TestClient) -> None:
 
 async def test_valid_jwt_in_header_passes_to_handler(cf_client: TestClient, jwks: FakeJWKS) -> None:
     token = jwks.mint(aud="aud-test", claims={"email": "alice@example.com", "sub": "s-1"})
-    # The boom_factory raises if the handler tries to open a session.
-    # /healthz skips auth and the registry, so use it as the canary that the
-    # *middleware* accepted the token.
-    resp = await cf_client.get("/healthz", headers={"Cf-Access-Jwt-Assertion": token})
+    # `/test/auth-canary` triggers the middleware but doesn't open a
+    # Session, so the boom_factory contract holds. The handler echoes
+    # the validated principal back so we can confirm identity stashing.
+    resp = await cf_client.get(_AUTH_CANARY_PATH, headers={"Cf-Access-Jwt-Assertion": token})
     assert resp.status == 200
+    body = await resp.json()
+    assert body == {"ok": True, "principal": "alice@example.com"}
 
 
 async def test_valid_jwt_in_cookie_also_accepted(cf_client: TestClient, jwks: FakeJWKS) -> None:
     token = jwks.mint(aud="aud-test", claims={"email": "alice@example.com", "sub": "s-2"})
     cf_client.session.cookie_jar.update_cookies({"CF_Authorization": token})
+    resp = await cf_client.get(_AUTH_CANARY_PATH)
+    assert resp.status == 200
+
+
+async def test_healthz_bypasses_auth_per_spec(cf_client: TestClient) -> None:
+    """`/healthz` must NOT require a JWT — cloudflared and external
+    uptime probes hit it without auth. The handler returns the opaque
+    `{"ok": true}` so it can't leak allowlist state either way."""
     resp = await cf_client.get("/healthz")
     assert resp.status == 200
+    body = await resp.json()
+    assert body == {"ok": True}
 
 
 async def test_wrong_audience_returns_401(cf_client: TestClient, jwks: FakeJWKS) -> None:
@@ -108,19 +138,27 @@ async def test_static_path_skips_auth(cf_client: TestClient) -> None:
     assert resp.status in (200, 404)
 
 
-async def test_kid_miss_then_refresh_succeeds(cf_client: TestClient, jwks: FakeJWKS) -> None:
+async def test_kid_miss_then_refresh_fails_when_kid_truly_unknown(
+    cf_client: TestClient, jwks: FakeJWKS
+) -> None:
     """If the JWT's kid isn't in cache, we refetch JWKS once and retry.
 
-    FakeJWKS only serves the original kid, so a JWT with a different kid
-    must fail (401) even after a refresh — the lens refetches but still
-    doesn't find the rotated kid. T3.4 will add the success-path test."""
+    FakeJWKS only serves the original kid, so a JWT with a different
+    kid must fail (401) even after a refresh — the lens refetches
+    JWKS but still doesn't find the rotated kid. T3.4 covers the
+    success path where the rotated kid IS present in the refreshed
+    JWKS."""
     # First request populates the cache with the current kid.
     t1 = jwks.mint(aud="aud-test", claims={"email": "alice@example.com", "sub": "s"})
-    r1 = await cf_client.get("/healthz", headers={"Cf-Access-Jwt-Assertion": t1})
+    r1 = await cf_client.get(_AUTH_CANARY_PATH, headers={"Cf-Access-Jwt-Assertion": t1})
     assert r1.status == 200
-    # Mint with a different kid; the lens must refetch JWKS to discover it
-    # and accept the JWT after the refresh.
-    t2 = jwks.mint(aud="aud-test", claims={"email": "alice@example.com", "sub": "s"}, kid="rotated-kid")
-    # FakeJWKS still serves only the original kid, so this MUST fail.
-    r2 = await cf_client.get("/healthz", headers={"Cf-Access-Jwt-Assertion": t2})
+    # Mint with a kid the FakeJWKS doesn't actually serve. The lens
+    # refetches JWKS once after the cache miss and still won't find
+    # this kid — must respond 401.
+    t2 = jwks.mint(
+        aud="aud-test",
+        claims={"email": "alice@example.com", "sub": "s"},
+        kid="rotated-kid",
+    )
+    r2 = await cf_client.get(_AUTH_CANARY_PATH, headers={"Cf-Access-Jwt-Assertion": t2})
     assert r2.status == 401
