@@ -17,6 +17,7 @@ from irc_lens.config import LensConfig
 from irc_lens.web import routes
 from irc_lens.web.auth import build_cloudflare_middleware
 from irc_lens.web.identity import Identity
+from irc_lens.web.render import precompute_static_hashes
 from irc_lens.web.routes import _MAX_INPUT_BODY
 from irc_lens.web.sessions import SessionFactory, SessionRegistry
 
@@ -86,5 +87,9 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
         show_index=False,
         follow_symlinks=False,
     )
+
+    # Pre-warm asset-hash cache so the first GET / doesn't pay file I/O
+    # synchronously inside the async handler (per Qodo PR #40 review).
+    precompute_static_hashes()
 
     return app

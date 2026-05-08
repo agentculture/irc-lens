@@ -124,6 +124,33 @@ async def test_post_input_origin_with_path_component(lens_client: TestClient) ->
 
 
 @pytest.mark.asyncio
+async def test_post_input_xfp_https_explicit_port_allowed(lens_client: TestClient) -> None:
+    """Non-standard public port behind a TLS-terminating proxy must NOT 403.
+
+    Cloudflare-style deployments use the scheme default (443), but other
+    reverse proxies expose lens on `https://<host>:8443`. The Origin
+    floor must accept these by honoring the explicit port from the Host
+    header (or X-Forwarded-Port) instead of always returning 443/80.
+    Without this case, every POST /input on a non-standard public port
+    would 403 — the bug Qodo flagged on PR #40.
+    """
+    public_host = "lens.example.test"
+    public_port = 8443
+    resp = await lens_client.post(
+        "/input",
+        data={"text": "hello"},
+        headers={
+            "Host": f"{public_host}:{public_port}",
+            "Origin": f"https://{public_host}:{public_port}",
+            "X-Forwarded-Proto": "https",
+        },
+    )
+    assert resp.status in (204, 503), (
+        f"Expected 204 or 503 with explicit non-standard public port, got {resp.status}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_post_input_xfp_https_allowed(lens_client: TestClient) -> None:
     """TLS-terminating proxy case: Origin=https + X-Forwarded-Proto=https
     must NOT 403, even though the actual TCP connection is plain HTTP.

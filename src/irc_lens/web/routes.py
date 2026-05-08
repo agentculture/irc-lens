@@ -96,20 +96,32 @@ def _request_effective_port(request: web.Request) -> int:
     """Return the public-facing port for Origin comparison.
 
     When ``X-Forwarded-Proto`` is set (we're behind a TLS-terminating
-    proxy), we use the *scheme*'s default port and ignore the local TCP
-    port — cloudflared & friends terminate TLS and forward plain HTTP
-    to this loopback listener, so ``request.url.port`` reflects the
-    proxy hop, not the client's view. Without XFP, fall back to the
-    actual URL.
+    proxy), ``request.url.port`` reflects the proxy hop, not the
+    client's view. Resolve the public-side port by preference:
+    explicit ``X-Forwarded-Port`` > explicit port in the ``Host``
+    header > default port for the forwarded scheme. The ``Host``-
+    explicit case keeps deployments on non-standard public ports (e.g.
+    ``https://example.com:8443``) from 403'ing on every POST.
+
+    Without XFP, fall back to the actual URL.
 
     Interim heuristic: trusts a header any local process can forge.
-    Replacement tracked alongside #27.
+    Replacement tracked in #39.
     """
     xfp = request.headers.get("X-Forwarded-Proto")
-    if xfp:
-        forwarded_scheme = xfp.lower().split(",")[0].strip()
-        return _effective_port(None, forwarded_scheme)
-    return _effective_port(request.url.port, request.url.scheme)
+    if not xfp:
+        return _effective_port(request.url.port, request.url.scheme)
+    forwarded_scheme = xfp.lower().split(",")[0].strip()
+    xfport = request.headers.get("X-Forwarded-Port")
+    if xfport:
+        try:
+            return int(xfport.split(",")[0].strip())
+        except ValueError:
+            pass
+    explicit = request.url.explicit_port
+    if explicit is not None:
+        return explicit
+    return _effective_port(None, forwarded_scheme)
 
 
 def _effective_port(port: int | None, scheme: str) -> int:

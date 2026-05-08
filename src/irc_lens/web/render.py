@@ -29,6 +29,11 @@ def static_url(name: str) -> str:
     Hashes the file's bytes once per process and reuses the result.
     Restarting the lens picks up edits; the changed hash forces
     browsers to refetch instead of serving the disk-cached copy.
+
+    Pre-warm via :func:`precompute_static_hashes` at startup to avoid
+    blocking file I/O on the event loop during the first request; the
+    lazy path here remains as a fallback for assets added after
+    startup or in tests with mocked package layouts.
     """
     cached = _asset_hash_cache.get(name)
     if cached is None:
@@ -36,6 +41,31 @@ def static_url(name: str) -> str:
         cached = hashlib.sha256(path.read_bytes()).hexdigest()[:8]
         _asset_hash_cache[name] = cached
     return f"/static/{name}?v={cached}"
+
+
+def precompute_static_hashes() -> None:
+    """Eagerly fill :data:`_asset_hash_cache` for every file under
+    ``irc_lens/static``. Called once from ``web.app.make_app`` so the
+    first ``GET /`` doesn't hash assets synchronously inside an async
+    handler.
+
+    Failures are swallowed: if the static layout isn't a real
+    filesystem (zipimport, partial test fixtures), :func:`static_url`
+    will retry lazily and surface the error there.
+    """
+    try:
+        _walk_static(files("irc_lens").joinpath("static"), "")
+    except Exception:  # pragma: no cover — defensive, see docstring
+        pass
+
+
+def _walk_static(node: Any, prefix: str) -> None:
+    for entry in node.iterdir():
+        rel = f"{prefix}{entry.name}" if not prefix else f"{prefix}/{entry.name}"
+        if entry.is_file():
+            static_url(rel)
+        elif entry.is_dir():
+            _walk_static(entry, rel)
 
 
 def _strftime(value: Any, fmt: str = "%H:%M:%S") -> str:
