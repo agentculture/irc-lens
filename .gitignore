@@ -220,9 +220,14 @@ __marimo__/
 # Cited references from afi cli cite (regenerate locally; never committed)
 .afi/
 
-# Per-user Claude Code config (settings, scheduled tasks, project-local
-# skills, etc. — none of these belong in the repo).
-.claude/
+# Per-user Claude Code state (settings, scheduled tasks, per-machine
+# overrides). Tracked skills under `.claude/skills/<name>/` are committed
+# so the team shares the workflow surface; this matches steward's pattern.
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+.claude/skills.local.yaml
+.claude/skills/*/local.yaml
+.claude/skills/*/scripts/*.local.sh
 
 # CF round-trip service-token secret (written by scripts/cf-roundtrip/setup.sh)
 .cf-roundtrip.env
