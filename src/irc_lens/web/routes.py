@@ -88,8 +88,40 @@ def _origin_ok(request: web.Request) -> bool:
     origin_host = parsed.hostname.lower()
     origin_port = _effective_port(parsed.port, parsed.scheme)
     request_host = (request.url.host or "").lower()
-    request_port = _effective_port(request.url.port, request.url.scheme)
+    request_port = _request_effective_port(request)
     return (origin_host, origin_port) == (request_host, request_port)
+
+
+def _request_effective_port(request: web.Request) -> int:
+    """Return the public-facing port for Origin comparison.
+
+    When ``X-Forwarded-Proto`` is set (we're behind a TLS-terminating
+    proxy), ``request.url.port`` reflects the proxy hop, not the
+    client's view. Resolve the public-side port by preference:
+    explicit ``X-Forwarded-Port`` > explicit port in the ``Host``
+    header > default port for the forwarded scheme. The ``Host``-
+    explicit case keeps deployments on non-standard public ports (e.g.
+    ``https://example.com:8443``) from 403'ing on every POST.
+
+    Without XFP, fall back to the actual URL.
+
+    Interim heuristic: trusts a header any local process can forge.
+    Replacement tracked in #39.
+    """
+    xfp = request.headers.get("X-Forwarded-Proto")
+    if not xfp:
+        return _effective_port(request.url.port, request.url.scheme)
+    forwarded_scheme = xfp.lower().split(",")[0].strip()
+    xfport = request.headers.get("X-Forwarded-Port")
+    if xfport:
+        try:
+            return int(xfport.split(",")[0].strip())
+        except ValueError:
+            pass
+    explicit = request.url.explicit_port
+    if explicit is not None:
+        return explicit
+    return _effective_port(None, forwarded_scheme)
 
 
 def _effective_port(port: int | None, scheme: str) -> int:
@@ -179,6 +211,20 @@ async def post_input(request: web.Request) -> web.Response:
     # (curl, cloudflared probes, internal monitors) pass through unchanged.
     # A full CSRF-token scheme is tracked in issue #27.
     if not _origin_ok(request):
+        xfp = request.headers.get("X-Forwarded-Proto")
+        forwarded_scheme = (
+            xfp.lower().split(",")[0].strip() if xfp else request.url.scheme
+        )
+        logger.warning(
+            "origin_mismatch origin=%s request_host=%s request_port=%s "
+            "scheme=%s method=%s path=%s",
+            request.headers.get("Origin"),
+            (request.url.host or "").lower(),
+            _request_effective_port(request),
+            forwarded_scheme,
+            request.method,
+            request.path,
+        )
         return web.json_response(
             {
                 "error": "Origin does not match request host",

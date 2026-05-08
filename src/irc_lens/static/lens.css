@@ -134,10 +134,12 @@ body[data-conn="down"] .lens-conn { color: var(--lens-down); }
 
 #toast-region {
   position: fixed;
-  bottom: 1em;
-  right: 1em;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
   display: grid;
   gap: 0.5em;
+  justify-items: center;
   z-index: 10;
   pointer-events: none;
 }
