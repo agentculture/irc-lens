@@ -88,8 +88,28 @@ def _origin_ok(request: web.Request) -> bool:
     origin_host = parsed.hostname.lower()
     origin_port = _effective_port(parsed.port, parsed.scheme)
     request_host = (request.url.host or "").lower()
-    request_port = _effective_port(request.url.port, request.url.scheme)
+    request_port = _request_effective_port(request)
     return (origin_host, origin_port) == (request_host, request_port)
+
+
+def _request_effective_port(request: web.Request) -> int:
+    """Return the public-facing port for Origin comparison.
+
+    When ``X-Forwarded-Proto`` is set (we're behind a TLS-terminating
+    proxy), we use the *scheme*'s default port and ignore the local TCP
+    port — cloudflared & friends terminate TLS and forward plain HTTP
+    to this loopback listener, so ``request.url.port`` reflects the
+    proxy hop, not the client's view. Without XFP, fall back to the
+    actual URL.
+
+    Interim heuristic: trusts a header any local process can forge.
+    Replacement tracked alongside #27.
+    """
+    xfp = request.headers.get("X-Forwarded-Proto")
+    if xfp:
+        forwarded_scheme = xfp.lower().split(",")[0].strip()
+        return _effective_port(None, forwarded_scheme)
+    return _effective_port(request.url.port, request.url.scheme)
 
 
 def _effective_port(port: int | None, scheme: str) -> int:
@@ -179,6 +199,20 @@ async def post_input(request: web.Request) -> web.Response:
     # (curl, cloudflared probes, internal monitors) pass through unchanged.
     # A full CSRF-token scheme is tracked in issue #27.
     if not _origin_ok(request):
+        xfp = request.headers.get("X-Forwarded-Proto")
+        forwarded_scheme = (
+            xfp.lower().split(",")[0].strip() if xfp else request.url.scheme
+        )
+        logger.warning(
+            "origin_mismatch origin=%s request_host=%s request_port=%s "
+            "scheme=%s method=%s path=%s",
+            request.headers.get("Origin"),
+            (request.url.host or "").lower(),
+            _request_effective_port(request),
+            forwarded_scheme,
+            request.method,
+            request.path,
+        )
         return web.json_response(
             {
                 "error": "Origin does not match request host",

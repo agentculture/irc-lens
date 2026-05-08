@@ -121,3 +121,34 @@ async def test_post_input_origin_with_path_component(lens_client: TestClient) ->
 # mocking or a second server bind.  The implementation handles it (hostname
 # comparison is lowercased on both sides) but the fixture mechanics make an
 # in-test assertion impractical.
+
+
+@pytest.mark.asyncio
+async def test_post_input_xfp_https_allowed(lens_client: TestClient) -> None:
+    """TLS-terminating proxy case: Origin=https + X-Forwarded-Proto=https
+    must NOT 403, even though the actual TCP connection is plain HTTP.
+
+    Replicates Cloudflare Tunnel's shape: cloudflared TLS-terminates and
+    forwards plain HTTP to the lens, so request.url.scheme is "http" but
+    the original client-facing scheme is "https". Without honoring XFP,
+    every public-host POST /input would fail the floor on port (80 vs
+    443) even though the host already matches. With XFP honored, the
+    derived request port lifts to 443 and the comparison passes.
+
+    Uses Host-header override so request.url.host/port reflect the
+    "public" hostname (no port → default-for-scheme), matching the
+    production shape rather than the TestServer's loopback bind.
+    """
+    public_host = "lens.example.test"
+    resp = await lens_client.post(
+        "/input",
+        data={"text": "hello"},
+        headers={
+            "Host": public_host,
+            "Origin": f"https://{public_host}",
+            "X-Forwarded-Proto": "https",
+        },
+    )
+    assert resp.status in (204, 503), (
+        f"Expected 204 or 503 with XFP=https honored, got {resp.status}"
+    )

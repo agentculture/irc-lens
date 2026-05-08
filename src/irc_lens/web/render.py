@@ -9,13 +9,33 @@ ship in the wheel without a separate ``MANIFEST.in``.
 
 from __future__ import annotations
 
+import hashlib
 import time
+from importlib.resources import files
 from typing import TYPE_CHECKING, Any
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
 if TYPE_CHECKING:
     from irc_lens.session import Session
+
+
+_asset_hash_cache: dict[str, str] = {}
+
+
+def static_url(name: str) -> str:
+    """Return ``/static/<name>?v=<hash>`` for cache-busting.
+
+    Hashes the file's bytes once per process and reuses the result.
+    Restarting the lens picks up edits; the changed hash forces
+    browsers to refetch instead of serving the disk-cached copy.
+    """
+    cached = _asset_hash_cache.get(name)
+    if cached is None:
+        path = files("irc_lens").joinpath("static").joinpath(name)
+        cached = hashlib.sha256(path.read_bytes()).hexdigest()[:8]
+        _asset_hash_cache[name] = cached
+    return f"/static/{name}?v={cached}"
 
 
 def _strftime(value: Any, fmt: str = "%H:%M:%S") -> str:
@@ -38,6 +58,7 @@ _env = Environment(
     lstrip_blocks=True,
 )
 _env.filters["strftime"] = _strftime
+_env.globals["static_url"] = static_url
 
 
 def render_fragment(template: str, **ctx: Any) -> str:
