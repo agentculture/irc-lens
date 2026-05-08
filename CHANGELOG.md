@@ -35,3 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `.claude/skills/pr-review/` — superseded by `.claude/skills/cicd/`
   (steward 0.7.0 rename).
+
+### Fixed
+
+- `cicd/scripts/pr-batch.sh` — guarded `jq -r` parses with
+  `2>/dev/null || echo "null"` so a malformed JSONL line yields the
+  sentinel that the existing null-check catches and skips, instead of
+  aborting the entire batch under `set -e`. (Divergence from upstream
+  steward; will reconcile when steward picks up the same patch.)
+- `cicd/scripts/pr-status.sh` — wrapped each `curl -s` call in command
+  substitution with `|| echo '{}'` so transient SonarCloud / network
+  failures yield empty JSON instead of empty stdout, preventing
+  `workflow.sh await` from crashing on a flaky API call. (Divergence
+  from upstream steward; will reconcile.)

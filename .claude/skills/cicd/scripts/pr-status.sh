@@ -120,11 +120,11 @@ printf "  %-12s %s\n"  "qodo"        "$([[ "$QODO_ISSUE" -gt 0 || "$QODO_INLINE"
 printf "  %-12s %s\n"  "Cloudflare"  "$([[ -n "$CF_URL" ]] && echo "✅ $CF_URL" || ([[ "$CFPAGES_ISSUE" -gt 0 ]] && echo "✅ ($CFPAGES_ISSUE comments)" || echo "— no deploy preview"))"
 
 # ── 4. SonarCloud quality gate + open issues ─────────────────────────────
-SONAR_QG=$(curl -s "https://sonarcloud.io/api/qualitygates/project_status?projectKey=${SONAR_KEY}&pullRequest=${PR_NUMBER}")
+SONAR_QG=$(curl -s "https://sonarcloud.io/api/qualitygates/project_status?projectKey=${SONAR_KEY}&pullRequest=${PR_NUMBER}" || echo '{}')
 SONAR_QG_STATUS=$(echo "$SONAR_QG" | jq -r '.projectStatus.status // "UNKNOWN"')
-SONAR_OPEN=$(curl -s "https://sonarcloud.io/api/issues/search?componentKeys=${SONAR_KEY}&pullRequest=${PR_NUMBER}&statuses=OPEN,CONFIRMED&ps=1" \
+SONAR_OPEN=$( (curl -s "https://sonarcloud.io/api/issues/search?componentKeys=${SONAR_KEY}&pullRequest=${PR_NUMBER}&statuses=OPEN,CONFIRMED&ps=1" || echo '{}') \
     | jq -r '.total // 0')
-SONAR_HOTSPOTS=$(curl -s "https://sonarcloud.io/api/hotspots/search?projectKey=${SONAR_KEY}&pullRequest=${PR_NUMBER}&status=TO_REVIEW&ps=1" \
+SONAR_HOTSPOTS=$( (curl -s "https://sonarcloud.io/api/hotspots/search?projectKey=${SONAR_KEY}&pullRequest=${PR_NUMBER}&status=TO_REVIEW&ps=1" || echo '{}') \
     | jq -r '.paging.total // 0')
 
 case "$SONAR_QG_STATUS" in
@@ -140,7 +140,7 @@ printf "  %-12s %s Quality Gate %s, %d OPEN issue(s), %d hotspot(s)\n" \
 if [[ "$SONAR_OPEN" != "0" ]]; then
     echo
     echo "  SonarCloud OPEN issues:"
-    curl -s "https://sonarcloud.io/api/issues/search?componentKeys=${SONAR_KEY}&pullRequest=${PR_NUMBER}&statuses=OPEN,CONFIRMED&ps=20" \
+    (curl -s "https://sonarcloud.io/api/issues/search?componentKeys=${SONAR_KEY}&pullRequest=${PR_NUMBER}&statuses=OPEN,CONFIRMED&ps=20" || echo '{"issues":[]}') \
         | jq -r '.issues[] | "    • [\(.rule)] \(.component | sub("^[^:]+:"; ""))(:\(.line // "?")) (\(.severity)) — \(.message)"'
 fi
 

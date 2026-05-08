@@ -35,8 +35,8 @@ while IFS= read -r line; do
     # Skip empty lines
     [[ -z "$line" ]] && continue
 
-    COMMENT_ID=$(echo "$line" | jq -r '.comment_id')
-    BODY=$(echo "$line" | jq -r '.body')
+    COMMENT_ID=$(echo "$line" | jq -r '.comment_id' 2>/dev/null || echo "null")
+    BODY=$(echo "$line" | jq -r '.body' 2>/dev/null || echo "null")
 
     if [[ "$COMMENT_ID" == "null" || "$BODY" == "null" ]]; then
         echo "SKIP: invalid line: $line"
