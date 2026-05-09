@@ -62,9 +62,7 @@ jobs:
 
       - run: uv python install 3.12
 
-      - run: uv venv
-
-      - run: uv pip install -e ".[dev]"
+      - run: uv sync --extra dev
 
       - name: Install chromium for pytest-playwright
         run: uv run playwright install --with-deps chromium
