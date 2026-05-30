@@ -141,6 +141,18 @@ def test_info_status_view_shows_session_metadata(session: Session) -> None:
     assert "6667" in out  # port
 
 
+def test_info_mesh_view_shows_legend(session: Session) -> None:
+    session.set_view("mesh")
+    out = render_fragment("_info.html.j2", session=session)
+    assert 'data-view="mesh"' in out
+    assert "Mesh graph" in out
+    assert 'data-testid="mesh-legend"' in out
+    # The legend names all three node kinds katvan's renderer draws.
+    assert "room" in out
+    assert "agent" in out
+    assert "human" in out
+
+
 def test_info_extras_only_render_under_chat_view(session: Session) -> None:
     """Template contract for issue #20: the channels/who/agents blocks
     are intentionally nested inside the chat-view branch of

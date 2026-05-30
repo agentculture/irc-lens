@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-05-30
+
+### Added
+
+- Live agent-mesh graph view in the web console (`/mesh`). A vanilla-JS
+  port of katvan's MeshIsland Canvas renderer (`static/mesh.js`) draws
+  joined channels as rooms and their members as agent/human nodes, with
+  membership edges and travelling message particles. It is fed live over
+  a new `mesh` SSE event: `Session.build_mesh_snapshot()` emits katvan's
+  mesh.json contract (`{nodes:[{id,label,kind,server}],
+  edges:[{source,target}]}`), refreshed on JOIN/PART (coalesced into a
+  single-flight rebuild) and on a per-session timer. The per-nick WHO
+  `server` field maps onto MeshIsland's federated server bands. Selecting
+  a channel returns from the mesh view to chat. The agent-vs-human
+  classification is a documented v1 heuristic pending a canonical rule
+  from katvan (tracked cross-repo).
+
 ## [0.5.1] - 2026-05-08
 
 ### Added
