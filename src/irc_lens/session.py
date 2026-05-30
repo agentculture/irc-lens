@@ -926,10 +926,15 @@ class Session:
             # join/part call (or — for other users — needs no local
             # mutation in v1); re-render the sidebar regardless.
             self._publish_roster()
-            # Topology changed — refresh the live mesh graph. Coalesced
+            # Topology changed — refresh the live mesh graph, but only when
+            # it's actually being viewed. The browser keeps an SSE stream
+            # open in every view, so refreshing on every JOIN/PART would fire
+            # WHO sweeps during normal chat (issue: qodo PR #46). Switching
+            # to /mesh recomputes immediately via `_exec_mesh`. Coalesced
             # because `dispatch` is a sync read-loop handler that cannot
             # await the WHO round-trips the snapshot needs.
-            self._request_mesh_refresh()
+            if self._mesh_active():
+                self._request_mesh_refresh()
 
     def _dispatch_privmsg(self, msg: Message) -> None:
         """Handle inbound PRIVMSG: filter, decode CTCP ACTION, publish."""
@@ -1142,6 +1147,19 @@ class Session:
             return
         self._publish_mesh(await self.build_mesh_snapshot())
 
+    def _mesh_active(self) -> bool:
+        """True when the live mesh graph is actually being watched: the
+        session is in the mesh view AND an SSE client is attached.
+
+        The browser opens ``/events`` in every view, so ``subscriber_count``
+        alone is ~always true during a normal session — gating the
+        background refreshers (the periodic loop and the JOIN/PART trigger)
+        on the view as well keeps chat usage from running WHO sweeps for a
+        graph nobody is looking at. ``/mesh`` stays responsive regardless:
+        ``_exec_mesh`` recomputes immediately on switch.
+        """
+        return self.view == "mesh" and self.event_bus.subscriber_count > 0
+
     def _request_mesh_refresh(self) -> None:
         """Schedule a mesh recompute, coalescing bursts into one rebuild.
 
@@ -1174,16 +1192,16 @@ class Session:
     async def _mesh_refresh_loop(self) -> None:
         """Per-session background task: periodically refresh the live mesh.
 
-        Idle-cheap — only triggers a rebuild when someone is watching
-        (``subscriber_count``), we're connected, and there are channels to
+        Idle-cheap — only triggers a rebuild when the mesh is actually being
+        viewed (``_mesh_active``), we're connected, and there are channels to
         show. JOIN/PART already drive immediate refreshes via ``dispatch``;
         this loop catches membership churn that arrives without a JOIN/PART
-        we observe and keeps a freshly-loaded mesh view current. Cancelled
-        in ``disconnect`` via ``_cancel_mesh_tasks``.
+        we observe and keeps the open mesh view current. Cancelled in
+        ``disconnect`` via ``_cancel_mesh_tasks``.
         """
         while True:
             await asyncio.sleep(MESH_REFRESH_INTERVAL)
-            if self.connected and self.joined_channels and self.event_bus.subscriber_count:
+            if self.connected and self.joined_channels and self._mesh_active():
                 self._request_mesh_refresh()
 
     # ------------------------------------------------------------------

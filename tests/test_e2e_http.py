@@ -189,8 +189,11 @@ async def test_mesh_event_streams_after_mesh_command(
     agentirc_server: AgentIRCTestServer,
     lens_session: Session,
 ) -> None:
-    """Open SSE, /join, then /mesh — a `mesh` event carrying katvan's
-    graph contract should land on the stream."""
+    """Open SSE, then /mesh — a `mesh` event carrying katvan's graph
+    contract should land on the stream. We pre-seed `joined_channels`
+    directly instead of POSTing /join because the bare test server doesn't
+    answer HISTORY (a real /join would block on that round-trip); /mesh is
+    still exercised over HTTP, which is what this test is about."""
     import json
 
     async def fake_who(target: str) -> list[dict]:
@@ -204,6 +207,7 @@ async def test_mesh_event_streams_after_mesh_command(
     # `connected` flag stays False; force it on (as test_session_dispatch
     # does) so the snapshot builder doesn't short-circuit to an empty graph.
     lens_session._transport.connected = True
+    lens_session.joined_channels.add("#ops")
 
     def _have_full_mesh_frame(buf: bytes) -> bool:
         # A complete SSE frame ends with a blank line; only parse once the
@@ -217,7 +221,7 @@ async def test_mesh_event_streams_after_mesh_command(
         assert resp.status == 200
         buf = b""
         try:
-            async with asyncio.timeout(2.0):
+            async with asyncio.timeout(3.0):
                 while not _have_full_mesh_frame(buf):
                     chunk = await resp.content.read(1024)
                     if not chunk:
@@ -232,8 +236,6 @@ async def test_mesh_event_streams_after_mesh_command(
         while lens_session.event_bus.subscriber_count == 0:
             await asyncio.sleep(0.005)
 
-    await lens_client.post("/input", json={"text": "/join #ops"})
-    await _wait_for_received(agentirc_server, "JOIN", "#ops")
     mesh_resp = await lens_client.post("/input", json={"text": "/mesh"})
     assert mesh_resp.status == 204
 

@@ -267,13 +267,28 @@ async def test_drain_survives_recompute_error(session: Session) -> None:
     assert calls == 1
 
 
-async def test_mesh_refresh_loop_ticks(session: Session, monkeypatch) -> None:
-    """The periodic refresher fires a refresh when someone is watching,
-    we're connected, and there are channels — and stays idle otherwise."""
+def test_mesh_active_predicate(session: Session) -> None:
+    """`_mesh_active` requires BOTH the mesh view and a live subscriber —
+    the browser opens SSE in every view, so a subscriber alone isn't enough."""
+    assert session._mesh_active() is False  # chat view, no subscriber
+    sub = session.event_bus.subscribe()
+    assert session._mesh_active() is False  # subscriber but still chat view
+    session.set_view("mesh")
+    assert session._mesh_active() is True  # mesh view + subscriber
+    sub.close()
+    assert session._mesh_active() is False  # mesh view but subscriber gone
+
+
+async def test_mesh_refresh_loop_ticks_only_in_mesh_view(
+    session: Session, monkeypatch
+) -> None:
+    """The periodic refresher fires only when the mesh is actually being
+    viewed (connected + joined + mesh view + subscriber). With the SSE
+    stream open in chat view it must stay idle — no background WHO sweeps."""
     monkeypatch.setattr("irc_lens.session.MESH_REFRESH_INTERVAL", 0.01)
     session._transport.connected = True
     session.joined_channels.add("#ops")
-    sub = session.event_bus.subscribe()  # subscriber_count > 0
+    sub = session.event_bus.subscribe()  # subscriber_count > 0, but view=chat
     ticks = 0
 
     def fake_request() -> None:
@@ -283,6 +298,12 @@ async def test_mesh_refresh_loop_ticks(session: Session, monkeypatch) -> None:
     session._request_mesh_refresh = fake_request  # type: ignore[assignment]
     task = asyncio.create_task(session._mesh_refresh_loop())
     try:
+        # In chat view (the default) the loop must NOT tick even though an
+        # SSE subscriber is attached — this is the qodo PR #46 bug fix.
+        await asyncio.sleep(0.05)
+        assert ticks == 0, "loop ticked while not in mesh view"
+        # Switch to mesh view → the loop starts firing.
+        session.set_view("mesh")
         async with asyncio.timeout(1.0):
             while ticks < 1:
                 await asyncio.sleep(0.01)
@@ -296,8 +317,9 @@ async def test_mesh_refresh_loop_ticks(session: Session, monkeypatch) -> None:
     assert ticks >= 1
 
 
-def test_join_dispatch_triggers_mesh_refresh(session: Session) -> None:
-    """Inbound JOIN/PART must request a mesh refresh (topology changed)."""
+def test_join_dispatch_triggers_mesh_refresh_only_in_mesh_view(session: Session) -> None:
+    """Inbound JOIN/PART refreshes the mesh only when it's being viewed.
+    In chat view (SSE still open) JOIN/PART must NOT trigger WHO sweeps."""
     refreshed = 0
 
     def fake_request() -> None:
@@ -305,12 +327,18 @@ def test_join_dispatch_triggers_mesh_refresh(session: Session) -> None:
         refreshed += 1
 
     session._request_mesh_refresh = fake_request  # type: ignore[assignment]
-    asyncio.run(
-        session.dispatch(Message(prefix="a!a@h", command="JOIN", params=["#ops"]))
-    )
-    asyncio.run(
-        session.dispatch(Message(prefix="a!a@h", command="PART", params=["#ops"]))
-    )
+    sub = session.event_bus.subscribe()
+
+    # Chat view (default): JOIN/PART must not refresh the mesh.
+    asyncio.run(session.dispatch(Message(prefix="a!a@h", command="JOIN", params=["#ops"])))
+    asyncio.run(session.dispatch(Message(prefix="a!a@h", command="PART", params=["#ops"])))
+    assert refreshed == 0
+
+    # Mesh view: JOIN/PART each request a refresh.
+    session.set_view("mesh")
+    asyncio.run(session.dispatch(Message(prefix="a!a@h", command="JOIN", params=["#ops"])))
+    asyncio.run(session.dispatch(Message(prefix="a!a@h", command="PART", params=["#ops"])))
+    sub.close()
     assert refreshed == 2
 
 
