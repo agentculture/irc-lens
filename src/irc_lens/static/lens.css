@@ -78,7 +78,6 @@ body {
    stays visible in mesh view so the user can switch away. */
 .lens-log,
 .lens-mesh { grid-row: 1; grid-column: 1; min-height: 0; }
-.lens-form { grid-row: 2; grid-column: 1; }
 .lens-mesh {
   display: none;
   position: relative;
@@ -90,6 +89,8 @@ body[data-view="mesh"] .lens-log  { display: none; }
 body[data-view="mesh"] .lens-mesh { display: block; }
 
 .lens-form {
+  grid-row: 2;
+  grid-column: 1;
   display: flex;
   gap: 0.5ch;
   padding: 0.4em;

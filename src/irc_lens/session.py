@@ -1086,7 +1086,9 @@ class Session:
             )
             try:
                 members = await self.who(channel)
-            except Exception:  # noqa: BLE001 — degrade per-channel, never fail the graph
+            # Degrade per-channel: a failed WHO (incl. broken pipe) skips
+            # that channel rather than failing the whole snapshot.
+            except Exception:  # noqa: BLE001
                 logger.exception("WHO %s failed during mesh snapshot", channel)
                 continue
             for entry in members:
@@ -1165,7 +1167,8 @@ class Session:
             self._mesh_dirty = False
             try:
                 await self._recompute_and_publish_mesh()
-            except Exception:  # noqa: BLE001 — a failed refresh must not kill the task
+            # A failed refresh must not kill the drain task.
+            except Exception:  # noqa: BLE001
                 logger.exception("mesh refresh failed")
 
     async def _mesh_refresh_loop(self) -> None:
