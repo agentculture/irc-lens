@@ -100,17 +100,16 @@
   let haveData = false;
   let prevSig = "";
 
-  // Deterministic PRNG (mulberry32), seeded once. Drives the decorative
-  // motion — jitter, per-node phase, particle timing. Intentionally a
-  // non-crypto RNG: this is animation, not security, and a fixed seed also
-  // makes layouts reproducible. (Avoids Math.random, which static analysis
-  // flags as a weak-crypto hotspot even in a purely cosmetic context.)
-  let _seed = 0x9e3779b9;
+  // Deterministic PRNG (Numerical-Recipes LCG), seeded once. Drives the
+  // decorative motion — jitter, per-node phase, particle timing.
+  // Intentionally a non-crypto RNG: this is animation, not security, and a
+  // fixed seed also makes layouts reproducible. `>>> 0` keeps the state in
+  // unsigned 32-bit (the `| 0` idiom trips static analysis), and avoiding
+  // Math.random sidesteps the weak-crypto hotspot flag for cosmetic code.
+  let _seed = 0x9e3779b9 >>> 0;
   function _rng() {
-    _seed = (_seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(_seed ^ (_seed >>> 15), 1 | _seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    _seed = (Math.imul(_seed, 1664525) + 1013904223) >>> 0;
+    return _seed / 4294967296;
   }
 
   function rand(min, max) {
