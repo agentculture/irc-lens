@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="{{ static_url('lens.css') }}">
     <script src="{{ static_url('vendor/htmx.min.js') }}" defer></script>
     <script src="{{ static_url('vendor/sse.js') }}" defer></script>
+    <script src="{{ static_url('mesh.js') }}" defer></script>
     <script src="{{ static_url('lens.js') }}" defer></script>
   </head>
   <body data-view="{{ session.view }}">
@@ -36,6 +37,19 @@
              history from the IRCd's SQLite store. #}
           {{ chat_log_html|safe }}
         </div>
+        {# Live agent-mesh graph (mesh.js / window.LensMesh). Shares the
+           center column's content row with the chat log; CSS shows exactly
+           one based on <body data-view>. The input form below stays usable
+           in mesh view so the user can switch away. Fed by the `mesh` SSE
+           event; the canvas only animates while this pane is on screen. #}
+        <section
+          data-testid="mesh"
+          id="mesh-pane"
+          class="lens-mesh"
+          role="img"
+          aria-label="Live agent-mesh graph: joined channels as rooms, their members as agents and humans, connections as edges, with messages travelling the links.">
+          <canvas id="mesh-canvas"></canvas>
+        </section>
         <form id="chat-form" class="lens-form" hx-post="/input" hx-trigger="submit" hx-swap="none">
           <input
             data-testid="chat-input"

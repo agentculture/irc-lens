@@ -36,9 +36,11 @@ class CommandType(Enum):
     QUIT = auto()
     HELP = auto()
     # irc-lens additions: SWITCH is a pure view-state verb (no IRC
-    # side-effect) used by the clickable sidebar; ME is CTCP ACTION.
+    # side-effect) used by the clickable sidebar; ME is CTCP ACTION;
+    # MESH switches to the live agent-mesh graph view.
     SWITCH = auto()
     ME = auto()
+    MESH = auto()
     UNKNOWN = auto()
 
 
@@ -76,6 +78,7 @@ _COMMANDS: dict[str, CommandType] = {
     "quit": CommandType.QUIT,
     "help": CommandType.HELP,
     "switch": CommandType.SWITCH,
+    "mesh": CommandType.MESH,
 }
 
 

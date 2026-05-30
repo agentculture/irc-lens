@@ -178,6 +178,82 @@ async def test_get_events_streams_roster_after_join(
 
 
 # ---------------------------------------------------------------------------
+# GET /events — the live agent-mesh graph snapshot streams as a `mesh`
+# event after /mesh. WHO is stubbed on the session so the snapshot builder
+# resolves without the test server implementing the WHO numerics.
+# ---------------------------------------------------------------------------
+
+
+async def test_mesh_event_streams_after_mesh_command(
+    lens_client: TestClient,
+    agentirc_server: AgentIRCTestServer,
+    lens_session: Session,
+) -> None:
+    """Open SSE, then /mesh — a `mesh` event carrying katvan's graph
+    contract should land on the stream. We pre-seed `joined_channels`
+    directly instead of POSTing /join because the bare test server doesn't
+    answer HISTORY (a real /join would block on that round-trip); /mesh is
+    still exercised over HTTP, which is what this test is about."""
+    import json
+
+    async def fake_who(target: str) -> list[dict]:
+        return [
+            {"nick": "lens-test", "server": "testsrv"},
+            {"nick": "daria", "server": "testsrv"},
+        ]
+
+    lens_session.who = fake_who  # type: ignore[assignment]
+    # The in-tree test server never sends 001, so the transport's
+    # `connected` flag stays False; force it on (as test_session_dispatch
+    # does) so the snapshot builder doesn't short-circuit to an empty graph.
+    lens_session._transport.connected = True
+    lens_session.joined_channels.add("#ops")
+
+    def _have_full_mesh_frame(buf: bytes) -> bool:
+        # A complete SSE frame ends with a blank line; only parse once the
+        # mesh event's terminator has arrived (a chunk boundary can split
+        # `event: mesh\ndata: {...}` mid-payload).
+        i = buf.find(b"event: mesh")
+        return i != -1 and buf.find(b"\n\n", i) != -1
+
+    async def collect_event() -> bytes:
+        resp = await lens_client.get("/events")
+        assert resp.status == 200
+        buf = b""
+        try:
+            async with asyncio.timeout(3.0):
+                while not _have_full_mesh_frame(buf):
+                    chunk = await resp.content.read(1024)
+                    if not chunk:
+                        break
+                    buf += chunk
+        finally:
+            resp.close()
+        return buf
+
+    collector = asyncio.create_task(collect_event())
+    async with asyncio.timeout(1.0):
+        while lens_session.event_bus.subscriber_count == 0:
+            await asyncio.sleep(0.005)
+
+    mesh_resp = await lens_client.post("/input", json={"text": "/mesh"})
+    assert mesh_resp.status == 204
+
+    payload = await collector
+    assert b"event: mesh" in payload
+    # Pull the JSON out of the `event: mesh\ndata: {...}` frame.
+    frame = payload.split(b"event: mesh", 1)[1]
+    data_line = next(
+        ln[len(b"data: ") :]
+        for ln in frame.splitlines()
+        if ln.startswith(b"data: ")
+    )
+    snap = json.loads(data_line)
+    assert {n["id"] for n in snap["nodes"]} == {"#ops", "lens-test", "daria"}
+    assert {"source": "#ops", "target": "daria"} in snap["edges"]
+
+
+# ---------------------------------------------------------------------------
 # JSON-shape regression: error response shape (NOT the AfiError CLI
 # triple — see PR #7 pushback memory).
 # ---------------------------------------------------------------------------

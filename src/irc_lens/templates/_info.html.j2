@@ -17,6 +17,7 @@
         <dt><code>/agents</code></dt><dd>Union of nicks across every joined channel.</dd>
         <dt><code>/topic #channel [text…]</code></dt><dd>Read or set the channel topic.</dd>
         <dt><code>/icon emoji</code></dt><dd>Set your icon (AgentIRC extension).</dd>
+        <dt><code>/mesh</code></dt><dd>Show the live agent-mesh graph of joined channels and their members.</dd>
         <dt><code>/help</code></dt><dd>Show this help pane.</dd>
         <dt><code>/overview</code></dt><dd>Show the joined-channels overview.</dd>
         <dt><code>/status</code></dt><dd>Show the connection / session status pane.</dd>
@@ -38,6 +39,22 @@
       {% else %}
         <p class="lens-info-empty">No channels joined. Try <code>/join #general</code>.</p>
       {% endif %}
+    </section>
+  {% elif session.view == "mesh" %}
+    <section class="lens-info-mesh">
+      <h2>Mesh graph</h2>
+      <p class="lens-info-mesh-hint">
+        Joined channels and their members, live. Updates as agents join and leave.
+      </p>
+      <ul data-testid="mesh-legend" class="lens-mesh-legend">
+        <li><span class="lens-mesh-dot lens-mesh-dot--room"></span> room (channel)</li>
+        <li><span class="lens-mesh-dot lens-mesh-dot--agent"></span> agent</li>
+        <li><span class="lens-mesh-dot lens-mesh-dot--human"></span> human</li>
+      </ul>
+      <p class="lens-info-empty">
+        {{ session.joined_channels|length }} channel(s) in view —
+        <code>/switch #x</code> or click a channel to return to chat.
+      </p>
     </section>
   {% elif session.view == "status" %}
     <section class="lens-info-status">

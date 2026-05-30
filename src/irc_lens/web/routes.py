@@ -259,6 +259,13 @@ async def get_events(request: web.Request) -> web.StreamResponse:
     """SSE stream — drains ``Session.event_bus`` until the client leaves."""
     session = await _resolve_session(request)
     sub = session.event_bus.subscribe()
+    # If this session is already in the mesh view (e.g. a page reload while
+    # viewing the graph), push the current snapshot straight away so the
+    # canvas paints without waiting for the next refresher tick. Gated on
+    # the view so clients looking at chat/help/etc don't receive mesh
+    # events they won't render.
+    if session.view == "mesh":
+        session.request_mesh_refresh()
     response = web.StreamResponse(
         status=200,
         headers={

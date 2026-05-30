@@ -59,6 +59,15 @@
   });
   src.addEventListener("roster", (e) => swap(sidebar, e.data));
   src.addEventListener("info",   (e) => swap(info, e.data));
+  // `mesh` carries the live agent-mesh graph snapshot (katvan's mesh.json
+  // shape) as JSON. Hand it to the canvas renderer (mesh.js, which exposes
+  // `window.LensMesh`). The renderer only animates while the mesh pane is
+  // on screen, so feeding it while in another view is cheap.
+  src.addEventListener("mesh", (e) => {
+    if (!globalThis.LensMesh || typeof e.data !== "string" || !e.data) return;
+    try { globalThis.LensMesh.update(JSON.parse(e.data)); }
+    catch (err) { console.warn("[lens] bad mesh payload", err); }
+  });
   src.addEventListener("view",   (e) => {
     try { document.body.dataset.view = JSON.parse(e.data).view; }
     catch (err) { console.warn("[lens] bad view payload", err); }

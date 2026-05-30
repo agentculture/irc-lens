@@ -123,3 +123,29 @@ async def test_view_switch_via_help_command(seeded_lens_client: TestClient) -> N
             await expect(indicator).to_have_attribute("data-view", "help", timeout=_LOCATOR_TIMEOUT_MS)
         finally:
             await browser.close()
+
+
+async def test_mesh_view_shows_canvas_and_hides_log(seeded_lens_client: TestClient) -> None:
+    """Typing ``/mesh`` switches to the live agent-mesh graph: the canvas
+    pane becomes visible (the mesh.js renderer mounts it), the chat log
+    hides, and the input form stays usable so the user can switch back."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        try:
+            page = await browser.new_page()
+            await page.goto(_url(seeded_lens_client))
+            canvas = page.locator("#mesh-canvas")
+            chat_log = page.locator('[data-testid="chat-log"]')
+            # Mesh pane is hidden under the default chat view.
+            await expect(canvas).to_be_hidden(timeout=_LOCATOR_TIMEOUT_MS)
+            await page.locator('[data-testid="chat-input"]').fill("/mesh")
+            await page.locator('[data-testid="chat-input"]').press("Enter")
+            await expect(canvas).to_be_visible(timeout=_LOCATOR_TIMEOUT_MS)
+            await expect(chat_log).to_be_hidden(timeout=_LOCATOR_TIMEOUT_MS)
+            # The input form stays usable in mesh view — clicking a channel
+            # (or /switch) is how the user returns to chat.
+            await expect(page.locator('[data-testid="chat-input"]')).to_be_visible(
+                timeout=_LOCATOR_TIMEOUT_MS
+            )
+        finally:
+            await browser.close()

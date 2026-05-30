@@ -73,7 +73,24 @@ body {
   padding: 0.5em;
 }
 
+/* Mesh graph shares the chat column's content row (row 1) with the log;
+   CSS shows exactly one based on <body data-view>. The input form (row 2)
+   stays visible in mesh view so the user can switch away. */
+.lens-log,
+.lens-mesh { grid-row: 1; grid-column: 1; min-height: 0; }
+.lens-mesh {
+  display: none;
+  position: relative;
+  overflow: hidden;
+  background: var(--lens-surface);
+}
+.lens-mesh canvas { display: block; width: 100%; height: 100%; }
+body[data-view="mesh"] .lens-log  { display: none; }
+body[data-view="mesh"] .lens-mesh { display: block; }
+
 .lens-form {
+  grid-row: 2;
+  grid-column: 1;
   display: flex;
   gap: 0.5ch;
   padding: 0.4em;
@@ -127,6 +144,22 @@ body {
 body[data-view="help"]     .lens-view { color: var(--lens-accent); }
 body[data-view="overview"] .lens-view { color: var(--lens-accent); }
 body[data-view="status"]   .lens-view { color: var(--lens-accent); }
+body[data-view="mesh"]     .lens-view { color: var(--lens-accent); }
+
+/* Mesh legend (info pane, mesh view). */
+.lens-info-mesh-hint { color: var(--lens-muted); margin: 0.25em 0; }
+.lens-mesh-legend { list-style: none; margin: 0.25em 0; padding: 0; }
+.lens-mesh-legend li { display: flex; align-items: center; gap: 0.6ch; padding: 0.1em 0; }
+.lens-mesh-dot {
+  width: 0.8em;
+  height: 0.8em;
+  border-radius: 50%;
+  display: inline-block;
+  border: 1.5px solid transparent;
+}
+.lens-mesh-dot--room  { border-color: var(--lens-bright); background: rgba(124, 255, 158, 0.25); }
+.lens-mesh-dot--agent { border-color: var(--lens-accent); background: rgba(65, 214, 122, 0.25); }
+.lens-mesh-dot--human { border-color: var(--lens-muted);  background: rgba(138, 151, 163, 0.25); }
 
 /* `lens.js` sets data-conn="down" on SSE failure. Visual cue, no
    layout shift. */

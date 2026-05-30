@@ -35,15 +35,23 @@ logger = logging.getLogger(__name__)
 # Mirrors ``culture/console/client.py``'s constants.
 QUERY_TIMEOUT = 10.0
 REGISTER_TIMEOUT = 15.0
+#: How often the per-session background task refreshes the live mesh
+#: graph. Topology changes (JOIN/PART) trigger an immediate refresh; this
+#: interval catches membership churn that arrives without an observed
+#: JOIN/PART and keeps a freshly-loaded mesh view current.
+MESH_REFRESH_INTERVAL = 10.0
 
-#: The four named views the spec's ``info`` event can switch between.
-ViewName = Literal["chat", "help", "overview", "status"]
+#: The named views the spec's ``info`` event can switch between. ``mesh``
+#: is the irc-lens live agent-mesh graph view — a vanilla-JS port of
+#: katvan's MeshIsland renderer (see ``static/mesh.js``).
+ViewName = Literal["chat", "help", "overview", "status", "mesh"]
 
 #: SSE event names defined in the spec's "SSE event types" section.
 #: ``log`` is a full chat-log replacement (innerHTML swap of ``#chat-log``)
 #: emitted on /join and /switch so server-side history surfaces in the UI;
-#: ``chat`` continues to append single live lines.
-EventName = Literal["chat", "log", "roster", "info", "view", "error"]
+#: ``chat`` continues to append single live lines. ``mesh`` carries the
+#: live agent-mesh graph snapshot (katvan's mesh.json shape) as JSON.
+EventName = Literal["chat", "log", "roster", "info", "view", "error", "mesh"]
 
 
 class LensConnectionLost(ConnectionError):
@@ -305,6 +313,15 @@ class Session:
         # Event bus: Phase 5 will wire publishes; Phase 3 just holds it.
         self.event_bus = event_bus if event_bus is not None else SessionEventBus()
 
+        # Live mesh-graph refresh state. `_mesh_refresher` is the
+        # per-session periodic task (started in connect, cancelled in
+        # disconnect); `_mesh_task` is the coalescing drain task that
+        # builds one snapshot at a time; `_mesh_dirty` collapses a burst
+        # of topology changes into a single rebuild.
+        self._mesh_refresher: asyncio.Task[None] | None = None
+        self._mesh_task: asyncio.Task[None] | None = None
+        self._mesh_dirty = False
+
         # Tracks transport health independent of `IRCTransport.connected`,
         # which only flips after the welcome (001) handshake. The lens
         # cares about "did we ever lose the pipe?" because Phase 5
@@ -351,6 +368,8 @@ class Session:
         self._transport.add_listener("PRIVMSG", self.dispatch)
         self._transport.add_listener("JOIN", self.dispatch)
         self._transport.add_listener("PART", self.dispatch)
+        # Per-session live-mesh refresher; cancelled in disconnect().
+        self._mesh_refresher = asyncio.create_task(self._mesh_refresh_loop())
 
     def _on_welcome_signal(self, _msg: Message) -> None:
         # Runs after IRCTransport's own 001 handler (which set
@@ -392,7 +411,27 @@ class Session:
             raise LensConnectionLost(f"nick rejected: {self._nick_rejection}")
 
     async def disconnect(self) -> None:
+        await self._cancel_mesh_tasks()
         await self._transport.disconnect()
+
+    async def _cancel_mesh_tasks(self) -> None:
+        """Cancel + drain the mesh refresher and any in-flight drain task.
+
+        Called from ``disconnect()`` (which ``disconnect_all`` invokes on
+        app cleanup). Awaiting the cancelled tasks avoids "Task was
+        destroyed but it is pending" warnings at loop shutdown.
+        """
+        tasks = [
+            t
+            for t in (self._mesh_refresher, self._mesh_task)
+            if t is not None and not t.done()
+        ]
+        self._mesh_refresher = None
+        self._mesh_task = None
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     @property
     def healthy(self) -> bool:
@@ -537,6 +576,7 @@ class Session:
             CommandType.WHO: self._exec_who,
             CommandType.AGENTS: self._exec_agents,
             CommandType.ME: self._exec_me,
+            CommandType.MESH: self._exec_mesh,
             CommandType.TOPIC: self._exec_topic,
             CommandType.ICON: self._exec_icon,
             CommandType.UNKNOWN: self._exec_unknown,
@@ -604,6 +644,14 @@ class Session:
             return
         # Switch is a pure view-state mutation — no IRC side-effect.
         self.set_current_channel(channel)
+        # Selecting a channel means "show me this channel", so return to
+        # the chat view if we were in a non-chat view (the mesh graph or a
+        # help/overview/status pane). Only emit a `view` event on an actual
+        # change so switches already in chat stay event-quiet. This is also
+        # how the user leaves the mesh view by clicking the sidebar.
+        if self.view != "chat":
+            self.set_view("chat")
+            self._publish_view()
         self._publish_roster()
         self._publish_info()
         await self._fetch_and_publish_history(channel)
@@ -821,6 +869,17 @@ class Session:
     async def _exec_status(self, _parsed: ParsedCommand) -> None:
         self._switch_view("status")
 
+    async def _exec_mesh(self, _parsed: ParsedCommand) -> None:
+        # Switch to the live agent-mesh graph view, then publish a fresh
+        # snapshot so the canvas paints immediately rather than waiting
+        # for the next refresher tick. `_switch_view` emits the `view`
+        # (+ `info`) events that toggle <body data-view> and swap the
+        # info pane to the mesh legend. The recompute does its own WHO
+        # round-trips; per-channel failures degrade gracefully inside
+        # `build_mesh_snapshot`, so /mesh never 503s the browser.
+        self._switch_view("mesh")
+        await self._recompute_and_publish_mesh()
+
     def _switch_view(self, name: ViewName) -> None:
         """Common body for the three view-switch verbs.
 
@@ -867,6 +926,15 @@ class Session:
             # join/part call (or — for other users — needs no local
             # mutation in v1); re-render the sidebar regardless.
             self._publish_roster()
+            # Topology changed — refresh the live mesh graph, but only when
+            # it's actually being viewed. The browser keeps an SSE stream
+            # open in every view, so refreshing on every JOIN/PART would fire
+            # WHO sweeps during normal chat (issue: qodo PR #46). Switching
+            # to /mesh recomputes immediately via `_exec_mesh`. Coalesced
+            # because `dispatch` is a sync read-loop handler that cannot
+            # await the WHO round-trips the snapshot needs.
+            if self._mesh_active():
+                self._request_mesh_refresh()
 
     def _dispatch_privmsg(self, msg: Message) -> None:
         """Handle inbound PRIVMSG: filter, decode CTCP ACTION, publish."""
@@ -987,6 +1055,154 @@ class Session:
     def _publish_error(self, message: str) -> None:
         payload = json.dumps({"message": message})
         self.event_bus.publish(SessionEvent(name="error", data=payload))
+
+    # ------------------------------------------------------------------
+    # Live mesh graph (katvan MeshIsland renderer, ported to static/mesh.js)
+    # ------------------------------------------------------------------
+    # Topology lives across three callers: `_exec_mesh` (the /mesh verb),
+    # `dispatch` (JOIN/PART), and the periodic `_mesh_refresh_loop`. The
+    # first awaits a build directly; the latter two are sync / can't block
+    # the read loop, so they funnel through the coalescing single-flight
+    # `_request_mesh_refresh`.
+
+    async def build_mesh_snapshot(self) -> dict:
+        """Assemble the live mesh graph from joined channels + members.
+
+        Shape matches katvan's ``mesh.json`` (the MeshIsland renderer):
+        ``{nodes: [{id, label, kind, server}], edges: [{source, target}]}``.
+        Joined channels are ``room`` nodes; each unique nick seen via
+        ``who()`` is an ``agent``/``human`` node (see ``_classify_kind``);
+        every (channel, nick) membership is an edge. The per-nick WHO
+        ``server`` field maps onto MeshIsland's federated server bands;
+        channel nodes carry the lens host as their band.
+
+        Per-channel WHO failures (including a broken pipe) are swallowed
+        and that channel is skipped — a visualization should degrade to
+        "what we could gather" rather than fail the whole snapshot. The
+        send path already flips ``_healthy`` on a broken pipe, so health
+        is tracked regardless of what we swallow here.
+        """
+        nodes: list[dict] = []
+        edges: list[dict] = []
+        seen_nicks: set[str] = set()
+        for channel in sorted(self.joined_channels):
+            nodes.append(
+                {"id": channel, "label": channel, "kind": "room", "server": self.host}
+            )
+            try:
+                members = await self.who(channel)
+            # Degrade per-channel: a failed WHO (incl. broken pipe) skips
+            # that channel rather than failing the whole snapshot.
+            except Exception:  # noqa: BLE001
+                logger.exception("WHO %s failed during mesh snapshot", channel)
+                continue
+            for entry in members:
+                nick = entry.get("nick", "")
+                if not nick:
+                    continue
+                if nick not in seen_nicks:
+                    seen_nicks.add(nick)
+                    nodes.append(
+                        {
+                            "id": nick,
+                            "label": nick,
+                            "kind": self._classify_kind(entry),
+                            "server": entry.get("server") or self.host,
+                        }
+                    )
+                edges.append({"source": channel, "target": nick})
+        return {"nodes": nodes, "edges": edges}
+
+    def _classify_kind(self, entry: dict) -> str:
+        """Best-effort ``agent``/``human`` classification for a WHO entry.
+
+        irc-lens has no authoritative agent/human signal yet — the roster
+        is unused and ``/agents`` just lists nicks — so this is a
+        deliberate v1 heuristic: the lens's own nick is the operator's
+        ``human`` presence, and everyone else on an agent mesh defaults to
+        ``agent``. The canonical rule (likely keyed on WHO ``flags`` /
+        ``realname`` or an AgentIRC capability) is being settled with
+        katvan, the mesh renderer's source of truth. ``room`` is assigned
+        by the snapshot builder, so this only returns ``agent``/``human``.
+        """
+        nick = entry.get("nick", "")
+        if nick and nick == self.nick:
+            return "human"
+        return "agent"
+
+    def _publish_mesh(self, snapshot: dict) -> None:
+        self.event_bus.publish(
+            SessionEvent(name="mesh", data=json.dumps(snapshot))
+        )
+
+    async def _recompute_and_publish_mesh(self) -> None:
+        """Build the current snapshot and publish it as a ``mesh`` event.
+
+        Publishes an empty graph when there's nothing to show (not yet
+        connected, or no channels joined) so the canvas clears rather than
+        holding a stale graph.
+        """
+        if not self.connected or not self.joined_channels:
+            self._publish_mesh({"nodes": [], "edges": []})
+            return
+        self._publish_mesh(await self.build_mesh_snapshot())
+
+    def _mesh_active(self) -> bool:
+        """True when the live mesh graph is actually being watched: the
+        session is in the mesh view AND an SSE client is attached.
+
+        The browser opens ``/events`` in every view, so ``subscriber_count``
+        alone is ~always true during a normal session — gating the
+        background refreshers (the periodic loop and the JOIN/PART trigger)
+        on the view as well keeps chat usage from running WHO sweeps for a
+        graph nobody is looking at. ``/mesh`` stays responsive regardless:
+        ``_exec_mesh`` recomputes immediately on switch.
+        """
+        return self.view == "mesh" and self.event_bus.subscriber_count > 0
+
+    def _request_mesh_refresh(self) -> None:
+        """Schedule a mesh recompute, coalescing bursts into one rebuild.
+
+        Sync-safe (callable from IRC handlers): sets a dirty flag and
+        ensures exactly one drain task runs. A burst of JOIN/PART collapses
+        into a single snapshot — and if more changes land mid-build the
+        drain loop runs once more — instead of spawning a WHO storm per
+        event. Requires a running loop (always true at the call sites:
+        the read loop, the refresher task, and the SSE handler).
+        """
+        self._mesh_dirty = True
+        if self._mesh_task is None or self._mesh_task.done():
+            self._mesh_task = asyncio.create_task(self._drain_mesh_refresh())
+
+    def request_mesh_refresh(self) -> None:
+        """Public entry for an out-of-band refresh (e.g. a new SSE
+        subscriber connecting). Safe to call unconditionally — when there
+        is nothing to show the builder publishes an empty graph."""
+        self._request_mesh_refresh()
+
+    async def _drain_mesh_refresh(self) -> None:
+        while self._mesh_dirty:
+            self._mesh_dirty = False
+            try:
+                await self._recompute_and_publish_mesh()
+            # A failed refresh must not kill the drain task.
+            except Exception:  # noqa: BLE001
+                logger.exception("mesh refresh failed")
+
+    async def _mesh_refresh_loop(self) -> None:
+        """Per-session background task: periodically refresh the live mesh.
+
+        Idle-cheap — only triggers a rebuild when the mesh is actually being
+        viewed (``_mesh_active``), we're connected, and there are channels to
+        show. JOIN/PART already drive immediate refreshes via ``dispatch``;
+        this loop catches membership churn that arrives without a JOIN/PART
+        we observe and keeps the open mesh view current. Cancelled in
+        ``disconnect`` via ``_cancel_mesh_tasks``.
+        """
+        while True:
+            await asyncio.sleep(MESH_REFRESH_INTERVAL)
+            if self.connected and self.joined_channels and self._mesh_active():
+                self._request_mesh_refresh()
 
     # ------------------------------------------------------------------
     # Future-based query methods
