@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-06-07
+
+### Changed
+
+- **License: MIT → Apache 2.0.** Replaced the MIT license text with the
+  Apache License 2.0 (`LICENSE`) and aligned the declared license in
+  `pyproject.toml` (`license = "Apache-2.0"` plus the OSI classifier).
+  Copyright holder is Ori Nachum.
+
 ## [0.6.0] - 2026-05-30
 
 ### Added
