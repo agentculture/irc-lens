@@ -1,0 +1,474 @@
+{
+  "slug": "adopt-agentfront-across-cli-and-site",
+  "title": "Adopt agentfront across CLI and site",
+  "frame_slug": "adopt-agentfront-across-cli-and-site",
+  "schema_version": 1,
+  "status": "exported",
+  "created": "2026-07-02T13:43:30Z",
+  "updated": "2026-07-02T13:59:14Z",
+  "targets": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "irc-lens runs on the agentfront runtime: the CLI is rendered from one App registry and the site serves the agent-facing HTTP front (markdown docs, sitemap.xml, llms.txt, front) \u2014 the whole tool is legible to agents by construction"
+    },
+    {
+      "id": "h9",
+      "kind": "honesty",
+      "text": "legible by construction is testable: a fresh agent given only the installed CLI and a fetch tool against the running site can discover every capability (learn, llms.txt) and exercise one end-to-end without reading the repo source"
+    },
+    {
+      "id": "c2",
+      "kind": "audience",
+      "text": "AI agents consuming irc-lens (CLI verbs with --json, fetch-tool HTTP navigation) and Culture mesh operators who deploy it"
+    },
+    {
+      "id": "h14",
+      "kind": "honesty",
+      "text": "each named audience has a concrete v1 surface: agents get CLI --json, MCP run, and the fetchable front; operators keep the same serve deployment they run today"
+    },
+    {
+      "id": "c3",
+      "kind": "before_state",
+      "text": "the CLI is hand-cited AFI scaffolding (src/irc_lens/cli/ from the retired afi cli cite pattern) verified only by an external afi binary that CI never runs (tests/test_afi_verify.py skip-guards on shutil.which); the site is a human-only HTMX/SSE console with zero machine-readable state surface; nothing structurally prevents CLI/site drift"
+    },
+    {
+      "id": "h15",
+      "kind": "honesty",
+      "text": "the described gaps are verifiable in-repo today: tests/test_afi_verify.py skip-guards on shutil.which(afi), and the web layer emits no machine-readable state beyond /healthz and upload receipts"
+    },
+    {
+      "id": "c4",
+      "kind": "after_state",
+      "text": "an agent can learn, explain, overview and doctor the CLI, and with only a fetch tool can start at llms.txt or sitemap.xml and read every doc page plus the front mirror \u2014 all derived from one registry, with assert_surfaces_agree pinning that the surfaces cannot drift"
+    },
+    {
+      "id": "h16",
+      "kind": "honesty",
+      "text": "demonstrated end-to-end: learn, explain, overview and doctor exit 0; the front enumerates the tool catalog from the running site; assert_surfaces_agree passes in CI"
+    },
+    {
+      "id": "c5",
+      "kind": "why_it_matters",
+      "text": "agent-first via agentfront is the stated AgentCulture org norm (agentfront docs/agentculture.md) and the colleague repo proved the import-dont-duplicate migration; irc-lens is the lens onto the agent mesh yet today its own surfaces are the least agent-legible in the org"
+    },
+    {
+      "id": "h17",
+      "kind": "honesty",
+      "text": "the cited norm and precedent are real and readable: agentfront docs/agentculture.md states the org expectation, and the shipped colleague register_into migration is the working blueprint"
+    },
+    {
+      "id": "c6",
+      "kind": "requirement",
+      "text": "the CLI is rendered from one agentfront App registry \u2014 import, dont duplicate: the hand-rolled scaffolding in src/irc_lens/cli/ (custom _ArgumentParser, _dispatch, emit_result/emit_error, hand-written learn/explain/overview) is replaced, following the colleague blueprint of per-verb register_into(app) hooks"
+    },
+    {
+      "id": "h1",
+      "kind": "honesty",
+      "text": "run_cli against the rendered App reproduces every contract pinned by tests/test_cli.py (learn markers, error triple on stderr, exit codes, no traceback) with the hand-rolled scaffolding deleted \u2014 not shimmed alongside"
+    },
+    {
+      "id": "c8",
+      "kind": "requirement",
+      "text": "serve and config register as host commands via app.add_command (a long-running server launcher is not a pure tool \u2014 agentfront docs/consumer-cli.md host-launcher-verb contract), preserving all serve flags, config resolution, and CF-mode guards byte-compatibly"
+    },
+    {
+      "id": "h3",
+      "kind": "honesty",
+      "text": "irc-lens serve and irc-lens config init behave byte-compatibly through agentfront dispatch: same flags, same config-file resolution and CF-mode guards, same exit codes \u2014 pinned by the existing test_serve_cli.py / test_config_init.py passing unmodified"
+    },
+    {
+      "id": "c9",
+      "kind": "requirement",
+      "text": "AfiError maps to AgentfrontError: identical dataclass shape (code, message, remediation), identical 0/1/2 exit-code policy, no-traceback guarantee preserved on every failure path including argparse-time errors"
+    },
+    {
+      "id": "h4",
+      "kind": "honesty",
+      "text": "no failure path leaks a Python traceback to stderr, including argparse-time errors with --json; a bogus verb exits 1 with an error line and a hint line"
+    },
+    {
+      "id": "c10",
+      "kind": "requirement",
+      "text": "tests/test_afi_verify.py (external afi subprocess, skip-guarded) is replaced by in-process agentfront.testing gates \u2014 assert_surfaces_agree(app) plus run_cli smoke tests \u2014 that actually run in CI on every push"
+    },
+    {
+      "id": "h5",
+      "kind": "honesty",
+      "text": "the drift gate runs unconditionally in CI \u2014 no skip-guard, no external binary: a deliberate surface drift (e.g. a tool registered on CLI but not listed in llms.txt) fails the build"
+    },
+    {
+      "id": "c11",
+      "kind": "requirement",
+      "text": "the derived CLI gains the doctor meta-verb (rubric bundle 7: healthy bool + checks list, failed checks carry remediation), which the current AFI-era CLI lacks"
+    },
+    {
+      "id": "h6",
+      "kind": "honesty",
+      "text": "irc-lens doctor exits 0 when healthy and its --json payload carries healthy plus a checks list where every failed check names a remediation"
+    },
+    {
+      "id": "c12",
+      "kind": "requirement",
+      "text": "requires-python bumps from 3.11 to 3.12 (the agentfront floor; local interpreter is 3.12.3)"
+    },
+    {
+      "id": "h7",
+      "kind": "honesty",
+      "text": "no supported deployment of irc-lens still runs on Python 3.11 \u2014 the floor bump strands nobody"
+    },
+    {
+      "id": "c13",
+      "kind": "requirement",
+      "text": "docs and meta sweep: CLAUDE.md (currently an AFI manifesto that still says the repo has no source code), docs/cli.md, docs/architecture.md decision log, and the cicd-skill AFI-rubric guardrails are rewritten to the agentfront contract; no doc still instructs regenerating .afi/reference or running afi cli verify"
+    },
+    {
+      "id": "h8",
+      "kind": "honesty",
+      "text": "grep across docs/, CLAUDE.md and .claude/skills/ finds no remaining instruction to regenerate .afi/reference or to run afi cli verify"
+    },
+    {
+      "id": "c14",
+      "kind": "boundary",
+      "text": "the human HTMX/SSE console stays intact: the aiohttp routes (/, /input, /events, /upload, /media, /healthz), CF Access auth middleware, CSP and security headers, the Origin CSRF floor, and the ratified error shape (error, hint) on console JSON responses (docs/architecture.md 195-204, PR 7) are not restructured by this adoption"
+    },
+    {
+      "id": "h18",
+      "kind": "honesty",
+      "text": "the pre-existing console suite (web skeleton, security headers, origin check, auth middleware, playwright) passes unmodified in behavior"
+    },
+    {
+      "id": "c15",
+      "kind": "boundary",
+      "text": "the culture-cited domain layer is untouched: irc/transport.py, irc/message.py, irc/buffer.py, commands.py and CITATION.md keep their cite-dont-import provenance from agentculture/culture \u2014 adoption changes interface surfaces, not domain logic"
+    },
+    {
+      "id": "h19",
+      "kind": "honesty",
+      "text": "the adoption diff touches no file under src/irc_lens/irc/, nor commands.py, nor CITATION.md"
+    },
+    {
+      "id": "c16",
+      "kind": "boundary",
+      "text": "media behavior is unchanged: links-not-binaries on the wire and auth-exempt /media capability URLs (standing operator principle, docs/superpowers/specs/2026-07-02-media-support-design.md)"
+    },
+    {
+      "id": "h20",
+      "kind": "honesty",
+      "text": "media tests (test_media*, test_serve_media_origins, playwright media and mic) pass unmodified and /media capability URLs stay auth-exempt"
+    },
+    {
+      "id": "c18",
+      "kind": "success_signal",
+      "text": "CI is green with the new gates: assert_surfaces_agree(app) passes, run_cli smoke tests pass, agentfront cli doctor . passes, the entire pre-existing suite (web skeleton, security headers, origin check, playwright) passes unmodified in behavior, and grep for afi scaffolding references in src/ returns nothing"
+    },
+    {
+      "id": "h21",
+      "kind": "honesty",
+      "text": "every listed gate is a CI-visible pass/fail on every push, and grep for afi scaffolding references in src/ returns empty"
+    },
+    {
+      "id": "c25",
+      "kind": "requirement",
+      "text": "the site exposes the agent-facing HTTP front under a path prefix on the console origin: purpose-authored agent pages about the running lens, llms.txt discovery, sitemap.xml, and the front markdown mirror \u2014 explicitly NOT a mirror of the repo docs/ tree (superseding rejected c7)"
+    },
+    {
+      "id": "h10",
+      "kind": "honesty",
+      "text": "an agent with only a fetch tool, starting blind at the prefix root or llms.txt, can enumerate the tool catalog and read every agent page without executing JavaScript \u2014 and none of those pages is a copy of a file under docs/"
+    },
+    {
+      "id": "c26",
+      "kind": "requirement",
+      "text": "the MCP surface ships in v1: app.mcp_server() behind the agentfront[mcp] extra, exposed via a host verb (e.g. irc-lens mcp) serving stdio \u2014 the single run tool carries the full irc-lens command catalog"
+    },
+    {
+      "id": "h11",
+      "kind": "honesty",
+      "text": "call_mcp(app, command) returns the result-or-error-triple payload for every registered tool, and the stdio server starts and answers a run round-trip in an e2e test"
+    },
+    {
+      "id": "c27",
+      "kind": "requirement",
+      "text": "the TAUI surface ships in v1: a host TTY verb (e.g. irc-lens tui) supplies the terminal loop over agentfront LiveDriver, so humans and agents drive one live session with state parity"
+    },
+    {
+      "id": "h12",
+      "kind": "honesty",
+      "text": "assert_agent_human_parity holds: an agent SelectorAction and a human key-navigation land on identical TAUI state for the same target"
+    },
+    {
+      "id": "c28",
+      "kind": "requirement",
+      "text": "the full live-verb catalog registers as agentfront tools: the CommandType/_exec_dispatch table in session.py (send, join, part, read, channels, who, mesh, switch, topic, me, icon...) becomes the registry tool catalog, identical across CLI, MCP run, and TAUI dispatch"
+    },
+    {
+      "id": "h13",
+      "kind": "honesty",
+      "text": "every CommandType verb wired in the web console is reachable as a registry tool with the same effect a console /command has \u2014 one dispatch table, no web-only verbs left behind"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t1",
+      "summary": "Packaging: agentfront dependency and Python 3.12 floor",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "pyproject.toml declares agentfront[mcp] at 0.20.0 or later in project dependencies and requires-python is 3.12 or later; uv sync --extra dev resolves and uv run python -c \"import agentfront, agentfront.testing\" exits 0",
+        "CI workflow pins Python 3.12 so the floor bump is exercised on every push; CHANGELOG notes the 3.11 to 3.12 floor bump; the diff touches only pyproject.toml, uv.lock, ci.yml and CHANGELOG.md"
+      ],
+      "deps": [],
+      "covers": [
+        "c12",
+        "h7"
+      ]
+    },
+    {
+      "id": "t2",
+      "summary": "Error layer: AfiError becomes the AgentfrontError triple",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "src/irc_lens/_errors.py maps AfiError onto agentfront.errors semantics: identical (code, message, remediation) dict shape and EXIT_SUCCESS/EXIT_USER_ERROR/EXIT_ENV_ERROR values equal to the agentfront constants; the cli/_errors.py shim keeps its public names",
+        "a bogus verb exits 1 printing an error line and a hint line with no Python traceback; parse-time errors with --json emit the (code, message, remediation) JSON on stderr \u2014 pinned by the existing error cases in tests/test_cli.py passing"
+      ],
+      "deps": [
+        "t1"
+      ],
+      "covers": [
+        "c9",
+        "h4"
+      ]
+    },
+    {
+      "id": "t3",
+      "summary": "App registry assembly: build_app plus derived meta-verbs replace the hand-rolled CLI",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "a new build_app() (colleague blueprint: per-command register_into(app) hooks auto-assembled) constructs App(name=\"irc-lens\") and irc_lens.cli:main dispatches via agentfront run_cli; the [project.scripts] entry is unchanged",
+        "learn/explain/overview/doctor all derive from the registry: learn exits 0 with at least 200 chars mentioning purpose, commands, exit codes, --json and explain; overview --json returns subject and sections; doctor --json returns a healthy bool plus a checks list where failed checks carry remediation",
+        "the hand-rolled cli/_commands/learn.py, explain.py, overview.py and the src/irc_lens/explain/ package are deleted, not shimmed; tests/test_cli.py passes against the rendered CLI with marker updates only where wording (not contract) changed"
+      ],
+      "deps": [
+        "t1",
+        "t2"
+      ],
+      "covers": [
+        "c6",
+        "h1",
+        "c11",
+        "h6"
+      ]
+    },
+    {
+      "id": "t4",
+      "summary": "Host commands: serve and config through app.add_command",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "serve.py and config_cmd.py gain register_into(app) hooks using add_command with a configure hook that recreates every existing flag (--config, --host, --port, --nick, --web-port, --bind, --icon, --open, --seed, --log-json) and the CF-mode guards; the old register(sub) wiring is removed",
+        "tests/test_serve_cli.py and tests/test_config_init.py pass unmodified: same flags, same config-file resolution, same exit codes; a bogus serve flag exits 1 with a hint and no traceback"
+      ],
+      "deps": [
+        "t3"
+      ],
+      "covers": [
+        "c8",
+        "h3"
+      ]
+    },
+    {
+      "id": "t5",
+      "summary": "Live-verb catalog: ephemeral-session registry tools",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "a new tools module registers every CommandType verb wired in the web console dispatch table (send, join, part, read, channels, who, mesh, switch, topic, me, icon) as agentfront tools; a test diffs the registry tool set against the session dispatch table so no web-only verb is left behind",
+        "tools obtain a Session ephemerally \u2014 connect, execute, disconnect with LensConfig credentials; an e2e test round-trips irc-lens channels --json against the in-tree fake AgentIRC server (tests/_agentirc_server.py)",
+        "no file under src/irc_lens/irc/ nor commands.py is modified"
+      ],
+      "deps": [
+        "t3",
+        "t4"
+      ],
+      "covers": [
+        "c28",
+        "h13"
+      ]
+    },
+    {
+      "id": "t6",
+      "summary": "Purpose-authored agent pages as registry docs",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "registry docs are authored in-package via add_doc covering at least: what irc-lens is, how to drive the chat console, the tool catalog, exit codes and --json conventions; a test asserts no page body is a copy of any file under docs/",
+        "the same doc slugs render on the CLI explain surface \u2014 pinned by the surface-agreement gate, not a parallel list"
+      ],
+      "deps": [
+        "t3"
+      ],
+      "covers": []
+    },
+    {
+      "id": "t7",
+      "summary": "HTTP front mount: WSGI bridge under the agent prefix, behind auth",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "a small in-repo bridge serves agentfront make_http_app inside the aiohttp console under a path prefix (e.g. /agent/): index, llms.txt, sitemap.xml, front and every doc slug return 200 in dev mode; sitemap URLs carry the prefix; no new third-party dependency",
+        "in cloudflare-access mode the prefix requires a valid CF JWT exactly like the console root: unauthenticated GET on the prefix returns 401 and the exempt list stays /static, /healthz, /media only; security-header middleware applies to prefix responses",
+        "a fetch-only traversal test starts blind at llms.txt, enumerates the tool catalog and fetches every linked page without executing JavaScript, and asserts none of those pages matches any docs/*.md file"
+      ],
+      "deps": [
+        "t6"
+      ],
+      "covers": [
+        "c25",
+        "h10"
+      ]
+    },
+    {
+      "id": "t8",
+      "summary": "MCP surface: irc-lens mcp host verb serving stdio",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "a new mcp host verb (add_command) serves app.mcp_server() on stdio; an e2e test performs a run round-trip against the stdio server",
+        "call_mcp(app, command) returns the result-or-error-triple payload for every registered tool via a test parametrized over the full catalog \u2014 without importing the mcp package"
+      ],
+      "deps": [
+        "t5"
+      ],
+      "covers": [
+        "c26",
+        "h11"
+      ]
+    },
+    {
+      "id": "t9",
+      "summary": "TAUI surface: irc-lens tui host verb over LiveDriver",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "a new tui host verb supplies the terminal loop over agentfront LiveDriver at a TTY; piped or non-TTY invocation prints help or a hint and exits without hanging",
+        "assert_agent_human_parity passes for a pure-navigation selector, and drive() executing a tool SelectorAction lands the same state as the equivalent CLI invocation"
+      ],
+      "deps": [
+        "t5"
+      ],
+      "covers": [
+        "c27",
+        "h12"
+      ]
+    },
+    {
+      "id": "t10",
+      "summary": "Test migration: in-process drift gates replace the external afi verifier",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "tests/test_afi_verify.py is deleted; a new tests/test_front_agreement.py asserts assert_surfaces_agree(build_app()) with zero skip conditions, no subprocess and no external binary, plus run_cli smoke tests for each meta-verb",
+        "the gate provably bites: a test registers a deliberate one-surface drift on a scratch App and asserts AssertionError naming the disagreeing pair",
+        "the new tests run in the default pytest selection (no marker), hence inside the existing CI pytest step on every push"
+      ],
+      "deps": [
+        "t3"
+      ],
+      "covers": [
+        "c10",
+        "h5"
+      ]
+    },
+    {
+      "id": "t11",
+      "summary": "Docs and meta sweep: agentfront contract replaces the AFI manifesto",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "grep across CLAUDE.md, docs/ and .claude/skills/ finds no remaining instruction to regenerate .afi/reference or run afi cli verify; CLAUDE.md describes the agentfront runtime contract (one registry, four surfaces, drift gate) and no longer claims the repo has no source code",
+        "docs/cli.md documents the rendered surface including doctor, mcp and tui with the unchanged exit-code policy; docs/architecture.md decision log records the adoption citing the agentfront org-norm doc (docs/agentculture.md) and the colleague register_into blueprint as the precedent",
+        "markdownlint-cli2 passes on every touched markdown file"
+      ],
+      "deps": [
+        "t4",
+        "t7",
+        "t8",
+        "t9"
+      ],
+      "covers": [
+        "c13",
+        "h8",
+        "c5",
+        "h17"
+      ]
+    },
+    {
+      "id": "t12",
+      "summary": "End-to-end validation, boundary regression sweep and release prep",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "fresh-agent legibility e2e: with only the installed CLI and HTTP fetches against a seeded serve, a scripted flow discovers capabilities via learn and the prefix llms.txt and exercises one tool end to end, never reading the repo source",
+        "boundary sweep: the pre-existing suite passes unmodified in behavior (web skeleton, security headers, origin check, auth middleware, media, playwright markers); the adoption diff touches no file under src/irc_lens/irc/, commands.py or CITATION.md; media capability URLs stay auth-exempt",
+        "success signals are CI-visible: surface agreement, run_cli smokes and doctor pass in the CI log; grep for afi scaffolding references in src/ returns nothing; version bumped with a CHANGELOG entry covering the adoption"
+      ],
+      "deps": [
+        "t10",
+        "t11"
+      ],
+      "covers": [
+        "c1",
+        "h9",
+        "c2",
+        "h14",
+        "c3",
+        "h15",
+        "c4",
+        "h16",
+        "c14",
+        "h18",
+        "c15",
+        "h19",
+        "c16",
+        "h20",
+        "c18",
+        "h21"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "r1",
+      "text": "WSGI-in-aiohttp bridge mechanics: aiohttp has no native WSGI support \u2014 direct-call vs thread offload, and CSP header interplay on bridged responses, settled inside t7",
+      "kind": "unknown_nonblocking",
+      "task_id": "t7"
+    },
+    {
+      "id": "r2",
+      "text": "agentfront-derived learn/explain wording may differ from the hand-rolled text pinned in tests/test_cli.py markers and docs/cli.md examples \u2014 contract stays, wording updates land in t3/t11",
+      "kind": "unknown_nonblocking",
+      "task_id": "t3"
+    },
+    {
+      "id": "r3",
+      "text": "ephemeral-session read/history fidelity is bounded by what the AgentIRC server replays on join \u2014 accepted for v1 per the frame decision; verified against the fake server in t5",
+      "kind": "unknown_nonblocking",
+      "task_id": "t5"
+    },
+    {
+      "id": "r4",
+      "text": "TAUI TTY loop is the largest new UI item (agentfront ships no runnable loop; the host supplies it) \u2014 t9 may grow; keep it last-wave and independently mergeable",
+      "kind": "unknown_nonblocking",
+      "task_id": "t9"
+    },
+    {
+      "id": "r5",
+      "text": "daemon-client session mode (tools reusing the running serve daemon buffers over a structured local RPC surface) \u2014 follow-up after v1 ephemeral mode",
+      "kind": "follow_up",
+      "task_id": null
+    }
+  ]
+}
