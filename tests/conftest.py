@@ -13,6 +13,8 @@ and a session-factory closure that returns the live test ``Session``.
 """
 from __future__ import annotations
 
+import dataclasses
+import socket
 from collections.abc import AsyncIterator
 from pathlib import Path
 
@@ -139,6 +141,72 @@ async def seeded_lens_client(
     apply_seed(lens_session, _BASIC_SEED)
     async for client in _serve_lens(lens_session, agentirc_server.host, agentirc_server.port):
         yield client
+
+
+@pytest_asyncio.fixture
+async def media_hosted_lens_client(
+    lens_session: Session, agentirc_server: AgentIRCTestServer
+) -> AsyncIterator[TestClient]:
+    """A seeded lens client whose media state renders uploaded URLs as
+    *direct* lens-hosted embeds that actually load over loopback.
+
+    ``lens_client`` / ``seeded_lens_client`` build the fixture ``Session``
+    with the plain ``Session(host, port, nick)`` constructor, which leaves
+    ``media_embed_prefixes`` empty and ``media.public_base_url`` unset — so
+    ``POST /upload`` returns a ``http://127.0.0.1:0/media/...`` URL (the
+    bogus port-0 config default) that ``media_items`` classifies as
+    *remote*, rendering a click-to-load placeholder. That's the right shape
+    for t8's send-path tests, but task t10's proof chain needs the
+    lens-hosted *direct-embed* branch exercised end to end: an uploaded
+    file that renders as a real ``<img>`` / ``<audio>`` and whose ``src``
+    the browser can actually fetch.
+
+    Both facts are only knowable after the ``TestServer`` binds its random
+    port, so this fixture starts the server first, then patches
+    ``app["media_base"]`` (what ``POST /upload`` stamps into the returned
+    URL) and the session's ``media_embed_prefixes`` (what ``media_items``
+    matches against) to the server's real reachable origin. An uploaded URL
+    is then both prefix-matched (→ direct embed) and loopback-reachable
+    (→ the browser can load it / the ``/media/`` route serves it).
+
+    Seeds ``tests/fixtures/basic.yaml`` so ``#general`` is the active
+    channel with two historical chat lines, matching ``seeded_lens_client``.
+    """
+    from irc_lens.seed import apply_seed
+
+    # Bind the TestServer to a known port *before* building the app, so the
+    # upload base can be baked into `LensConfig` (→ `app["media_base"]`) at
+    # construction time. Mutating `app[...]` after the server has started is
+    # deprecated by aiohttp, and the port is the one thing not otherwise
+    # knowable until the socket binds — pre-reserving it sidesteps both.
+    host = "127.0.0.1"
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind((host, 0))
+        port = probe.getsockname()[1]
+    base = f"http://{host}:{port}"
+
+    config = dataclasses.replace(
+        _dev_config(agentirc_server.host, agentirc_server.port, nick=lens_session.nick),
+        web_bind=host,
+        web_port=port,
+        media_public_base_url=base,
+    )
+    factory = lambda _nick: lens_session  # noqa: E731 — single-line closure is the point
+    app: web.Application = make_app(config, factory)
+    app["registry"].register(config.dev_email, lens_session)
+    apply_seed(lens_session, _BASIC_SEED)
+    # The session (not the app) is the embed-prefix source and is safe to
+    # mutate any time — point it at the same origin uploads will advertise,
+    # so a lens-hosted URL renders as a direct embed rather than a remote
+    # placeholder.
+    lens_session.media_embed_prefixes = (f"{base}/media/",)
+    test_server = TestServer(app, host=host, port=port)
+    client = TestClient(test_server)
+    await client.start_server()
+    try:
+        yield client
+    finally:
+        await client.close()
 
 
 # ---------------------------------------------------------------------------
