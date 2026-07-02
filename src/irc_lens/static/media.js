@@ -119,6 +119,12 @@
     form.requestSubmit();
   }
 
+  // Expose the upload-then-send helper so other media.js modules (task
+  // t9's mic-recording IIFE below) can reuse the exact same send path
+  // instead of duplicating it — mirrors how mesh.js exposes
+  // `window.LensMesh`.
+  window.LensMedia = { uploadAndSend: uploadAndSend };
+
   // Attach button opens the hidden file picker; picking a file uploads it.
   if (attachButton && fileInput) {
     attachButton.addEventListener("click", () => fileInput.click());
@@ -159,4 +165,135 @@
       }
     });
   }
+})();
+
+// irc-lens mic recording (task t9): getUserMedia + MediaRecorder capture.
+// Button-text states: idle -> recording (elapsed seconds, click again to
+// stop) -> uploading -> idle. Hard-caps at 300s, closes every stream
+// track on stop, and sends the file via window.LensMedia.uploadAndSend —
+// the SAME send path file uploads use above, so there's only one.
+(function () {
+  "use strict";
+
+  const recordButton = document.querySelector('[data-testid="media-record"]');
+  if (!recordButton) return; // Guard: safe on pages without the button
+
+  const IDLE_LABEL = "🎙 record";
+  const MAX_SECONDS = 300;
+  const OPUS_MIME = "audio/webm;codecs=opus";
+  let state = "idle"; // idle | recording | uploading
+  let mediaRecorder = null;
+  let activeStream = null;
+  let chunks = [];
+  let timerId = null;
+  let elapsedSeconds = 0;
+  let recordingExt = "webm";
+
+  function toast(message) {
+    const toasts = document.getElementById("toast-region");
+    if (!toasts) return;
+    toasts.setAttribute("aria-live", "assertive");
+    const el = document.createElement("div");
+    el.className = "lens-toast lens-toast--error";
+    el.setAttribute("role", "alert");
+    el.textContent = message;
+    toasts.appendChild(el);
+    setTimeout(() => el.remove(), 4000);
+  }
+  function stopStreamTracks() {
+    if (!activeStream) return;
+    activeStream.getTracks().forEach((track) => track.stop());
+    activeStream = null;
+  }
+  function clearTimer() {
+    clearInterval(timerId);
+    timerId = null;
+  }
+  function resetToIdle() {
+    state = "idle";
+    elapsedSeconds = 0;
+    recordButton.disabled = false;
+    recordButton.textContent = IDLE_LABEL;
+    clearTimer();
+  }
+  // Prefer opus when isTypeSupported says so; audio/mp4 is the fallback.
+  function pickMimeType() {
+    const supportsOpus =
+      typeof MediaRecorder !== "undefined" &&
+      MediaRecorder.isTypeSupported &&
+      MediaRecorder.isTypeSupported(OPUS_MIME);
+    return supportsOpus
+      ? { mimeType: OPUS_MIME, ext: "webm" }
+      : { mimeType: "audio/mp4", ext: "m4a" };
+  }
+
+  async function onRecordingStopped() {
+    stopStreamTracks();
+    state = "uploading";
+    recordButton.textContent = "uploading…";
+    const mimeType = (mediaRecorder && mediaRecorder.mimeType) || "audio/webm";
+    const blob = new Blob(chunks, { type: mimeType });
+    chunks = [];
+    const filename = recordingExt === "webm" ? "recording.webm" : "recording.m4a";
+    const file = new File([blob], filename, { type: mimeType });
+    try {
+      if (window.LensMedia && window.LensMedia.uploadAndSend) {
+        await window.LensMedia.uploadAndSend(file);
+      }
+    } catch (err) {
+      toast("recording upload failed: network error");
+    } finally {
+      resetToIdle();
+    }
+  }
+
+  function stopRecording() {
+    clearTimer();
+    if (mediaRecorder && mediaRecorder.state !== "inactive") mediaRecorder.stop();
+  }
+
+  function tick() {
+    elapsedSeconds += 1;
+    recordButton.textContent = "⏹ " + elapsedSeconds + "s (click to stop)";
+    if (elapsedSeconds >= MAX_SECONDS) stopRecording();
+  }
+
+  async function startRecording() {
+    const noApi = typeof MediaRecorder === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia;
+    if (noApi) {
+      toast("recording failed — hint: this browser has no mic/MediaRecorder support");
+      return;
+    }
+    try {
+      activeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      toast("recording failed — hint: microphone permission was denied");
+      return;
+    }
+    const chosen = pickMimeType();
+    recordingExt = chosen.ext;
+    try {
+      mediaRecorder = new MediaRecorder(activeStream, { mimeType: chosen.mimeType });
+    } catch (err) {
+      stopStreamTracks();
+      toast("recording failed — hint: could not start MediaRecorder");
+      return;
+    }
+    chunks = [];
+    mediaRecorder.addEventListener("dataavailable", (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    });
+    mediaRecorder.addEventListener("stop", onRecordingStopped);
+    mediaRecorder.start();
+    state = "recording";
+    elapsedSeconds = 0;
+    recordButton.textContent = "⏹ 0s (click to stop)";
+    timerId = setInterval(tick, 1000);
+  }
+
+  recordButton.addEventListener("click", () => {
+    if (state === "idle") startRecording();
+    else if (state === "recording") stopRecording();
+    // state === "uploading": ignore clicks until the send path resolves.
+  });
 })();
