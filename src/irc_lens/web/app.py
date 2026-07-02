@@ -9,6 +9,7 @@ a ``/healthz`` endpoint.
 from __future__ import annotations
 
 from importlib.resources import files
+from pathlib import Path
 
 from aiohttp import web
 
@@ -18,8 +19,16 @@ from irc_lens.web import routes
 from irc_lens.web.auth import build_cloudflare_middleware
 from irc_lens.web.identity import Identity
 from irc_lens.web.render import precompute_static_hashes
-from irc_lens.web.routes import _MAX_INPUT_BODY
 from irc_lens.web.sessions import SessionFactory, SessionRegistry
+from irc_lens.web.store import MediaStore
+
+# Headroom added on top of `config.media_max_file_bytes` when sizing
+# `client_max_size` (see `make_app`). Multipart framing (boundary
+# markers, the "file" field's own headers) adds a little overhead
+# beyond the raw file bytes; this keeps a well-formed upload right at
+# the per-file cap from being rejected by the framework layer before
+# `MediaStore.save`'s own streaming cap ever gets a chance to run.
+_CLIENT_MAX_SIZE_MEDIA_HEADROOM = 65536
 
 
 _SECURITY_HEADERS_CSP = (
@@ -99,7 +108,11 @@ def _dev_identity_middleware(config: LensConfig):
 
     @web.middleware
     async def middleware(request: web.Request, handler):
-        if request.path.startswith("/static/") or request.path == "/healthz":
+        if (
+            request.path.startswith("/static/")
+            or request.path == "/healthz"
+            or request.path.startswith("/media/")
+        ):
             return await handler(request)
         request["identity"] = identity
         return await handler(request)
@@ -119,8 +132,15 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
             remediation="set `auth.mode:` to either `dev` or `cloudflare-access`",
         )
 
+    # Sized for the media cap (task t6), not the 4 KiB `/input` contract —
+    # `POST /input` enforces its own bound in-handler (see
+    # `routes._read_bounded_body`) precisely because this is no longer
+    # small enough to do that job for it. `media_max_file_bytes` is
+    # always a valid, validated int regardless of `media_enabled`
+    # (`_validate_media_section` computes it unconditionally), so this
+    # is safe to compute even when media is disabled.
     app = web.Application(
-        client_max_size=_MAX_INPUT_BODY,
+        client_max_size=config.media_max_file_bytes + _CLIENT_MAX_SIZE_MEDIA_HEADROOM,
         middlewares=[_security_headers_middleware, middleware],
     )
 
@@ -128,8 +148,28 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
     app["registry"] = registry
     app["config"] = config
 
+    if config.media_enabled:
+        app["media_store"] = MediaStore(
+            root=Path(config.media_dir),
+            max_file_bytes=config.media_max_file_bytes,
+            max_store_bytes=config.media_max_store_bytes,
+        )
+        # Advertised base URL for capability links returned by
+        # `POST /upload`. `media_public_base_url` (when set) is the
+        # operator-declared reachable address (needed once a peer on
+        # another machine has to fetch the blob); otherwise fall back
+        # to this instance's own bind/port, which is at least correct
+        # for same-host / same-LAN consumers.
+        app["media_base"] = (
+            config.media_public_base_url.rstrip("/")
+            if config.media_public_base_url
+            else f"http://{config.web_bind}:{config.web_port}"
+        )
+
     app.router.add_get("/", routes.get_index)
     app.router.add_post("/input", routes.post_input)
+    app.router.add_post("/upload", routes.post_upload)
+    app.router.add_get("/media/{name}", routes.get_media)
     app.router.add_get("/events", routes.get_events)
     app.router.add_get("/healthz", routes.get_healthz)
 
