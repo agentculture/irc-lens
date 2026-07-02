@@ -23,6 +23,16 @@ modules (e.g. ``irc_lens.config``) can import it without creating a
 circular dependency through ``irc_lens.cli``. Everything is re-exported
 here so all existing ``from irc_lens.cli._errors import ...`` call
 sites continue to work unchanged.
+
+As of the agentfront adoption, :mod:`irc_lens._errors` maps these
+names directly onto :mod:`agentfront.errors`: the ``EXIT_*`` values
+*are* agentfront's constants, and ``AfiError`` is a verbatim subclass
+of ``agentfront.errors.AgentfrontError``. That mapping is invisible
+here — this module still just re-exports the same four names — but it
+means every ``AfiError`` this shim exposes is also an
+``AgentfrontError``, which is what lets a future dispatcher migration
+(see the adopt-agentfront plan) catch irc-lens errors without a
+translation layer.
 """
 from __future__ import annotations
 
