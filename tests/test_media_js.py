@@ -35,16 +35,17 @@ def test_media_js_delegates_on_chat_log() -> None:
 
 def test_media_js_handles_lens_media_load_clicks() -> None:
     """Click handler targets .lens-media-load buttons and reads data-src
-    and data-kind via getAttribute or dataset."""
+    and data-kind via .dataset.
+
+    Pin updated deliberately: media.js moved off getAttribute/setAttribute
+    for data-* attributes to `.dataset` per SonarCloud S7761 — the pin now
+    checks for the specific `.dataset.src`/`.dataset.kind` accessors
+    rather than accepting either form.
+    """
     js = _read_media_js()
     assert ".lens-media-load" in js, "media.js must handle .lens-media-load clicks"
-    # Verify data-src and data-kind are read (either via getAttribute or dataset)
-    assert ("data-src" in js or "dataset" in js), (
-        "media.js must read data-src via getAttribute or dataset"
-    )
-    assert ("data-kind" in js or "dataset" in js), (
-        "media.js must read data-kind via getAttribute or dataset"
-    )
+    assert "dataset.src" in js, "media.js must read data-src via .dataset.src (S7761)"
+    assert "dataset.kind" in js, "media.js must read data-kind via .dataset.kind (S7761)"
 
 
 def test_media_js_uses_createElement_not_innerHTML() -> None:
@@ -93,15 +94,43 @@ def test_media_js_validates_url_scheme() -> None:
     assert "http" in js, "media.js must validate URL scheme (http/https)"
 
 
+def test_media_js_url_scheme_check_is_case_insensitive() -> None:
+    """Qodo PR #50 finding: the click-to-load scheme guard only accepted
+    a lowercase `http(s)://` prefix while server-side classification
+    (media.classify_url / the store's magic-byte sniff) is
+    case-insensitive — an otherwise-legitimate "HTTP://..." URL would be
+    silently dropped by the click handler. The fix lowercases a *copy*
+    of the URL for the scheme comparison while keeping the original
+    casing on the element actually built. This pins the lowercasing
+    itself so the fix can't silently regress back to a raw comparison.
+    """
+    js = _read_media_js()
+    assert "toLowerCase" in js, (
+        "media.js must lowercase the URL before the http(s) scheme check "
+        "so an uppercase scheme (e.g. HTTP://...) isn't silently rejected"
+    )
+
+
 def test_media_js_swaps_data_testid_on_embed() -> None:
     """After replacing the button, update the wrapper div's data-testid
-    from 'media-placeholder' to 'media-embed'."""
+    from 'media-placeholder' to 'media-embed' via `.dataset.testid`.
+
+    Pin updated deliberately alongside the S7761 dataset migration: the
+    swap itself now goes through `wrapper.dataset.testid = ...` rather
+    than `setAttribute`, so this pins that accessor directly instead of
+    only the generic "data-testid" substring (which would still match
+    the unrelated `[data-testid="media-attach"]`-style selectors used
+    elsewhere in this file).
+    """
     js = _read_media_js()
     assert "media-placeholder" in js or "media-embed" in js, (
         "media.js must reference the testid swap (placeholder → embed)"
     )
     assert "data-testid" in js, (
         "media.js must update the wrapper's data-testid"
+    )
+    assert "dataset.testid" in js, (
+        "media.js must update the wrapper's data-testid via .dataset.testid (S7761)"
     )
 
 

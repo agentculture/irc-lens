@@ -24,6 +24,7 @@ written to a final path.
 
 from __future__ import annotations
 
+import asyncio
 import re
 import secrets
 from collections.abc import AsyncIterator
@@ -68,8 +69,10 @@ class MediaTooLargeError(MediaError):
 # ---------------------------------------------------------------------------
 
 #: extension -> "image" | "audio", built from the t1 allowlists.
-_EXT_KIND: dict[str, str] = {ext: "image" for ext in _IMAGE_EXTENSIONS}
-_EXT_KIND.update({ext: "audio" for ext in _AUDIO_EXTENSIONS})
+# SonarCloud S7519: `dict.fromkeys(...)` builds a same-value dict
+# without a comprehension.
+_EXT_KIND: dict[str, str] = dict.fromkeys(_IMAGE_EXTENSIONS, "image")
+_EXT_KIND.update(dict.fromkeys(_AUDIO_EXTENSIONS, "audio"))
 
 #: extension -> Content-Type, for the route layer to set on `GET
 #: /media/<token>.<ext>` responses. Deliberately a superset-free 1:1
@@ -160,7 +163,8 @@ def _sniff(data: bytes) -> str | None:
         return "png"
     if data.startswith(b"\xff\xd8\xff"):
         return "jpeg"
-    if data.startswith(b"GIF87a") or data.startswith(b"GIF89a"):
+    # SonarCloud S8513: one startswith call with a tuple, not two ORed calls.
+    if data.startswith((b"GIF87a", b"GIF89a")):
         return "gif"
     if len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "webp"
@@ -204,6 +208,29 @@ def _verify_sniff(data: bytes, ext: str) -> None:
             "upload a file whose content matches its extension "
             f"(allowed: {_ALLOWED_EXTENSIONS_TEXT})",
         )
+
+
+def _accumulate_sniff(sniff_buf: bytearray, chunk: bytes, sniff_checked: bool, ext: str) -> bool:
+    """Feed `chunk` into `sniff_buf` up to `_SNIFF_BYTES` and, once
+    enough bytes have accumulated, verify and return `True`.
+
+    Only the leading `_SNIFF_BYTES` are ever needed to sniff a magic
+    number — extending `sniff_buf` by a chunk's *full* length (the
+    previous behaviour) meant a large first chunk (a multi-MB upload
+    can legitimately arrive as one chunk) got copied into `sniff_buf`
+    in its entirety even though only the first 64 bytes were ever
+    read. Capping the extend to the remaining budget keeps this
+    buffer's size bounded by `_SNIFF_BYTES` regardless of chunk size.
+    """
+    if sniff_checked:
+        return True
+    remaining = _SNIFF_BYTES - len(sniff_buf)
+    if remaining > 0:
+        sniff_buf.extend(chunk[:remaining])
+    if len(sniff_buf) >= _SNIFF_BYTES:
+        _verify_sniff(bytes(sniff_buf), ext)
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +301,18 @@ class MediaStore:
         subdirectory, enforcing the per-file cap while streaming and
         sniffing magic bytes before the file is considered final.
 
+        Every blocking filesystem call along this path — the temp-file
+        write loop, the rename-into-place, and eviction's directory
+        walk — runs off the event loop via `asyncio.to_thread` (see
+        `_stream_to_temp`/`_finalize`): a synchronous `handle.write()`
+        (or `Path.replace`/`Path.rglob`) called directly inside this
+        `async def` would block every other coroutine on the loop for
+        the duration of a multi-MB upload. Split into small helpers
+        (`_validate_extension`, `_ensure_principal_dir`,
+        `_stream_to_temp`, `_finalize`) to keep this method's own
+        cognitive complexity low (SonarCloud S3776) — each helper does
+        exactly one step of "validate → stream → finalize".
+
         Raises:
             MediaTypeError: `filename`'s extension isn't on the
                 allowlist (checked before `chunks` is touched at all),
@@ -281,49 +320,75 @@ class MediaStore:
             MediaTooLargeError: the stream exceeded `max_file_bytes`;
                 the partial temp file is deleted before this raises.
         """
+        ext = self._validate_extension(filename)
+        principal_dir = await self._ensure_principal_dir(principal)
+
+        token = secrets.token_urlsafe(16)
+        tmp_path = principal_dir / f".{token}.{ext}.part"
+        final_path = principal_dir / f"{token}.{ext}"
+
+        try:
+            size = await self._stream_to_temp(tmp_path, chunks, ext)
+        except Exception:
+            await asyncio.to_thread(tmp_path.unlink, missing_ok=True)
+            raise
+
+        await self._finalize(tmp_path, final_path)
+        return StoredMedia(token=token, ext=ext, kind=_EXT_KIND[ext], path=final_path, size=size)
+
+    @staticmethod
+    def _validate_extension(filename: str) -> str:
+        """Reject an unsupported extension before `chunks` is ever
+        touched — cheap, in-memory, no reason to offload."""
         ext = _extract_ext(filename)
         if ext not in _EXT_KIND:
             raise MediaTypeError(
                 f"unsupported file type: {filename!r}",
                 f"upload one of: {_ALLOWED_EXTENSIONS_TEXT}",
             )
+        return ext
 
+    async def _ensure_principal_dir(self, principal: str) -> Path:
         principal_dir = self.root / _sanitize_principal(principal)
-        principal_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(principal_dir.mkdir, parents=True, exist_ok=True)
+        return principal_dir
 
-        token = secrets.token_urlsafe(16)
-        tmp_path = principal_dir / f".{token}.{ext}.part"
-        final_path = principal_dir / f"{token}.{ext}"
-
+    async def _stream_to_temp(
+        self, tmp_path: Path, chunks: AsyncIterator[bytes], ext: str
+    ) -> int:
+        """Stream `chunks` into `tmp_path`, enforcing the per-file cap
+        and sniffing magic bytes, and return the total byte count
+        written. Every write (and the open/close bracketing it) runs
+        via `asyncio.to_thread` so a multi-MB upload doesn't stall the
+        event loop for other requests/sessions mid-stream.
+        """
         size = 0
         sniff_buf = bytearray()
         sniff_checked = False
+        handle = await asyncio.to_thread(tmp_path.open, "wb")
         try:
-            with tmp_path.open("wb") as handle:
-                async for chunk in chunks:
-                    if not chunk:
-                        continue
-                    size += len(chunk)
-                    if size > self.max_file_bytes:
-                        raise MediaTooLargeError(
-                            f"upload exceeds the {self.max_file_bytes}-byte per-file limit",
-                            "upload a smaller file or raise `media.max_file_bytes` in the lens config",
-                        )
-                    handle.write(chunk)
-                    if not sniff_checked:
-                        sniff_buf.extend(chunk)
-                        if len(sniff_buf) >= _SNIFF_BYTES:
-                            _verify_sniff(bytes(sniff_buf), ext)
-                            sniff_checked = True
-                if not sniff_checked:
-                    _verify_sniff(bytes(sniff_buf), ext)
-        except Exception:
-            tmp_path.unlink(missing_ok=True)
-            raise
+            async for chunk in chunks:
+                if not chunk:
+                    continue
+                size += len(chunk)
+                if size > self.max_file_bytes:
+                    raise MediaTooLargeError(
+                        f"upload exceeds the {self.max_file_bytes}-byte per-file limit",
+                        "upload a smaller file or raise `media.max_file_bytes` in the lens config",
+                    )
+                await asyncio.to_thread(handle.write, chunk)
+                sniff_checked = _accumulate_sniff(sniff_buf, chunk, sniff_checked, ext)
+            if not sniff_checked:
+                _verify_sniff(bytes(sniff_buf), ext)
+        finally:
+            await asyncio.to_thread(handle.close)
+        return size
 
-        tmp_path.replace(final_path)
-        self._evict(just_written=final_path)
-        return StoredMedia(token=token, ext=ext, kind=_EXT_KIND[ext], path=final_path, size=size)
+    async def _finalize(self, tmp_path: Path, final_path: Path) -> None:
+        """Rename the completed temp file into place and run eviction —
+        both real filesystem work, offloaded off the event loop."""
+        await asyncio.to_thread(tmp_path.replace, final_path)
+        await asyncio.to_thread(self._evict, final_path)
 
     def resolve(self, token_and_ext: str) -> Path | None:
         """Return the path for a ``<token>.<ext>`` capability string, or

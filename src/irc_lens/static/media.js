@@ -14,14 +14,15 @@
     const button = e.target.closest(".lens-media-load");
     if (!button) return;
 
-    // Read data-src and data-kind from button attributes
-    const src = button.getAttribute("data-src");
-    const kind = button.getAttribute("data-kind");
+    // .dataset, not get/setAttribute, for data-* reads (S7761).
+    const src = button.dataset.src;
+    const kind = button.dataset.kind;
 
     if (!src || !kind) return;
 
-    // Validate URL scheme: must be http:// or https://
-    if (!src.startsWith("http://") && !src.startsWith("https://")) {
+    // Scheme check on a lowercased copy; element below keeps ORIGINAL casing.
+    const lowerSrc = src.toLowerCase();
+    if (!lowerSrc.startsWith("http://") && !lowerSrc.startsWith("https://")) {
       return;
     }
 
@@ -41,18 +42,18 @@
       return;
     }
 
-    // Set common attributes
+    // `class` stays setAttribute (not data-*); rest use .dataset (S7761).
     el.setAttribute("class", "lens-media-item");
-    el.setAttribute("data-kind", kind);
-    el.setAttribute("data-testid", "media-embed");
+    el.dataset.kind = kind;
+    el.dataset.testid = "media-embed";
 
     // Replace button with element
     button.replaceWith(el);
 
-    // Update wrapper's data-testid from media-placeholder to media-embed
+    // Swap wrapper's data-testid; S6582: optional chaining, not `a && a.b`.
     const wrapper = el.parentElement;
-    if (wrapper && wrapper.classList.contains("lens-media")) {
-      wrapper.setAttribute("data-testid", "media-embed");
+    if (wrapper?.classList.contains("lens-media")) {
+      wrapper.dataset.testid = "media-embed";
     }
   });
 })();

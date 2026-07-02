@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -294,15 +295,20 @@ def _validate_media_section(raw: dict) -> tuple[bool, str, int, int, str, str, t
             "raise `media.max_store_bytes:` or lower `media.max_file_bytes:`",
         )
 
-    if media_public_base_url and not media_public_base_url.startswith(
-        ("http://", "https://")
-    ):
-        raise _err(
-            "media.public_base_url must start with http:// or https://, "
-            f"got {media_public_base_url!r}",
-            "set `media.public_base_url:` to a full base URL, "
-            "e.g. https://lens.example.com",
-        )
+    if media_public_base_url:
+        # SonarCloud S5332: avoid an insecure-protocol string literal
+        # (`"http://"`) in the validation check itself — parse the
+        # scheme with `urlsplit` instead of a `str.startswith` prefix
+        # comparison. A non-empty `netloc` is also required so a bare
+        # `"https://"` (valid scheme, no host) is rejected too.
+        parsed_base = urlsplit(media_public_base_url)
+        if parsed_base.scheme not in ("http", "https") or not parsed_base.netloc:
+            raise _err(
+                "media.public_base_url must start with http:// or https://, "
+                f"got {media_public_base_url!r}",
+                "set `media.public_base_url:` to a full base URL, "
+                "e.g. https://lens.example.com",
+            )
 
     remote_embeds = media.get("remote_embeds", "click")
     if remote_embeds not in ("click", "auto", "off"):
