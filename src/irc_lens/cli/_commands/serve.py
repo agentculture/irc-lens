@@ -188,6 +188,32 @@ def _resolve_config(args: argparse.Namespace) -> LensConfig:
     return load_config(default)
 
 
+def _media_session_kwargs(config: LensConfig) -> dict[str, object]:
+    """Derive `Session`'s optional media-embed kwargs from `LensConfig`.
+
+    `media_embed_prefixes` is `media_public_base_url` (when set) plus
+    each `media_trusted_hosts` entry widened to both an `https://` and
+    an `http://` prefix — matching hosts always auto-embed regardless
+    of `media_remote_embeds` (design doc: "trusted_hosts widens
+    auto-embed per deployment"). `media_enabled=False` collapses to no
+    prefixes and mode `"off"` so a disabled media feature never renders
+    a `.lens-media` block. See docs/superpowers/specs/
+    2026-07-02-media-support-design.md ("Rendering path").
+    """
+    if not config.media_enabled:
+        return {"media_embed_prefixes": (), "media_remote_embeds": "off"}
+    prefixes: list[str] = []
+    if config.media_public_base_url:
+        prefixes.append(config.media_public_base_url)
+    for host in config.media_trusted_hosts:
+        prefixes.append(f"https://{host}")
+        prefixes.append(f"http://{host}")
+    return {
+        "media_embed_prefixes": tuple(prefixes),
+        "media_remote_embeds": config.media_remote_embeds,
+    }
+
+
 async def _connect_dev_session(args: argparse.Namespace, config: LensConfig) -> Session:
     """Open the dev-mode IRC session: connect → wait_for_welcome → seed.
 
@@ -200,6 +226,7 @@ async def _connect_dev_session(args: argparse.Namespace, config: LensConfig) -> 
         port=config.server_port,
         nick=config.dev_nick,
         icon=args.icon,
+        **_media_session_kwargs(config),
     )
     try:
         await session.connect()
@@ -287,7 +314,10 @@ async def _build_app(
 
         def cf_factory(nick: str) -> Session:
             return Session(
-                host=config.server_host, port=config.server_port, nick=nick
+                host=config.server_host,
+                port=config.server_port,
+                nick=nick,
+                **_media_session_kwargs(config),
             )
 
         app = make_app(config, cf_factory)

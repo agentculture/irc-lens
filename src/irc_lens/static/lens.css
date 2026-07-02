@@ -120,6 +120,38 @@ body[data-view="mesh"] .lens-mesh { display: block; }
 .lens-chat-ts   { color: var(--lens-muted); margin-right: 0.6ch; }
 .lens-chat-nick { color: var(--lens-accent); margin-right: 0.5ch; }
 
+/* Chat-line media embeds (media-support design doc, "Rendering path").
+   Lens-hosted and auto-embedded remote media render directly here;
+   click-to-load remote media renders a placeholder button that a later
+   task's media.js swaps for the real element on click. Caps keep the
+   chat log scannable even when a message embeds a large image. */
+.lens-media {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5em;
+  margin: 0.3em 0 0.1em;
+}
+.lens-media img,
+.lens-media audio {
+  max-width: 100%;
+  display: block;
+}
+.lens-media img {
+  max-height: 320px;
+  border-radius: 3px;
+  border: 1px solid var(--lens-border);
+}
+.lens-media-load {
+  background: var(--lens-surface);
+  color: var(--lens-fg-soft);
+  border: 1px solid var(--lens-border);
+  padding: 0.3em 1em;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.lens-media-load:hover { background: rgba(65, 214, 122, 0.10); color: var(--lens-fg); }
+
 .lens-sidebar-heading { font-size: 0.85em; color: var(--lens-muted); text-transform: uppercase; margin: 0.5em 0 0.25em; }
 .lens-channel-list,
 .lens-roster { list-style: none; margin: 0; padding: 0; }

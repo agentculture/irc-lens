@@ -10,11 +10,14 @@ ship in the wheel without a separate ``MANIFEST.in``.
 from __future__ import annotations
 
 import hashlib
+import re
 import time
 from importlib.resources import files
 from typing import TYPE_CHECKING, Any
 
 from jinja2 import Environment, PackageLoader, select_autoescape
+
+from irc_lens.web.media import classify_url, render_message_html
 
 if TYPE_CHECKING:
     from irc_lens.session import Session
@@ -81,6 +84,65 @@ def _strftime(value: Any, fmt: str = "%H:%M:%S") -> str:
     return time.strftime(fmt, time.localtime(float(value)))
 
 
+# Candidate media URLs inside a chat message's raw text: either an
+# absolute http(s) URL (mirrors `media.py`'s own `_URL_RE`) or a
+# relative `/media/...` path. Per the design doc's "Rendering path", a
+# relative `/media/` path always counts as lens-hosted even without a
+# matching `media_embed_prefixes` entry — see `media_items` below.
+_MEDIA_CANDIDATE_RE = re.compile(r"(?:https?://\S+|/media/\S+)", re.IGNORECASE)
+
+
+def media_items(
+    text: str,
+    embed_prefixes: tuple[str, ...] = (),
+    remote_mode: str = "click",
+) -> list[dict[str, str | bool]]:
+    """Extract the `.lens-media` block entries for one chat message.
+
+    Scans *text* (the raw, unescaped message body) for image/audio
+    URLs via `media.classify_url` and decides, per URL, whether it
+    renders as a direct embed or a click-to-load placeholder:
+
+    - **Lens-hosted** — the URL starts with one of *embed_prefixes*
+      (derived from `media.public_base_url` / `media.trusted_hosts` by
+      the session glue) or is a relative `/media/...` path — always
+      embeds directly (`item["direct"] = True`), regardless of
+      *remote_mode*.
+    - **Remote** — anything else. `remote_mode="auto"` embeds
+      directly; `"click"` (the default) marks the item for a
+      click-to-load placeholder (`item["direct"] = False`);
+      `"off"` drops the item from the result entirely (message text
+      still renders as a plain link via `render_message_html`, but no
+      `.lens-media` entry is produced for it).
+
+    `"link"`-classified URLs (no recognized image/audio extension)
+    never produce an entry. Called from `_chat_line.html.j2` as a
+    Jinja global — see the `_env.globals["media_items"]` registration
+    below. Values are plain `str`/`bool`; the template interpolates
+    `item.url` via `{{ }}` so Jinja's autoescape — not this function —
+    is what protects the `src="..."`/`data-src="..."` attributes from
+    an adversarial URL (see the XSS-in-URL test in
+    `tests/test_render_media.py`).
+    """
+    items: list[dict[str, str | bool]] = []
+    for match in _MEDIA_CANDIDATE_RE.finditer(text or ""):
+        url = match.group(0)
+        kind = classify_url(url)
+        if kind not in ("image", "audio"):
+            continue
+        hosted = url.startswith("/media/") or any(
+            prefix and url.startswith(prefix) for prefix in embed_prefixes
+        )
+        if hosted:
+            direct = True
+        elif remote_mode == "off":
+            continue
+        else:
+            direct = remote_mode == "auto"
+        items.append({"kind": kind, "url": url, "direct": direct})
+    return items
+
+
 _env = Environment(
     loader=PackageLoader("irc_lens", "templates"),
     autoescape=select_autoescape(["html", "html.j2"]),
@@ -88,7 +150,9 @@ _env = Environment(
     lstrip_blocks=True,
 )
 _env.filters["strftime"] = _strftime
+_env.filters["linkify"] = render_message_html
 _env.globals["static_url"] = static_url
+_env.globals["media_items"] = media_items
 
 
 def render_fragment(template: str, **ctx: Any) -> str:
@@ -145,14 +209,33 @@ def _normalize_history_entry(entry: Any) -> dict:
     }
 
 
-def render_chat_log(entries: list) -> str:
+def render_chat_log(
+    entries: list,
+    *,
+    media_embed_prefixes: tuple[str, ...] = (),
+    media_remote_embeds: str = "click",
+) -> str:
     """Render multiple chat lines as a single HTML blob for innerHTML
     replacement of `#chat-log`. Used by the `log` SSE event publish on
     /join and /switch (history-on-channel-context-change) and by the
     initial `GET /` server render so a page reload doesn't go blank.
+
+    `media_embed_prefixes`/`media_remote_embeds` mirror `Session`'s
+    optional media state (see `session.py`) and are threaded straight
+    into each `_chat_line.html.j2` render so history/log fragments get
+    the same `.lens-media` treatment as live `chat` events. Both
+    default to the values that make the block behave as it would with
+    no media configuration at all — see `media_items` above.
     """
     template = _env.get_template("_chat_line.html.j2")
-    parts = [template.render(msg=_normalize_history_entry(e)) for e in entries]
+    parts = [
+        template.render(
+            msg=_normalize_history_entry(e),
+            media_embed_prefixes=media_embed_prefixes,
+            media_remote_embeds=media_remote_embeds,
+        )
+        for e in entries
+    ]
     return "".join(parts)
 
 
@@ -169,7 +252,11 @@ def render_index(session: "Session", *, chat_log_html: str | None = None) -> str
     if chat_log_html is None:
         if session.current_channel:
             entries = session.buffer.read(session.current_channel, limit=200)
-            chat_log_html = render_chat_log(entries)
+            chat_log_html = render_chat_log(
+                entries,
+                media_embed_prefixes=session.media_embed_prefixes,
+                media_remote_embeds=session.media_remote_embeds,
+            )
         else:
             chat_log_html = ""
     return _env.get_template("index.html.j2").render(

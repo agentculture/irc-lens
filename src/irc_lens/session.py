@@ -257,11 +257,25 @@ class Session:
         *,
         icon: str | None = None,
         event_bus: SessionEventBus | None = None,
+        media_embed_prefixes: tuple[str, ...] = (),
+        media_remote_embeds: str = "click",
     ) -> None:
         self.host = host
         self.port = port
         self.nick = nick
         self.icon = icon
+
+        # Media-embed state (media-support design doc, "Rendering path").
+        # Optional and keyword-only so every existing caller that
+        # constructs a bare `Session(host, port, nick)` keeps working
+        # unchanged — these default to "no lens-hosted prefixes" / the
+        # spec's default `click` remote-embed mode. `web/routes.py` and
+        # `serve.py` derive the real values from `LensConfig`
+        # (`media_public_base_url` + `media_trusted_hosts` for
+        # `media_embed_prefixes`, `media_remote_embeds` passed through
+        # as-is; `media_enabled=False` collapses to `((), "off")`).
+        self.media_embed_prefixes = media_embed_prefixes
+        self.media_remote_embeds = media_remote_embeds
 
         # View state (mutated by command dispatch in Phase 5+).
         self.current_channel: str = ""
@@ -683,7 +697,13 @@ class Session:
             # for QUERY_TIMEOUT seconds waiting for HISTORYEND that
             # never arrives.
             if self.current_channel == view_channel:
-                self._publish_log(render_chat_log([]))
+                self._publish_log(
+                    render_chat_log(
+                        [],
+                        media_embed_prefixes=self.media_embed_prefixes,
+                        media_remote_embeds=self.media_remote_embeds,
+                    )
+                )
             return
 
         try:
@@ -701,7 +721,13 @@ class Session:
             entries = []
         if self.current_channel != view_channel:
             return  # user moved off the pane this fetch was for; skip swap
-        self._publish_log(render_chat_log(entries))
+        self._publish_log(
+            render_chat_log(
+                entries,
+                media_embed_prefixes=self.media_embed_prefixes,
+                media_remote_embeds=self.media_remote_embeds,
+            )
+        )
 
     async def _exec_part(self, parsed: ParsedCommand) -> None:
         if not parsed.args:
@@ -990,6 +1016,8 @@ class Session:
         fragment = render_fragment(
             "_chat_line.html.j2",
             msg={"nick": nick, "text": text, "ts_display": ts_display, "kind": kind},
+            media_embed_prefixes=self.media_embed_prefixes,
+            media_remote_embeds=self.media_remote_embeds,
         )
         self.event_bus.publish(SessionEvent(name="chat", data=fragment))
 
