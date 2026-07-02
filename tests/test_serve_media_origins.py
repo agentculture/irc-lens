@@ -93,8 +93,11 @@ def test_trusted_host_origins_malformed_port_degrades_to_any_port() -> None:
 
 
 def test_trusted_host_origins_empty_entry_yields_nothing() -> None:
-    assert _trusted_host_origins("") == ()
-    assert _trusted_host_origins("   ") == ()
+    # `None` (not a 0-length tuple) — every tuple-returning path is the
+    # same-shaped `(http, https)` pair; see SonarCloud S8495 note on
+    # `_trusted_host_origins`'s docstring.
+    assert _trusted_host_origins("") is None
+    assert _trusted_host_origins("   ") is None
 
 
 # ---------------------------------------------------------------------------

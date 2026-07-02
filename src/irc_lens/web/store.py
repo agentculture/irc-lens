@@ -148,17 +148,12 @@ def _looks_like_svg(data: bytes) -> bool:
     return head.startswith(b"<svg")
 
 
-def _sniff(data: bytes) -> str | None:
-    """Return the sniffed type label for the leading bytes of a file,
-    or ``None`` when nothing recognized matches.
-
-    Labels: ``png jpeg gif webp mp3 ogg wav webm m4a flac svg``. ``svg``
-    is not a member of any extension's allowlist (see
-    ``_ALLOWED_SNIFF``) — sniffing it is purely so the caller can raise
-    an SVG-specific error message instead of a generic mismatch.
-    """
-    if _looks_like_svg(data):
-        return "svg"
+def _sniff_image_kind(data: bytes) -> str | None:
+    """Return the sniffed *image* type label for `data`'s leading
+    bytes, or ``None`` when no image signature matches. Split out of
+    `_sniff` (SonarCloud S3776: keep each magic-byte dispatcher's own
+    cognitive complexity low) — same checks, same order, just the
+    image half of the table."""
     if data.startswith(b"\x89PNG\r\n\x1a\n"):
         return "png"
     if data.startswith(b"\xff\xd8\xff"):
@@ -168,6 +163,14 @@ def _sniff(data: bytes) -> str | None:
         return "gif"
     if len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "webp"
+    return None
+
+
+def _sniff_audio_kind(data: bytes) -> str | None:
+    """Return the sniffed *audio* type label for `data`'s leading
+    bytes, or ``None`` when no audio signature matches. Split out of
+    `_sniff` (SonarCloud S3776) — same checks, same order, just the
+    audio half of the table."""
     if len(data) >= 12 and data[0:4] == b"RIFF" and data[8:12] == b"WAVE":
         return "wav"
     if data.startswith(b"OggS"):
@@ -187,6 +190,29 @@ def _sniff(data: bytes) -> str | None:
     if len(data) >= 8 and data[4:8] == b"ftyp":
         return "m4a"
     return None
+
+
+def _sniff(data: bytes) -> str | None:
+    """Return the sniffed type label for the leading bytes of a file,
+    or ``None`` when nothing recognized matches.
+
+    Labels: ``png jpeg gif webp mp3 ogg wav webm m4a flac svg``. ``svg``
+    is not a member of any extension's allowlist (see
+    ``_ALLOWED_SNIFF``) — sniffing it is purely so the caller can raise
+    an SVG-specific error message instead of a generic mismatch.
+
+    Delegates the image/audio magic-byte checks to
+    `_sniff_image_kind`/`_sniff_audio_kind` (SonarCloud S3776: this
+    function's own cognitive complexity was 16 of the 15 allowed with
+    every check inlined) — the checked order (svg, then image
+    signatures, then audio signatures) is unchanged.
+    """
+    if _looks_like_svg(data):
+        return "svg"
+    image_kind = _sniff_image_kind(data)
+    if image_kind is not None:
+        return image_kind
+    return _sniff_audio_kind(data)
 
 
 def _verify_sniff(data: bytes, ext: str) -> None:
