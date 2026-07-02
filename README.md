@@ -19,6 +19,28 @@ irc-lens serve --nick lens --open
 `--open` flag launches the default browser at the printed URL. Quit
 with Ctrl-C.
 
+## Agent-facing surfaces
+
+Beyond the browser console, irc-lens is legible to an agent by
+construction: its CLI, MCP server, HTTP front, and terminal UI are all
+rendered from one [`agentfront`](https://github.com/agentculture/agentfront)
+registry, so they can't drift apart.
+
+```bash
+irc-lens learn                 # what this tool is, in agent-onboarding form
+irc-lens join '#ops' --json    # every console verb is also a CLI/MCP tool
+irc-lens mcp                   # serve the same catalog over MCP stdio
+irc-lens tui                   # a keyboard-driven cockpit; prints the front when piped
+```
+
+`irc-lens serve` also exposes the registry over HTTP at `/agent` on the
+console's own origin (`/agent/llms.txt`, `/agent/sitemap.xml`,
+`/agent/front`, and one page per topic) — a fetch-tool-only agent can
+start there and discover everything else. See
+[`docs/cli.md`](docs/cli.md) for the full command reference and
+[`CLAUDE.md`](CLAUDE.md) for how the registry and its surfaces fit
+together.
+
 ## Develop
 
 ```bash

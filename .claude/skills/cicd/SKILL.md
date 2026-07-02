@@ -9,15 +9,15 @@ description: >
   irc-lens, handling review feedback, polling CI status, or the user says
   "create PR", "review comments", "address feedback", "resolve threads".
   Vendored from steward's `cicd` skill — see the `irc-lens notes` section
-  below for the AFI-rubric guardrails specific to this repo.
+  below for the agentfront-contract guardrails specific to this repo.
 ---
 
 # CI/CD — irc-lens edition
 
 irc-lens is the lens CLI for AgentIRC in the Culture ecosystem; its PRs touch
-the AFI-rubric CLI surface, mesh-observability code paths, and committed
-docs that other contributors clone fresh. The two recurring bug classes that
-this skill is built to catch up front:
+the agentfront-rendered CLI/MCP/HTTP/TAUI surface, mesh-observability code
+paths, and committed docs that other contributors clone fresh. The two
+recurring bug classes that this skill is built to catch up front:
 
 - **Path leaks** — committing absolute home-directory paths that work only on
   the author's machine.
@@ -26,8 +26,8 @@ this skill is built to catch up front:
   contributors and CI.
 
 The workflow is encapsulated in `scripts/workflow.sh` — follow that, not a
-manual checklist. AFI-rubric-specific PUSHBACK rules and bug classes live in
-the `## irc-lens notes` section at the bottom.
+manual checklist. Agentfront-contract-specific PUSHBACK rules and bug
+classes live in the `## irc-lens notes` section at the bottom.
 
 ## Prerequisites
 
@@ -125,13 +125,14 @@ For every comment, decide **FIX** or **PUSHBACK** with reasoning.
 
 Default to **FIX** for: portability complaints (always valid for irc-lens —
 recurring bug class), test or doc requests, style nits aligned with workspace
-conventions, AFI-rubric divergence (see irc-lens notes below).
+conventions, agentfront-contract divergence (see irc-lens notes below).
 
 Default to **PUSHBACK** for: architecture opinions that conflict with workspace
-`CLAUDE.md`, `.afi/reference/python-cli/`, or the all-backends rule;
+`CLAUDE.md`, the agentfront runtime contract (one App registry, four derived
+surfaces, the `assert_surfaces_agree` drift gate), or the all-backends rule;
 greenfield false-positives (e.g. "add tests" before there's any source —
 defer to a later PR, don't refuse). Always cite the *reason* — workspace
-convention, rubric clause, or scoping. PUSHBACK without reasoning is just
+convention, contract clause, or scoping. PUSHBACK without reasoning is just
 a refusal.
 
 ### Alignment-delta rule
@@ -177,10 +178,11 @@ when irc-lens joins the mesh.
 
 ## irc-lens notes
 
-irc-lens conforms to the agent-first Python CLI rubric cited from
-`citation-cli` (see top-level `CLAUDE.md` and `.afi/reference/python-cli/`).
-The cited material is authoritative — these notes summarize the
-guardrails this skill should enforce on PRs.
+irc-lens's CLI, MCP, HTTP, and TAUI surfaces are all rendered from one
+`agentfront.app.App` registry (`irc_lens.cli.build_app()`) — see
+top-level `CLAUDE.md`'s "Runtime contract" section, which is
+authoritative. These notes summarize the guardrails this skill should
+enforce on PRs.
 
 ### Recurring bug classes
 
@@ -190,27 +192,41 @@ guardrails this skill should enforce on PRs.
   IRC inspection code).
 - **Per-user config dependencies** — referencing `~/.<dotfile>` paths in
   committed docs/configs.
-- **Rubric divergence** — `afi cli verify` enforces 6 bundles (Structure,
-  Learnability, JSON, Errors, Explain, Overview). Any change to the
-  CLI core surface must keep them green.
+- **Surface drift** — `tests/test_front_agreement.py::test_surfaces_agree`
+  (`agentfront.testing.assert_surfaces_agree`) enforces that the CLI, MCP,
+  HTTP, and TAUI surfaces enumerate the same tools/docs as the registry.
+  It runs unconditionally in the default `pytest` selection — no opt-in
+  marker, no external binary — so `uv run pytest -q` is the whole gate;
+  there is nothing extra to run before a PR. `agentfront`'s own `doctor`
+  meta-verb (`irc-lens doctor`) is a useful *runtime* health check against
+  a built `App`, but it is not itself the drift gate.
 
 ### PUSHBACK rules specific to irc-lens
 
-- **"Vendor `.afi/reference/` into `docs/`"** → no, by design it is cited
-  via `afi cli cite` and gitignored. The right fix is to document the
-  regen command, not to commit the reference.
+- **"Add a second hand-rolled parser/tool-list/doc-page instead of a
+  `register_into(app)` hook"** → no. Every command module contributes to
+  the one registry `cli.build_app()` assembles; a second source of truth
+  for any surface is exactly what the drift gate exists to prevent.
 - **"Merge `cli/_errors.py` into `cli/__init__.py`"** (or any consolidation
-  of the stable-contract files: `cli/_errors.py`, `cli/_output.py`, the
-  `_ArgumentParser` override, the `learn`/`explain` surface) → no, the
-  split is part of the rubric contract.
+  of the stable-contract files: `cli/_errors.py`, `cli/_output.py`) → no,
+  the split predates and survives the agentfront adoption; `cli/_errors.py`
+  re-exports `irc_lens._errors.AfiError` (a subclass of
+  `agentfront.errors.AgentfrontError`) so non-CLI modules can import it
+  without pulling in the CLI package.
+- **"Route `overview`/`doctor` through `agentfront.cli_surface.run_cli`
+  like every other verb"** → no, not yet: `agentfront` 0.20.0 reserves
+  both names but its stock shapes (`overview --json`'s bare noun list,
+  `doctor`'s missing `--json`) are thinner than this repo's rubric
+  requires. `cli/_meta.py` is the documented, deliberate exception — see
+  `CLAUDE.md`'s "The `cli/_meta.py` routing deviation".
 - **"Hard-fail on missing target in `overview`"** → no, `overview` is
   descriptive, not verifying. `overview <bogus-path>` exits 0 with a
-  warning section; hard-failing is `afi cli verify`'s job.
+  warning section; hard-failing on an unhealthy target is `doctor`'s job.
 
 ### Stable-contract checklist
 
-When PRs touch `cli/_errors.py`, `cli/_output.py`, the `_ArgumentParser`
-override, or the `learn` / `explain` / `overview` surface:
+When PRs touch `cli/_errors.py`, `cli/_output.py`, `cli/_meta.py`, or any
+command module's `register_into(app)` hook:
 
 - Exit-code policy intact: `0` success, `1` user error, `2` env error,
   `3+` reserved. All failures raise `AfiError`; the dispatcher catches
@@ -219,10 +235,15 @@ override, or the `learn` / `explain` / `overview` surface:
   to stderr, even in `--json` mode.
 - Errors keep shape `{code, message, remediation}`; text-mode renders as
   `error: <msg>\nhint: <remediation>`.
-- `_ArgumentParser` override still routes argparse errors through
-  `emit_error` so unknown verbs/flags exit with `error:` + `hint:` and
-  no traceback.
-- Globals `learn`, `explain`, `overview` still exist at the top level —
-  not nested under a noun.
+- Argparse-time errors still route through the structured error contract
+  so unknown verbs/flags exit with `error:` + `hint:` and no traceback
+  (`agentfront.cli_surface.run_cli` provides this for every verb except
+  `overview`/`doctor`, which `cli/_meta.py`'s own `_MetaParser` provides
+  it for).
+- Meta-verbs `learn`, `explain`, `overview`, `doctor` still exist at the
+  top level — not nested under a noun.
 - `learn` output rubric still passes (≥ 200 chars, mentions purpose,
   commands, exit codes, `--json`, `explain`).
+- `tests/test_front_agreement.py::test_surfaces_agree` still passes —
+  this is the one check that actually proves no surface silently
+  dropped a tool or doc the others still report.
