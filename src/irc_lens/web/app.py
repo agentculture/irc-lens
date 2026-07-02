@@ -17,6 +17,7 @@ from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
 from irc_lens.web import routes
 from irc_lens.web.auth import build_cloudflare_middleware
+from irc_lens.web.front import mount_agent_front
 from irc_lens.web.identity import Identity
 from irc_lens.web.render import precompute_static_hashes
 from irc_lens.web.sessions import SessionFactory, SessionRegistry
@@ -181,6 +182,13 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
         show_index=False,
         follow_symlinks=False,
     )
+
+    # Mount the agentfront HTTP surface (index / llms.txt / sitemap.xml /
+    # front / doc slugs) under the /agent prefix, behind this app's auth
+    # middleware. Builds the WSGI callable once here — not per request. The
+    # /agent routes are deliberately NOT added to either exempt list above,
+    # so CF mode requires a valid JWT on the prefix (decisions c21/c30).
+    mount_agent_front(app)
 
     # Pre-warm asset-hash cache so the first GET / doesn't pay file I/O
     # synchronously inside the async handler (per Qodo PR #40 review).
