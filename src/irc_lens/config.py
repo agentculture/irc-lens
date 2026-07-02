@@ -286,6 +286,24 @@ def _validate_media_section(raw: dict) -> tuple[bool, str, int, int, str, str, t
     media_max_store_bytes = _coerce_int(media.get("max_store_bytes", 268435456), "media.max_store_bytes")
     media_public_base_url = str(media.get("public_base_url", ""))
 
+    if media_max_file_bytes > media_max_store_bytes:
+        raise _err(
+            "media.max_file_bytes must not exceed media.max_store_bytes "
+            f"({media_max_file_bytes} > {media_max_store_bytes}); "
+            "eviction could never free room for a single file",
+            "raise `media.max_store_bytes:` or lower `media.max_file_bytes:`",
+        )
+
+    if media_public_base_url and not media_public_base_url.startswith(
+        ("http://", "https://")
+    ):
+        raise _err(
+            "media.public_base_url must start with http:// or https://, "
+            f"got {media_public_base_url!r}",
+            "set `media.public_base_url:` to a full base URL, "
+            "e.g. https://lens.example.com",
+        )
+
     remote_embeds = media.get("remote_embeds", "click")
     if remote_embeds not in ("click", "auto", "off"):
         raise _err(

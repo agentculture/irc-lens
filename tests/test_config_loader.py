@@ -308,6 +308,45 @@ media:
     assert "off" in exc.value.remediation
 
 
+def test_media_file_cap_exceeding_store_cap_errors(tmp_path: Path) -> None:
+    """max_file_bytes > max_store_bytes would make eviction ineffective."""
+    with pytest.raises(AfiError) as exc:
+        load_config(_write(tmp_path, """
+auth:
+  mode: dev
+  dev:
+    nick: lens
+    email: dev@local
+server:
+  name: spark
+media:
+  max_file_bytes: 10485760
+  max_store_bytes: 1048576
+"""))
+    assert exc.value.code == EXIT_USER_ERROR
+    assert "max_file_bytes" in exc.value.message
+    assert "max_store_bytes" in exc.value.remediation
+
+
+def test_media_public_base_url_bad_scheme_errors(tmp_path: Path) -> None:
+    """public_base_url must be an http(s) base URL when set."""
+    with pytest.raises(AfiError) as exc:
+        load_config(_write(tmp_path, """
+auth:
+  mode: dev
+  dev:
+    nick: lens
+    email: dev@local
+server:
+  name: spark
+media:
+  public_base_url: not-a-url
+"""))
+    assert exc.value.code == EXIT_USER_ERROR
+    assert "public_base_url" in exc.value.message
+    assert "http" in exc.value.remediation
+
+
 def test_media_invalid_type_for_enabled_errors(tmp_path: Path) -> None:
     """Invalid type for enabled field raises error."""
     with pytest.raises(AfiError) as exc:
