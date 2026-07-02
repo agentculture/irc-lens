@@ -46,6 +46,14 @@ def test_config_overview_works(tmp_path: Path) -> None:
     assert rc == 0
 
 
+def test_config_bare_prints_help(capsys) -> None:
+    """Bare `irc-lens config` (no verb) prints the noun's help and exits 0."""
+    rc = main(["config"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "init" in out and "overview" in out
+
+
 def test_config_init_starter_includes_media_section(tmp_path: Path, monkeypatch) -> None:
     """The starter template includes the media section."""
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))

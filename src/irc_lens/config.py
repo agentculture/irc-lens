@@ -403,3 +403,43 @@ def load_config(path: Path) -> LensConfig:
         media_remote_embeds=media_remote_embeds,
         media_trusted_hosts=media_trusted_hosts,
     )
+
+
+# ---------------------------------------------------------------------------
+# Shared --config resolution — one convention, two callers
+# ---------------------------------------------------------------------------
+# `irc-lens serve` (via `cli/_commands/serve.py::_resolve_config`) and every
+# live-verb tool in `irc_lens.tools` both need "an explicit path if given,
+# else the default location, else a clean error" — factored here so both
+# surfaces raise byte-identical `error:`/`hint:` text for the same
+# missing-config cases instead of maintaining two copies that could drift.
+
+
+def resolve_config(config_path: str | None) -> LensConfig:
+    """Load a ``LensConfig`` from an explicit path or the default location.
+
+    If *config_path* is truthy it must exist — a typo'd ``--config`` must
+    never silently fall back to the default location (that would risk
+    quietly starting against the wrong server/identity). If *config_path*
+    is falsy, :func:`default_config_path` must exist instead. Either way, a
+    missing file raises :class:`AfiError` (``EXIT_USER_ERROR``) with a
+    remediation pointing at ``irc-lens config init``.
+    """
+    if config_path:
+        explicit = Path(config_path)
+        if not explicit.exists():
+            raise _err(
+                f"--config {config_path!r} does not exist",
+                (
+                    "fix the path, or run `irc-lens config init "
+                    f"--path {config_path}` to drop a starter config there"
+                ),
+            )
+        return load_config(explicit)
+    default = default_config_path()
+    if not default.exists():
+        raise _err(
+            f"no config at {default}",
+            "run 'irc-lens config init' to create one, or pass --config <path>",
+        )
+    return load_config(default)

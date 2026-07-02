@@ -7,6 +7,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-07-02
+
+### Added
+
+- **Adopted the `agentfront` runtime across the whole CLI and site.**
+  irc-lens is now legible to agents by construction: one `agentfront.App`
+  registry backs every surface, and a suite of in-process drift gates
+  keeps them from ever disagreeing.
+  - **agentfront[mcp] dependency:** `agentfront[mcp]>=0.20.0` in project
+    dependencies.
+  - **CLI rendered from one registry:** `irc-lens.cli:build_app()`
+    assembles a single `agentfront.App`; `learn`, `explain`, `overview`,
+    and `doctor` are all derived from it rather than hand-maintained.
+  - **11 live verbs as ephemeral-session tools:** `send`, `join`, `part`,
+    `read`, `channels`, `who`, `mesh`, `switch`, `topic`, `me`, and `icon`
+    are registered as agentfront tools, reachable identically from the
+    CLI, MCP, and (future) TAUI surfaces — each opens a throwaway
+    AgentIRC session, performs one verb, and disconnects.
+  - **`irc-lens mcp`:** a new host verb serving `app.mcp_server()` over
+    stdio, so any MCP client can drive the same tool catalog.
+  - **`irc-lens tui`:** a new host verb supplying a terminal cockpit over
+    agentfront's `LiveDriver`.
+  - **`/agent` HTTP front:** an agentfront WSGI bridge mounted inside the
+    aiohttp console under `/agent`, behind the console's existing auth
+    (dev or cloudflare-access) — serves `llms.txt`, `sitemap.xml`,
+    `front`, and purpose-authored doc pages (what irc-lens is, driving
+    the chat console, the tool catalog, exit codes and `--json`
+    conventions). `/media` capability URLs remain auth-exempt.
+  - **In-process drift gate:** `tests/test_front_agreement.py`'s
+    `assert_surfaces_agree(build_app())` replaces the external `afi cli
+    verify` binary — no subprocess, no skip conditions, runs in the
+    default test selection on every push.
+
+### Changed
+
+- **Python 3.12 floor:** `requires-python` bumped from `>=3.11` to `>=3.12`,
+  aligning with agentfront's Python version support.
+- **`AfiError` → `AgentfrontError`:** `irc_lens._errors.AfiError` is now a
+  verbatim subclass of `agentfront.errors.AgentfrontError`; the
+  `(code, message, remediation)` shape and exit-code policy (0/1/2/3+)
+  are unchanged, and `cli/_errors.py`'s public names are preserved as a
+  stable-contract re-export shim.
+- **Docs swept for the agentfront contract:** `CLAUDE.md`,
+  `docs/cli.md`, and `docs/architecture.md` describe the one-registry,
+  four-surface runtime and its drift gate in place of the retired AFI
+  scaffolding manifesto.
+
 ## [0.8.0] - 2026-07-02
 
 ### Added

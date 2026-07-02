@@ -46,7 +46,7 @@ from aiohttp import web
 
 from irc_lens.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
 from irc_lens.cli._output import emit_diagnostic
-from irc_lens.config import LensConfig, default_config_path, load_config
+from irc_lens.config import LensConfig, resolve_config
 from irc_lens.session import LensConnectionLost, Session
 from irc_lens.web import make_app
 from irc_lens.web.auth import warm_jwks
@@ -158,35 +158,13 @@ def _validate_cli_against_config(
 def _resolve_config(args: argparse.Namespace) -> LensConfig:
     """Load a LensConfig from ``--config`` or the default path.
 
-    The config file is required (T4.4). If the user passes ``--config
-    <path>`` that path must exist. If no ``--config`` is given, the default
-    location (``~/.config/irc-lens/config.yaml``) must exist. Either way,
-    a missing file exits 1 with ``error:`` / ``hint:`` pointing at
-    ``irc-lens config init``.
+    The config file is required (T4.4). Thin wrapper around
+    :func:`irc_lens.config.resolve_config` — the shared helper t5's
+    live-verb tools (:mod:`irc_lens.tools`) also use, so the two surfaces
+    raise byte-identical ``error:``/``hint:`` text for the same
+    missing-config cases.
     """
-    if args.config:
-        explicit = Path(args.config)
-        if not explicit.exists():
-            raise AfiError(
-                code=EXIT_USER_ERROR,
-                message=f"--config {args.config!r} does not exist",
-                remediation=(
-                    "fix the path, or run `irc-lens config init "
-                    f"--path {args.config}` to drop a starter config there"
-                ),
-            )
-        return load_config(explicit)
-    default = default_config_path()
-    if not default.exists():
-        raise AfiError(
-            code=EXIT_USER_ERROR,
-            message=f"no config at {default}",
-            remediation=(
-                "run 'irc-lens config init' to create one, "
-                "or pass --config <path>"
-            ),
-        )
-    return load_config(default)
+    return resolve_config(args.config)
 
 
 def _public_base_origin(base_url: str) -> tuple[str, str, int] | None:
@@ -529,27 +507,35 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
-def register(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser(
-        "serve",
-        help="Launch the aiohttp web console against an AgentIRC server.",
-        description=(
-            "Launch the aiohttp web console against an AgentIRC server. "
-            "A config file is required — run 'irc-lens config init' to create one. "
-            "Defaults target a local culture server on 127.0.0.1:6667."
-        ),
-        epilog=(
-            "examples:\n"
-            "  irc-lens serve --nick lens\n"
-            "      Connect to a local AgentIRC (127.0.0.1:6667) and serve the\n"
-            "      web console on http://127.0.0.1:8765/.\n"
-            "  irc-lens serve --nick lens --open\n"
-            "      Same, and auto-launch your default browser at the URL.\n"
-            "  irc-lens serve --host irc.example.org --port 6667 --nick ops\n"
-            "      Point at a remote AgentIRC server.\n"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+_SERVE_HELP = "Launch the aiohttp web console against an AgentIRC server."
+
+
+def _configure_serve(p: argparse.ArgumentParser) -> None:
+    """Add ``serve``'s flags + rich help to the parser agentfront hands us.
+
+    agentfront's ``App.add_command`` (see ``register_into`` below) creates the
+    ``serve`` subparser and calls this ``configure`` hook to populate it. The
+    flag definitions here are byte-compatible with the pre-agentfront
+    ``register(sub)`` wiring (flags, defaults, help text, epilog) — that
+    wiring has been fully removed; this hook is the sole source of the
+    ``serve`` CLI surface.
+    """
+    p.description = (
+        "Launch the aiohttp web console against an AgentIRC server. "
+        "A config file is required — run 'irc-lens config init' to create one. "
+        "Defaults target a local culture server on 127.0.0.1:6667."
     )
+    p.epilog = (
+        "examples:\n"
+        "  irc-lens serve --nick lens\n"
+        "      Connect to a local AgentIRC (127.0.0.1:6667) and serve the\n"
+        "      web console on http://127.0.0.1:8765/.\n"
+        "  irc-lens serve --nick lens --open\n"
+        "      Same, and auto-launch your default browser at the URL.\n"
+        "  irc-lens serve --host irc.example.org --port 6667 --nick ops\n"
+        "      Point at a remote AgentIRC server.\n"
+    )
+    p.formatter_class = argparse.RawDescriptionHelpFormatter
     p.add_argument(
         "--config",
         default=None,
@@ -626,4 +612,13 @@ def register(sub: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Emit stderr logs as one JSON object per line.",
     )
-    p.set_defaults(func=cmd_serve)
+
+
+def register_into(app) -> None:
+    """Register ``serve`` as a host command on the agentfront App."""
+    app.add_command(
+        "serve",
+        handler=cmd_serve,
+        help=_SERVE_HELP,
+        configure=_configure_serve,
+    )

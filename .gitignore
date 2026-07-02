@@ -243,3 +243,5 @@ __marimo__/
 
 # colleague run reports (local working state)
 .colleague/
+
+.devague/questions/
