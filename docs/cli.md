@@ -19,10 +19,10 @@ on the agent-first CLI shape.
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Success. |
-| `1` | User error — bad input, unreachable AgentIRC, missing seed file, malformed YAML. |
-| `2` | Environment error — failure to act on a resource that exists (port collision on `--web-port`, permission denied while reading a seed file). |
-| `3+` | Reserved. |
+| `0` | Success |
+| `1` | User error (bad input, unreachable IRC, bad seed) |
+| `2` | Environment error (port in use, permission denied) |
+| `3+` | Reserved |
 
 The split is mandated by the AFI rubric; precedent in
 `src/irc_lens/cli/_commands/serve.py`: the `LensConnectionLost`
@@ -98,7 +98,9 @@ on `127.0.0.1:6667`. To deploy behind Cloudflare Access, switch
 ### `--nick` and `--bind`
 
 In `auth.mode: dev`, `--nick` overrides `auth.dev.nick`. In
-`auth.mode: cloudflare-access`, passing `--nick` is a hard error: the nick is derived per authenticated user from the JWT principal (email or service-token common-name). `auth.allowed_emails` is only the allowlist.
+`auth.mode: cloudflare-access`, passing `--nick` is a hard error: the
+nick is derived per user from the JWT principal (email or service-token
+common-name). `auth.allowed_emails` is only the allowlist.
 A non-loopback `--bind` (or `web.bind`) under CF mode is coerced to
 `127.0.0.1` with a `WARNING` log line, because cloudflared terminates locally.
 
@@ -114,9 +116,9 @@ then binds the local web port.
 | `--port` | no | `6667` | AgentIRC server port. |
 | `--nick` | yes | — | Nick to register on AgentIRC. |
 | `--web-port` | no | `8765` | Local HTTP port for the lens UI. |
-| `--bind` | no | `127.0.0.1` | Bind address for the local web app. `0.0.0.0` prints a no-auth warning to stderr. |
-| `--icon` | no | none | Optional emoji passed to AgentIRC `ICON`. |
-| `--open` | no | off | Auto-launch the default browser at the lens URL after binding. |
+| `--bind` | no | `127.0.0.1` | Web bind address |
+| `--icon` | no | none | Optional emoji for `ICON` |
+| `--open` | no | off | Auto-launch browser |
 | `--seed` | no | none | Path to a YAML fixture preloading view state — see [Seed schema](#seed-schema). |
 | `--log-json` | no | off | Emit stderr logs as one JSON object per line. |
 
@@ -192,15 +194,18 @@ canonical fixture lives at `tests/fixtures/basic.yaml`.
 
 Optional media configuration (absent section = defaults, feature on):
 
-| Field | Default | Validation | Purpose |
+| Field | Default | Type | Purpose |
 | --- | --- | --- | --- |
-| `enabled` | `true` | boolean | Enable/disable media uploads and serving. |
-| `dir` | `$XDG_DATA_HOME/irc-lens/media` | string path | Local blob-store directory. |
-| `max_file_bytes` | `10485760` (10 MiB) | integer, ≥ 1 | Per-upload size cap in bytes. |
-| `max_store_bytes` | `268435456` (256 MiB) | integer, ≥ 1 | Total store cap; enforces `max_file_bytes <= max_store_bytes`. |
-| `public_base_url` | `http://<web.bind>:<web.port>` | string URL or empty | Advertised base for capability links (set for cross-machine peers). Must start with `http://` or `https://` when non-empty. |
-| `remote_embeds` | `click` | `click` \| `auto` \| `off` | How remote (non-lens-hosted) media URLs render: click-to-load, auto-embed, or plain links. |
-| `trusted_hosts` | `[]` | list of hostnames | Hosts that auto-embed even when `remote_embeds: click`. |
+| `enabled` | `true` | boolean | Enable/disable media |
+| `dir` | `$XDG_DATA_HOME/media` | path | Store directory |
+| `max_file_bytes` | `10485760` | ≥ 1 | Max file size |
+| `max_store_bytes` | `268435456` | ≥ 1 | Total store cap |
+| `public_base_url` | `http://…` | URL | Cross-machine base |
+| `remote_embeds` | `click` | click/auto/off | Remote rendering |
+| `trusted_hosts` | `[]` | list | Auto-embed hosts |
+
+For `public_base_url`: use `http://` or `https://`. For `remote_embeds`:
+controls how non-lens URLs render (click-to-load, auto, or plain link).
 
 Example:
 

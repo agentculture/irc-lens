@@ -8,13 +8,13 @@ and streamed to subscribers. Each subscriber owns a bounded queue
 
 ## Event catalogue
 
-| Event | Payload | Fragment template | Browser target |
+| Event | Payload | Template | Target |
 | --- | --- | --- | --- |
-| `chat` | rendered `_chat_line.html.j2` (HTML) | `src/irc_lens/templates/_chat_line.html.j2` | append into `#chat-log` |
-| `roster` | rendered `_sidebar.html.j2` (HTML) | `src/irc_lens/templates/_sidebar.html.j2` | replace `#sidebar` innerHTML |
-| `info` | rendered `_info.html.j2` (HTML) | `src/irc_lens/templates/_info.html.j2` | replace `#info` innerHTML |
-| `view` | JSON `{"view": "chat" \| "help" \| "overview" \| "status"}` | — | set `<body data-view>` attribute |
-| `error` | JSON `{"message": "..."}` | — | toast region (`#toast-region`) |
+| `chat` | HTML | `_chat_line.html.j2` | append `#chat-log` |
+| `roster` | HTML | `_sidebar.html.j2` | replace `#sidebar` |
+| `info` | HTML | `_info.html.j2` | replace `#info` |
+| `view` | JSON view state | — | `<body data-view>` |
+| `error` | JSON message | — | `#toast-region` |
 
 The `view` and `error` payloads are spec-strict (handover-design
 spec lines 162–163) — additional fields are intentionally not
@@ -63,23 +63,23 @@ pinned by `tests/test_render.py`.
 
 | Selector | Source template | Purpose |
 | --- | --- | --- |
-| `[data-testid="connection-status"]` | `index.html.j2` | Conn-state badge (`lens-conn--healthy` / `lens-conn--down`). |
-| `[data-testid="sidebar"]` | `index.html.j2` | Sidebar wrapper. |
-| `[data-testid="sidebar-channel"]` | `_sidebar.html.j2` | Channel row; carries `data-channel="#x"` and `lens-channel--active` for the current channel. |
-| `[data-testid="sidebar-entity"]` | `_sidebar.html.j2` | Roster row. |
-| `[data-testid="chat-log"]` | `index.html.j2` | Container `#chat-log`. |
-| `[data-testid="chat-line"]` | `_chat_line.html.j2` | One rendered chat line (timestamp + nick + text spans). |
-| `[data-testid="chat-line-nick"]` | `_chat_line.html.j2` | Nick span. |
-| `[data-testid="chat-line-text"]` | `_chat_line.html.j2` | Text span. |
-| `[data-testid="media-embed"]` | `_chat_line.html.j2`, `media.js` | Direct `<img>` or `<audio>` embed; on click-to-load placeholder replacement. |
-| `[data-testid="media-placeholder"]` | `_chat_line.html.j2` | Click-to-load placeholder card for remote media. |
-| `[data-testid="media-attach"]` | `index.html.j2` | Attach button (opens hidden file picker). |
-| `[data-testid="media-file-input"]` | `index.html.j2` | Hidden file input element. |
-| `[data-testid="media-record"]` | `index.html.j2` | Mic recording button (idle → recording → uploading). |
-| `[data-testid="chat-input"]` | `index.html.j2` | The input element (also `id="chat-input"`). |
-| `[data-testid="chat-submit"]` | `index.html.j2` | Submit button. |
-| `[data-testid="info"]` | `index.html.j2` | Info-pane container `#info`. |
-| `[data-testid="view-indicator"]` | `_info.html.j2` | Carries `data-view="chat\|help\|overview\|status"`. |
+| `[data-testid="connection-status"]` | `index.html.j2` | Conn-state badge |
+| `[data-testid="sidebar"]` | `index.html.j2` | Sidebar wrapper |
+| `[data-testid="sidebar-channel"]` | `_sidebar.html.j2` | Channel row + state |
+| `[data-testid="sidebar-entity"]` | `_sidebar.html.j2` | Roster row |
+| `[data-testid="chat-log"]` | `index.html.j2` | Chat log `#chat-log` |
+| `[data-testid="chat-line"]` | `_chat_line.html.j2` | Chat line (timestamp) |
+| `[data-testid="chat-line-nick"]` | `_chat_line.html.j2` | Nick span |
+| `[data-testid="chat-line-text"]` | `_chat_line.html.j2` | Text span |
+| `[data-testid="media-embed"]` | `_chat_line/media.js` | Embedded media |
+| `[data-testid="media-placeholder"]` | `_chat_line.html.j2` | Media card |
+| `[data-testid="media-attach"]` | `index.html.j2` | Attach button |
+| `[data-testid="media-file-input"]` | `index.html.j2` | File input |
+| `[data-testid="media-record"]` | `index.html.j2` | Mic record button |
+| `[data-testid="chat-input"]` | `index.html.j2` | Chat input field |
+| `[data-testid="chat-submit"]` | `index.html.j2` | Submit button |
+| `[data-testid="info"]` | `index.html.j2` | Info pane `#info` |
+| `[data-testid="view-indicator"]` | `_info.html.j2` | View state badge |
 
 The `<form>` element itself is addressed by `id="chat-form"` (no
 `data-testid`) — tests submit by clicking

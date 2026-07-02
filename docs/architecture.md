@@ -6,21 +6,21 @@ Per-phase build plan: `docs/superpowers/plans/2026-04-27-irc-lens-build-plan.md`
 ## Runtime topology
 
 ```text
-┌──────────────────────┐      ┌────────────────────────────┐      ┌──────────────────┐
-│ Browser (HTMX + SSE) │ HTTP │ aiohttp.web.Application    │ TCP  │ AgentIRC server  │
-│ lens.js + lens.css   │ ◄──► │   GET /                    │ ◄──► │ (culture mesh)   │
-│ EventSource("/events")│     │   POST /input              │      │                  │
-└──────────────────────┘      │   GET /events  (SSE)       │      └──────────────────┘
-                              │   GET /static/*            │
-                              │                            │
-                              │  ┌──────────────────────┐  │
-                              │  │  Session             │  │
-                              │  │  ├─ IRCTransport     │──┘ TCP read loop publishes
-                              │  │  ├─ MessageBuffer    │    inbound messages into
-                              │  │  ├─ SessionEventBus ─┼──► subscribed SSE responses
-                              │  │  └─ execute()        │
-                              │  └──────────────────────┘
-                              └────────────────────────────┘
+┌────────────────────┐      ┌──────────────────────┐      ┌──────────────────┐
+│ Browser (HTMX+SSE) │ HTTP │ aiohttp web app     │ TCP  │ AgentIRC server  │
+│ lens.js/lens.css   │ ◄──► │   GET /             │ ◄──► │ (mesh)           │
+│ EventSource        │     │   POST /input       │      │                  │
+└────────────────────┘      │   GET /events (SSE) │      └──────────────────┘
+                            │   GET /static/*     │
+                            │                     │
+                            │  ┌────────────────┐ │
+                            │  │ Session        │ │
+                            │  │ ├─ Transport   │─┘ TCP read loop publishes
+                            │  │ ├─ Buffer      │    inbound messages into
+                            │  │ ├─ EventBus   ─┼──► subscribed SSE responses
+                            │  │ └─ execute()   │
+                            │  └────────────────┘
+                            └──────────────────────┘
 ```
 
 * One `Session` per process, owned by the `aiohttp.web.Application`
@@ -51,7 +51,7 @@ src/irc_lens/
 ├── web/
 │   ├── __init__.py        # public make_app re-export
 │   ├── app.py             # Application factory + client_max_size
-│   ├── routes.py          # get_index / post_input / post_upload / get_media / get_events
+│   ├── routes.py          # HTTP route handlers
 │   ├── media.py           # classify_url + render_message_html + compose_media_message
 │   ├── store.py           # MediaStore (blob-file management + token safety)
 │   ├── render.py          # Jinja2 env + render_index/render_fragment
@@ -79,12 +79,18 @@ See `docs/security-checklist.md` for the CSP directives and rationale.
 
 | Route | Verb | Body | Response |
 | --- | --- | --- | --- |
-| `/` | `GET` | — | 200 HTML (`render_index`). |
-| `/input` | `POST` | JSON `{"text": "..."}` *or* form-encoded `text=...` | 204 success, 400 bad JSON, 413 oversize, 503 unhealthy. |
-| `/upload` | `POST` | multipart/form-data `file` field | 201 `{"url": "...", "kind": "image\|audio"}`, 400 bad type, 413 oversize, 403 origin mismatch, 404 media disabled. |
-| `/media/{token}.{ext}` | `GET` | — | 200 blob (auth-exempt capability URL), 404 unknown token, 404 media disabled. |
-| `/events` | `GET` | — | 200 SSE stream (`text/event-stream`, `Cache-Control: no-store`). |
-| `/static/{path}` | `GET` | — | Vendored assets + `lens.js` / `lens.css`. |
+| `/` | `GET` | — | 200 HTML |
+| `/input` | `POST` | JSON or form-encoded | 204/400/413/503 |
+| `/upload` | `POST` | multipart/form-data | 201/400/413/403/404 |
+| `/media/{token}.{ext}` | `GET` | — | 200/404 media |
+| `/events` | `GET` | — | 200 SSE stream |
+| `/static/{path}` | `GET` | — | 200 vendored assets |
+
+Details: `/input` accepts JSON or form-encoded `text` field; errors are
+bad JSON, oversize, unhealthy. `/upload` media responses include
+content with `{url, kind}` for success or error details on type/size
+mismatch. `/media/{token}` serves auth-exempt blobs via capability URLs
+(128-bit tokens). `/events` uses `text/event-stream` with no-cache.
 
 `POST /input` content-negotiates: `application/json` triggers JSON
 parsing, anything else (including HTMX's default
@@ -119,12 +125,12 @@ event.
 
 Several caps keep a long session deterministic:
 
-| Surface | Cap | Source | Behaviour on overflow |
+| Surface | Cap | Source | Overflow behavior |
 | --- | --- | --- | --- |
-| Subscriber queue | 256 events | `SessionEventBus` | drop-oldest + single-shot `error: events dropped` |
-| `MessageBuffer` | 500 messages per channel | `MessageBuffer` | drop-oldest |
-| `POST /input` body | 4 KiB | `routes._MAX_INPUT_BODY` + `client_max_size` | 413 |
-| Browser chat log | 500 `<div data-testid="chat-line">` nodes | `lens.js` `CHAT_LOG_CAP` | trim oldest |
+| Subscriber queue | 256 events | `SessionEventBus` | drop-oldest + error |
+| `MessageBuffer` | 500 messages | `MessageBuffer` | drop-oldest |
+| `POST /input` body | 4 KiB | `routes._MAX_INPUT_BODY` | 413 |
+| Chat log DOM | 500 lines | `lens.js` `CHAT_LOG_CAP` | trim oldest |
 
 The browser cap mirrors the server cap so a long session can't grow
 unbounded DOM even if every message is rendered.
@@ -247,8 +253,8 @@ include.
 
 | File | Pin | Source |
 | --- | --- | --- |
-| `htmx.min.js` | `htmx.org@2.0.4` | `https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js` |
-| `sse.js` | `htmx-ext-sse@2.2.2` | `https://unpkg.com/htmx-ext-sse@2.2.2/sse.js` |
+| `htmx.min.js` | `htmx.org@2.0.4` | unpkg.com (HTMX) |
+| `sse.js` | `htmx-ext-sse@2.2.2` | unpkg.com (SSE ext) |
 
 To refresh:
 
@@ -265,14 +271,13 @@ without verifying the SSE event-listener API still matches what
 
 ## Further reading
 
-* [`docs/cli.md`](cli.md) — every flag, exit code, the seed schema.
-* [`docs/slash-commands.md`](slash-commands.md) — verb table.
-* [`docs/sse-events.md`](sse-events.md) — every event, fragment, testid.
-* [`docs/playwright.md`](playwright.md) — driving the lens with
-  pytest-playwright or Playwright MCP.
+* [`cli.md`](cli.md) — every flag, exit code, seed schema.
+* [`slash-commands.md`](slash-commands.md) — verb table.
+* [`sse-events.md`](sse-events.md) — events, fragments, testids.
+* [`playwright.md`](playwright.md) — driving with pytest-playwright.
 * [`CITATION.md`](../CITATION.md) — culture citations + divergences.
-* [`docs/superpowers/specs/2026-04-27-irc-lens-handover-design.md`](superpowers/specs/2026-04-27-irc-lens-handover-design.md) — spec.
-* [`docs/superpowers/plans/2026-04-27-irc-lens-build-plan.md`](superpowers/plans/2026-04-27-irc-lens-build-plan.md) — build plan.
+* [Handover design](superpowers/specs/2026-04-27-irc-lens-handover-design.md)
+* [Build plan](superpowers/plans/2026-04-27-irc-lens-build-plan.md)
 
 ## Deployment modes
 

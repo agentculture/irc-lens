@@ -39,11 +39,11 @@ item is a yes/no.
       the capability — possession of the URL means you saw it in the
       channel (IRC trust model). Uploads (`POST /upload`) remain
       authenticated; CF Access still gates the tunnel in front.
-- [ ] CSP headers: set on HTML documents:
-      `default-src 'self'; script-src 'self'; img-src 'self' https: http:; media-src 'self' https: http:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`.
-      The load-bearing directives are `script-src` / `object-src`;
-      `img-src` / `media-src` stay broad because mesh peers advertise
-      plain-HTTP LAN URLs and click-to-load is the actual gate.
+- [ ] CSP headers on HTML documents. Load-bearing directives are
+      `script-src: 'self'` and `object-src: 'none'`. Broad `img-src` /
+      `media-src` (https + http) because mesh peers advertise plain-HTTP
+      LAN URLs and click-to-load is the gate. See
+      [`docs/architecture.md`](architecture.md) for full CSP string.
 - [ ] Security headers on all responses: `X-Content-Type-Options: nosniff`
       and `Referrer-Policy: no-referrer`.
 - [ ] Media store size caps are enforced: `max_file_bytes` (default
