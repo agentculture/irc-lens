@@ -22,6 +22,57 @@ from irc_lens.web.routes import _MAX_INPUT_BODY
 from irc_lens.web.sessions import SessionFactory, SessionRegistry
 
 
+_SECURITY_HEADERS_CSP = (
+    "default-src 'self'; script-src 'self'; img-src 'self' https: http:; "
+    "media-src 'self' https: http:; object-src 'none'; base-uri 'none'; "
+    "frame-ancestors 'none'"
+)
+
+
+def _apply_security_headers(response: web.StreamResponse) -> None:
+    """Stamp the baseline security headers onto *response* in place.
+
+    ``X-Content-Type-Options`` and ``Referrer-Policy`` apply to every
+    response; ``Content-Security-Policy`` is scoped to HTML documents —
+    the directives (``script-src``, ``object-src``, ...) police markup,
+    and adding them to JSON/static-asset responses would just be noise.
+    See docs/superpowers/specs/2026-07-02-media-support-design.md
+    ("Security headers").
+    """
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    if (response.content_type or "").lower() == "text/html":
+        response.headers["Content-Security-Policy"] = _SECURITY_HEADERS_CSP
+
+
+@web.middleware
+async def _security_headers_middleware(request: web.Request, handler):
+    """Attach baseline security headers to every response.
+
+    Wraps the identity middleware (see ``middlewares=`` in ``make_app``)
+    so the headers land even on auth denials (401/403) and other
+    early-exit responses. A static-file 404 surfaces as a *raised*
+    ``HTTPException`` rather than a returned ``Response`` (aiohttp's
+    ``StaticResource`` internals) — the ``except`` arm below catches
+    that path too, so nosniff/referrer-policy aren't lost on the
+    framework-level error page.
+
+    ``GET /events`` (the SSE stream) calls ``response.prepare()``
+    itself deep inside the handler, before this middleware regains
+    control — by the time we could mutate its headers they're already
+    on the wire, so this middleware is a no-op there by construction.
+    That route sets its own Content-Type/Cache-Control/X-Accel-Buffering
+    and is left alone, matching the design doc.
+    """
+    try:
+        response = await handler(request)
+    except web.HTTPException as exc:
+        _apply_security_headers(exc)
+        raise
+    _apply_security_headers(response)
+    return response
+
+
 def _dev_identity_middleware(config: LensConfig):
     """Synthesize a fixed dev identity on every request.
 
@@ -68,7 +119,10 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
             remediation="set `auth.mode:` to either `dev` or `cloudflare-access`",
         )
 
-    app = web.Application(client_max_size=_MAX_INPUT_BODY, middlewares=[middleware])
+    app = web.Application(
+        client_max_size=_MAX_INPUT_BODY,
+        middlewares=[_security_headers_middleware, middleware],
+    )
 
     registry = SessionRegistry(factory=session_factory)
     app["registry"] = registry
