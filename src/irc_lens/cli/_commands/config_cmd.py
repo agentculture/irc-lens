@@ -82,11 +82,13 @@ _CONFIG_HELP = "Manage the irc-lens config file."
 def register_into(app) -> None:
     """Register ``config`` (a noun with ``init`` + ``overview`` verbs).
 
-    Transitional (t3): agentfront's ``App.add_command`` models a host verb, and
-    a noun-with-verbs is expressed as a single host command whose ``configure``
-    hook adds the verb subparsers — the same definitions the old
-    ``register(sub)`` used, so ``config init``/``config overview`` and the
-    bare-``config`` help are byte-compatible. t4 owns the clean migration.
+    agentfront's ``App.add_command`` models a host verb, so a noun-with-verbs
+    is expressed as a single host command whose ``configure`` hook adds the
+    verb subparsers. The definitions here are byte-compatible with the
+    pre-agentfront ``register(sub)`` wiring — ``config init``/``config
+    overview`` and the bare-``config`` help behave identically — and that old
+    wiring has been fully removed; this hook is the sole source of the
+    ``config`` CLI surface.
     """
     # The parser agentfront builds for us is captured here so the bare-``config``
     # handler (no verb) can print the noun's help, matching the pre-migration

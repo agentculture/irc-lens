@@ -535,11 +535,12 @@ _SERVE_HELP = "Launch the aiohttp web console against an AgentIRC server."
 def _configure_serve(p: argparse.ArgumentParser) -> None:
     """Add ``serve``'s flags + rich help to the parser agentfront hands us.
 
-    Transitional (t3): agentfront's ``App.add_command`` creates the ``serve``
-    subparser and calls this ``configure`` hook to populate it, so the argument
-    definitions below are the same ones the old ``register(sub)`` used — the CLI
-    surface (flags, defaults, help text) is byte-compatible. t4 owns the full
-    clean migration of this module.
+    agentfront's ``App.add_command`` (see ``register_into`` below) creates the
+    ``serve`` subparser and calls this ``configure`` hook to populate it. The
+    flag definitions here are byte-compatible with the pre-agentfront
+    ``register(sub)`` wiring (flags, defaults, help text, epilog) — that
+    wiring has been fully removed; this hook is the sole source of the
+    ``serve`` CLI surface.
     """
     p.description = (
         "Launch the aiohttp web console against an AgentIRC server. "
