@@ -7,9 +7,10 @@ relocated to :mod:`irc_lens._errors` because non-CLI modules (notably
 constants without dragging the eager-import-heavy ``irc_lens.cli``
 package along — that path closes a real circular import. The public
 surface (``AfiError``, ``EXIT_USER_ERROR``, ``EXIT_ENV_ERROR``,
-``EXIT_SUCCESS``) is preserved verbatim and ``afi cli verify`` passes
-because every import site still resolves the same names from this
-module.
+``EXIT_SUCCESS``) is preserved verbatim and the in-process drift gate
+(``tests/test_front_agreement.py::test_surfaces_agree`` — the external
+``afi`` verifier's replacement, per t10) passes because every import site
+still resolves the same names from this module.
 
 Every failure inside irc-lens raises :class:`AfiError`. The CLI entry
 point catches it and exits with :attr:`AfiError.code`. Guarantees:
