@@ -34,6 +34,11 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
     from agentfront.app import App
     from agentfront.doctor_live import Check
 
+#: Shared placeholder for an empty registry-derived section (commands, nouns,
+#: top-level tools, docs) — keeps the four ``_*_md`` builders below from
+#: duplicating the same literal.
+_NONE_REGISTERED = "_(none registered)_"
+
 # One line per meta-verb, mirrored into overview's rollup so an agent reading
 # ``overview`` sees the generated surface it can't discover from the registry
 # alone (the meta-verbs are not registry tools).
@@ -103,7 +108,7 @@ class _MetaParser(argparse.ArgumentParser):
 def _commands_md(app: "App") -> str:
     cmds = app.list_commands()
     if not cmds:
-        return "_(none registered)_"
+        return _NONE_REGISTERED
     return "\n".join(f"- `{app.name} {c.name}` — {c.help}" for c in cmds)
 
 
@@ -119,7 +124,7 @@ def _nouns(app: "App") -> dict[str, list[str]]:
 def _nouns_md(app: "App") -> str:
     nouns = _nouns(app)
     if not nouns:
-        return "_(none registered)_"
+        return _NONE_REGISTERED
     return "\n".join(
         f"- `{noun}` — verbs: {', '.join(verbs)}" for noun, verbs in nouns.items()
     )
@@ -136,14 +141,14 @@ def _top_level_tools(app: "App") -> list["ToolEntry"]:
 def _top_level_tools_md(app: "App") -> str:
     tools = _top_level_tools(app)
     if not tools:
-        return "_(none registered)_"
+        return _NONE_REGISTERED
     return "\n".join(f"- `{app.name} {t.name}` — {t.description}" for t in tools)
 
 
 def _docs_md(app: "App") -> str:
     docs = app.list_docs()
     if not docs:
-        return "_(none registered)_"
+        return _NONE_REGISTERED
     return "\n".join(f"- `{d.slug}` — {d.title}" for d in docs)
 
 

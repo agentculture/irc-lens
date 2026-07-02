@@ -78,12 +78,15 @@ from __future__ import annotations
 import argparse
 import select
 import sys
-from typing import TextIO
+from typing import TYPE_CHECKING, TextIO
 
 from agentfront.taui.driver import LiveDriver
 from agentfront.taui.session import Session
 
 from irc_lens.cli._output import emit_diagnostic
+
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    from agentfront.app import App
 
 _TUI_HELP = (
     "Open the terminal UI (TAUI): a live, keyboard-driven view over the same "
@@ -183,6 +186,15 @@ def _run_raw_loop(driver: LiveDriver, stdin: TextIO, stdout: TextIO) -> None:
         stdout.flush()
 
 
+def _print_front(app: "App") -> None:
+    """Print the hint + registry-derived front for a non-interactive stdin/stdout."""
+    emit_diagnostic(_NON_TTY_HINT)
+    from agentfront.taui.render.markdown import render_markdown
+
+    front = render_markdown(app.taui())
+    sys.stdout.write(front if front.endswith("\n") else front + "\n")
+
+
 def cmd_tui(args: argparse.Namespace) -> int:
     """Enter the TAUI loop at a real TTY; print the front and return 0 otherwise."""
     from irc_lens.cli import build_app
@@ -190,16 +202,12 @@ def cmd_tui(args: argparse.Namespace) -> int:
     app = build_app()
 
     if not sys.stdin.isatty() or not sys.stdout.isatty():
-        emit_diagnostic(_NON_TTY_HINT)
-        from agentfront.taui.render.markdown import render_markdown
+        _print_front(app)
+    else:
+        session = Session(app)
+        driver = LiveDriver(session)
+        _run_raw_loop(driver, sys.stdin, sys.stdout)
 
-        front = render_markdown(app.taui())
-        sys.stdout.write(front if front.endswith("\n") else front + "\n")
-        return 0
-
-    session = Session(app)
-    driver = LiveDriver(session)
-    _run_raw_loop(driver, sys.stdin, sys.stdout)
     return 0
 
 
