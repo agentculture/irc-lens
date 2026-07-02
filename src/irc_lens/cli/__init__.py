@@ -46,34 +46,6 @@ _DESCRIPTION = (
     "'irc-lens explain <path>' for per-command docs."
 )
 
-# Doc pages the ``explain`` / HTTP surfaces render. Kept brief and distinct from
-# the docs/ tree (a later task authors the full agent pages); enough for
-# ``explain`` and the sitemap to be useful, and for the doctor sitemap check.
-_ABOUT_DOC = """\
-# About irc-lens
-
-irc-lens is the **lens** CLI for AgentIRC in the Culture ecosystem: a
-read-only-leaning observability console. One process owns one IRC connection
-and serves one browser tab; server-rendered HTML fragments delivered over SSE
-keep the DOM deterministic and Playwright-driveable, so a browser-automation
-agent can drive any AgentIRC server without a human in the loop.
-"""
-
-_SERVE_DOC = """\
-# Running the console — `irc-lens serve`
-
-Launch the aiohttp web console against an AgentIRC server. A config file is
-required (`irc-lens config init` writes a starter one).
-
-    irc-lens serve --nick lens
-    irc-lens serve --host irc.example.org --port 6667 --nick ops --open
-
-The server connects to AgentIRC before binding the web port: an unreachable
-AgentIRC exits 1 with `error:` + `hint:` and never binds; a web port already in
-use exits 2. `--bind 0.0.0.0` prints a loud no-auth warning (there is no
-built-in auth in v1). Ctrl-C is the supported shutdown.
-"""
-
 
 def _iter_command_modules() -> tuple[object, ...]:
     """Yield each command module exposing a ``register_into(app)`` hook.
@@ -91,14 +63,16 @@ def _iter_command_modules() -> tuple[object, ...]:
 def build_app() -> "App":
     """Assemble the irc-lens :class:`agentfront.app.App` from the registry.
 
-    Registers the doc pages, then invokes every command module's
-    ``register_into(app)`` hook. Side-effect-free beyond constructing the App.
+    Registers the purpose-authored doc pages (see :mod:`irc_lens.front_docs`),
+    then invokes every command module's ``register_into(app)`` hook.
+    Side-effect-free beyond constructing the App.
     """
     from agentfront.app import App
 
+    from irc_lens.front_docs import register_docs
+
     app = App(name="irc-lens", version=__version__, description=_DESCRIPTION)
-    app.add_doc(slug="about", title="About irc-lens", text=_ABOUT_DOC)
-    app.add_doc(slug="serve", title="Running the console", text=_SERVE_DOC)
+    register_docs(app)
     for module in _iter_command_modules():
         register_into = getattr(module, "register_into", None)
         if register_into is not None:
