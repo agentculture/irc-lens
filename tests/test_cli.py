@@ -11,9 +11,10 @@ from irc_lens.cli import main
 
 
 def test_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
-    with pytest.raises(SystemExit) as exc:
-        main(["--version"])
-    assert exc.value.code == 0
+    # Rendered CLI: main() returns an exit code rather than raising SystemExit
+    # (run_cli translates argparse's exits into return values); --version is
+    # handled ahead of run_cli.
+    assert main(["--version"]) == 0
     assert __version__ in capsys.readouterr().out
 
 
@@ -28,11 +29,14 @@ def test_learn_exits_zero(capsys: pytest.CaptureFixture[str]) -> None:
 def test_learn_json_parseable(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["learn", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    assert payload["tool"] == "irc-lens"
+    # Derived learn --json keys the tool name as "name" (was "tool").
+    assert payload["name"] == "irc-lens"
 
 
 def test_explain_self(capsys: pytest.CaptureFixture[str]) -> None:
-    assert main(["explain", "irc-lens"]) == 0
+    # Bare `explain` (no path) renders the root page; the derived `explain`
+    # resolves registered tool paths, not a synthetic "irc-lens" path.
+    assert main(["explain"]) == 0
     assert capsys.readouterr().out.startswith("#")
 
 
@@ -49,9 +53,10 @@ def test_explain_unknown_path_fails_with_hint(
 def test_unknown_verb_fails_with_hint(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    with pytest.raises(SystemExit) as exc:
-        main(["nope-not-a-verb"])
-    assert exc.value.code != 0
+    # run_cli returns the exit code (no SystemExit) but still emits the
+    # structured error:/hint: pair with no traceback.
+    rc = main(["nope-not-a-verb"])
+    assert rc != 0
     err = capsys.readouterr().err
     assert "error:" in err
     assert "hint:" in err
@@ -80,6 +85,78 @@ def test_overview_graceful_on_bad_path(
     assert "warning" in out.lower()
 
 
+def test_doctor_exits_zero_when_healthy(capsys: pytest.CaptureFixture[str]) -> None:
+    """`doctor` audits the derived surfaces; a healthy app exits 0."""
+    rc = main(["doctor"])
+    out, err = capsys.readouterr()
+    assert rc == 0, f"doctor must exit 0 when healthy; stderr={err!r}"
+    assert "healthy" in out.lower()
+    assert "Traceback" not in err
+
+
+def test_doctor_json_shape(capsys: pytest.CaptureFixture[str]) -> None:
+    """`doctor --json` carries a healthy bool + a checks list; stderr is clean."""
+    rc = main(["doctor", "--json"])
+    out, err = capsys.readouterr()
+    assert rc == 0
+    assert err == "", f"doctor --json stderr must be clean; got {err!r}"
+    payload = json.loads(out)
+    assert payload["healthy"] is True
+    assert isinstance(payload["checks"], list) and payload["checks"]
+    for check in payload["checks"]:
+        assert {"name", "status", "remediation"} <= set(check)
+
+
+def test_overview_bad_flag_errors_with_hint(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A bogus flag to the intercepted `overview` verb still routes through the
+    error:/hint: contract with no traceback."""
+    rc = main(["overview", "--nonsense-flag"])
+    err = capsys.readouterr().err
+    assert rc != 0
+    assert "error:" in err and "hint:" in err
+    assert "Traceback" not in err
+
+
+def test_doctor_bad_flag_errors_with_hint(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    rc = main(["doctor", "--nonsense-flag"])
+    err = capsys.readouterr().err
+    assert rc != 0
+    assert "error:" in err and "hint:" in err
+    assert "Traceback" not in err
+
+
+def test_overview_and_doctor_help_exit_zero(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """`--help` on the intercepted meta-verbs prints usage and exits 0."""
+    assert main(["overview", "--help"]) == 0
+    assert main(["doctor", "--help"]) == 0
+
+
+def test_doctor_failed_check_carries_remediation() -> None:
+    """A failed check must carry a non-empty remediation, and any failure flips
+    the aggregate `healthy` bool to False."""
+    from agentfront.doctor_live import Check
+
+    from irc_lens.cli._meta import _doctor_payload
+
+    payload = _doctor_payload(
+        "irc-lens v0",
+        [
+            Check(name="ok-check", status="ok", remediation=""),
+            Check(name="broken", status="fail", remediation="do the thing"),
+        ],
+    )
+    assert payload["healthy"] is False
+    failed = [c for c in payload["checks"] if not c["passed"]]
+    assert failed, "expected at least one failed check"
+    assert all(c["remediation"] for c in failed)
+
+
 def test_cli_noun_overview(capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["cli", "overview"]) == 0
     out = capsys.readouterr().out
@@ -93,19 +170,20 @@ def test_cli_noun_overview_json(capsys: pytest.CaptureFixture[str]) -> None:
 
 
 def test_learn_text_lists_overview(capsys: pytest.CaptureFixture[str]) -> None:
-    """Regression: learn TEXT must mention every registered global verb."""
+    """Derived learn TEXT surfaces the meta-verbs (in the description) and the
+    registered `cli overview` tool."""
     assert main(["learn"]) == 0
     out = capsys.readouterr().out
-    assert "irc-lens overview" in out
-    assert "irc-lens cli overview" in out
+    assert "overview" in out
+    assert "cli overview" in out
 
 
 def test_learn_json_lists_overview(capsys: pytest.CaptureFixture[str]) -> None:
-    """Regression: learn JSON commands must include overview + cli overview."""
+    """Derived learn --json lists registered tools by path; `cli overview` is
+    registered (the meta-verbs are generated, not registry tools)."""
     assert main(["learn", "--json"]) == 0
     payload = json.loads(capsys.readouterr().out)
-    paths = [tuple(c["path"]) for c in payload["commands"]]
-    assert ("overview",) in paths
+    paths = [tuple(t["path"]) for t in payload["tools"]]
     assert ("cli", "overview") in paths
 
 
@@ -125,22 +203,26 @@ def test_argparse_error_in_json_mode(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Parse-time errors must respect --json so machine consumers can parse."""
-    with pytest.raises(SystemExit):
-        main(["--json", "nope-not-a-verb"])
+    rc = main(["--json", "nope-not-a-verb"])
+    assert rc != 0
     err = capsys.readouterr().err
     payload = json.loads(err)  # JSON-mode errors emit to stderr per the rubric
     assert payload["code"] != 0
     assert "remediation" in payload
 
 
-def test_cli_overview_extra_path_warns(
+def test_cli_overview_extra_path_rejected(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """`cli overview <bogus>` has no sub-subjects, so it must warn (still exit 0)."""
+    """`cli overview <extra>` is a leaf verb in the derived surface, so an extra
+    positional is a parse error (error:/hint:, no traceback) — the global
+    `overview` is the graceful, path-tolerant descriptive rollup."""
     rc = main(["cli", "overview", "definitely-not-a-real-subpath"])
     out, err = capsys.readouterr()
-    assert rc == 0, f"cli overview must exit 0 on unknown sub-path; stderr={err!r}"
-    assert "warning" in out.lower()
+    assert rc != 0
+    assert "error:" in err
+    assert "hint:" in err
+    assert "Traceback" not in err
 
 
 def test_explain_cli_overview_resolves(
@@ -152,12 +234,13 @@ def test_explain_cli_overview_resolves(
     assert out.startswith("# irc-lens cli overview")
 
 
-def test_explain_unknown_remediation_lists_known_paths(
+def test_explain_unknown_remediation_points_at_overview(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The remediation must enumerate real catalog paths, not point at the root page."""
+    """The derived `explain` remediation points at the discovery verb so an
+    agent can find the real registered paths."""
     rc = main(["explain", "zzz-not-a-real-noun"])
     assert rc != 0
     err = capsys.readouterr().err
-    assert "known paths:" in err
-    assert "irc-lens" in err  # at least the root noun should be listed
+    assert "hint:" in err
+    assert "overview" in err  # points at `irc-lens overview` for discovery
