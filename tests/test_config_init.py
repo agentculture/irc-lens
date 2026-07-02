@@ -44,3 +44,25 @@ def test_config_init_force_overwrites(tmp_path: Path) -> None:
 def test_config_overview_works(tmp_path: Path) -> None:
     rc = main(["config", "overview"])
     assert rc == 0
+
+
+def test_config_init_starter_includes_media_section(tmp_path: Path, monkeypatch) -> None:
+    """The starter template includes the media section."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    rc = main(["config", "init"])
+    assert rc == 0
+    target = tmp_path / "irc-lens" / "config.yaml"
+    body = target.read_text()
+    assert "media:" in body
+
+
+def test_config_init_starter_round_trips(tmp_path: Path, monkeypatch) -> None:
+    """The starter template can be loaded by load_config."""
+    from irc_lens.config import load_config
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    rc = main(["config", "init"])
+    assert rc == 0
+    target = tmp_path / "irc-lens" / "config.yaml"
+    cfg = load_config(target)
+    assert cfg.media_enabled is True
+    assert cfg.media_remote_embeds == "click"

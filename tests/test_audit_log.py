@@ -40,6 +40,13 @@ def _cf_config_with_email(jwks: FakeJWKS, email: str) -> LensConfig:
         server_port=6667,
         web_bind="127.0.0.1",
         web_port=0,
+        media_enabled=True,
+        media_dir="/tmp/irc-lens-test-media",
+        media_max_file_bytes=10485760,
+        media_max_store_bytes=268435456,
+        media_public_base_url="",
+        media_remote_embeds="click",
+        media_trusted_hosts=(),
     )
 
 
