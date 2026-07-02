@@ -85,6 +85,25 @@ def _run(argv: list[str], config_path):
     return run_cli(app, [*argv, "--config", str(config_path)])
 
 
+def _received_eventually(fake_server, predicate, timeout: float = 2.0) -> bool:
+    """Poll ``fake_server.received`` until *predicate* matches a line.
+
+    ``run_cli`` returns once the *client* side of the ephemeral session
+    has disconnected, but the fake server appends to ``received`` on its
+    own thread/loop — a fire-and-forget write (TOPIC/PRIVMSG/ICON) can
+    land in ``received`` a beat after the tool exits. Polling instead of
+    asserting instantly removes that cross-thread race.
+    """
+    import time
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if any(predicate(line) for line in fake_server.received):
+            return True
+        time.sleep(0.01)
+    return any(predicate(line) for line in fake_server.received)
+
+
 def _run_json(argv: list[str], config_path):
     """Like :func:`_run` but appends ``--json`` and returns the parsed
     payload, asserting a clean (exit 0, empty stderr) success first."""
@@ -120,16 +139,16 @@ def test_full_catalog_round_trip(dev_config_path, fake_server: ThreadedAgentIRCT
     # join — real JOIN over the wire + local joined_channels bookkeeping.
     payload = _run_json(["join", "#agora"], dev_config_path)
     assert payload == {"channel": "#agora", "joined_channels": ["#agora"]}
-    assert any(
-        line.command == "JOIN" and line.params[:1] == ["#agora"] for line in fake_server.received
+    assert _received_eventually(
+        fake_server, lambda line: line.command == "JOIN" and line.params[:1] == ["#agora"]
     )
 
     # send — PRIVMSG to the joined channel.
     result = _run(["send", "#agora", "hello mesh"], dev_config_path)
     assert result.exit_code == 0, result.stderr
-    assert any(
-        line.command == "PRIVMSG" and line.params == ["#agora", "hello mesh"]
-        for line in fake_server.received
+    assert _received_eventually(
+        fake_server,
+        lambda line: line.command == "PRIVMSG" and line.params == ["#agora", "hello mesh"],
     )
 
     # who — the fake server tracks #agora's membership across connections;
@@ -154,23 +173,27 @@ def test_full_catalog_round_trip(dev_config_path, fake_server: ThreadedAgentIRCT
     # topic — sets and is observable on the wire.
     result = _run(["topic", "#agora", "--text", "today's agenda"], dev_config_path)
     assert result.exit_code == 0, result.stderr
-    assert any(
-        line.command == "TOPIC" and line.params == ["#agora", "today's agenda"]
-        for line in fake_server.received
+    assert _received_eventually(
+        fake_server,
+        lambda line: line.command == "TOPIC" and line.params == ["#agora", "today's agenda"],
     )
 
     # me — CTCP ACTION on the wire.
     result = _run(["me", "#agora", "waves hello"], dev_config_path)
     assert result.exit_code == 0, result.stderr
-    assert any(
-        line.command == "PRIVMSG" and line.params[0] == "#agora" and "ACTION waves hello" in line.params[1]
-        for line in fake_server.received
+    assert _received_eventually(
+        fake_server,
+        lambda line: line.command == "PRIVMSG"
+        and line.params[0] == "#agora"
+        and "ACTION waves hello" in line.params[1],
     )
 
     # icon — raw ICON line on the wire.
     result = _run(["icon", "🎉"], dev_config_path)
     assert result.exit_code == 0, result.stderr
-    assert any(line.command == "ICON" and line.params == ["🎉"] for line in fake_server.received)
+    assert _received_eventually(
+        fake_server, lambda line: line.command == "ICON" and line.params == ["🎉"]
+    )
 
     # read — round-trips HISTORY/HISTORYEND without stalling; the fake
     # server has no real backlog, so an empty list is the honest result.

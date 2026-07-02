@@ -77,7 +77,14 @@ class AgentIRCTestServer:
     proves the query round-trips, not that it returns real backlog.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, auto_welcome: bool = True) -> None:
+        #: send ``001 RPL_WELCOME`` on ``USER`` (t5 behavior, required by
+        #: the live-verb tools' ``wait_for_welcome()``). The shared conftest
+        #: fixture opts OUT to preserve the pre-t5 semantics its consumers
+        #: were built against: with no welcome, ``Session.connected`` stays
+        #: False and ``get_index`` renders the seeded buffer instead of
+        #: querying an (empty) live HISTORY.
+        self._auto_welcome = auto_welcome
         self.host: str = "127.0.0.1"
         self.port: int = 0
         self.received: list[_ReceivedLine] = []
@@ -155,7 +162,8 @@ class AgentIRCTestServer:
             self._nick = line.params[0]
             return
         if line.command == "USER":
-            await self._send_welcome(writer)
+            if self._auto_welcome:
+                await self._send_welcome(writer)
             return
         if line.command == "JOIN" and line.params:
             channel = line.params[0]

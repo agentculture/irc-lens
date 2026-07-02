@@ -96,7 +96,11 @@ async def agentirc_server() -> AsyncIterator[AgentIRCTestServer]:
     """Function-scoped: each test gets a fresh server bound to a
     random port. Teardown closes the listening socket and any open
     client connections."""
-    server = AgentIRCTestServer()
+    # auto_welcome=False: pre-t5 semantics for every consumer of this
+    # shared fixture — no 001, `Session.connected` stays False, and the
+    # seeded fixtures render from the preloaded buffer (see
+    # _agentirc_server.py's constructor note).
+    server = AgentIRCTestServer(auto_welcome=False)
     await server.start()
     try:
         yield server
