@@ -203,11 +203,18 @@ def _public_base_origin(base_url: str) -> tuple[str, str, int] | None:
     if not hostname:
         return None
     scheme = parsed.scheme.lower()
-    port = parsed.port if parsed.port is not None else (443 if scheme == "https" else 80)
+    if parsed.port is not None:
+        port = parsed.port
+    elif scheme == "https":
+        port = 443
+    else:
+        port = 80
     return (scheme, hostname.lower(), port)
 
 
-def _trusted_host_origins(host: str) -> tuple[tuple[str, str, int | None], ...]:
+def _trusted_host_origins(
+    host: str,
+) -> tuple[tuple[str, str, int | None], tuple[str, str, int | None]] | None:
     """Widen one `media.trusted_hosts` entry into `MediaOrigin` rows.
 
     Entries are bare hostnames (design doc: "trusted_hosts widens
@@ -221,11 +228,18 @@ def _trusted_host_origins(host: str) -> tuple[tuple[str, str, int | None], ...]:
     An entry that does carry an explicit `host:port` is instead pinned
     to that exact port for both schemes, since the operator gave us a
     real port to match.
+
+    Returns ``None`` — rather than a shorter (0-length) tuple — for an
+    entry with no usable hostname, so every non-``None`` result is the
+    same-shaped `(http, https)` pair (SonarCloud S8495: a function's
+    tuple-returning paths must all return the same length). Callers
+    (`_media_session_kwargs` below) skip a ``None`` result instead of
+    extending with it.
     """
     host_part, sep, port_part = host.partition(":")
     host_part = host_part.strip().lower()
     if not host_part:
-        return ()
+        return None
     if not sep:
         return (("http", host_part, None), ("https", host_part, None))
     try:
@@ -271,7 +285,9 @@ def _media_session_kwargs(config: LensConfig) -> dict[str, object]:
         if base_origin is not None:
             origins.append(base_origin)
     for host in config.media_trusted_hosts:
-        origins.extend(_trusted_host_origins(host))
+        host_origins = _trusted_host_origins(host)
+        if host_origins is not None:
+            origins.extend(host_origins)
     return {
         "media_embed_prefixes": tuple(origins),
         "media_remote_embeds": config.media_remote_embeds,

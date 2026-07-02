@@ -125,7 +125,12 @@ def _candidate_origin(url: str) -> tuple[str, str, int] | None:
     if not hostname:
         return None
     scheme = parsed.scheme.lower()
-    port = parsed.port if parsed.port is not None else (443 if scheme == "https" else 80)
+    if parsed.port is not None:
+        port = parsed.port
+    elif scheme == "https":
+        port = 443
+    else:
+        port = 80
     return (scheme, hostname.lower(), port)
 
 
