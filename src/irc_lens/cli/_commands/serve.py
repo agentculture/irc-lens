@@ -40,6 +40,7 @@ import webbrowser
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
+from urllib.parse import urlsplit
 
 from aiohttp import web
 
@@ -116,7 +117,7 @@ def _display_url(bind: str, port: int) -> str:
     display only; the bind address itself is unchanged.
     """
     host = "127.0.0.1" if bind in ("0.0.0.0", "::") else bind
-    return f"http://{host}:{port}/"
+    return f"http://{host}:{port}/"  # NOSONAR — loopback default; TLS terminates at cloudflared in CF mode
 
 
 def _validate_cli_against_config(
@@ -188,6 +189,111 @@ def _resolve_config(args: argparse.Namespace) -> LensConfig:
     return load_config(default)
 
 
+def _public_base_origin(base_url: str) -> tuple[str, str, int] | None:
+    """Parse `media_public_base_url` into an exact `(scheme, host, port)`
+    `MediaOrigin` row, or `None` when it has no parseable hostname.
+
+    Unlike `_trusted_host_origins` below, this origin is pinned to an
+    exact port: `media_public_base_url` names the lens's own advertised
+    address, whose port is always known, so there's no reason to widen
+    the match to "any port" the way a bare `trusted_hosts` hostname is.
+    """
+    parsed = urlsplit(base_url)
+    hostname = parsed.hostname
+    if not hostname:
+        return None
+    scheme = parsed.scheme.lower()
+    if parsed.port is not None:
+        port = parsed.port
+    elif scheme == "https":
+        port = 443
+    else:
+        port = 80
+    return (scheme, hostname.lower(), port)
+
+
+def _trusted_host_origins(
+    host: str,
+) -> tuple[tuple[str, str, int | None], tuple[str, str, int | None]] | None:
+    """Widen one `media.trusted_hosts` entry into `MediaOrigin` rows.
+
+    Entries are bare hostnames (design doc: "trusted_hosts widens
+    auto-embed per deployment"), optionally carrying a `:port` suffix.
+    A trusted host is meant to auto-embed regardless of which scheme a
+    message happens to link with, so a bare hostname (no `:port`)
+    widens to BOTH `http` and `https`, matching on ANY port (`port=None`
+    is the "any port" sentinel `render.py::_origin_matches` understands)
+    — `trusted_hosts` names an *external* media host, and that host's
+    port isn't necessarily (or even usually) the lens's own web port.
+    An entry that does carry an explicit `host:port` is instead pinned
+    to that exact port for both schemes, since the operator gave us a
+    real port to match.
+
+    Returns ``None`` — rather than a shorter (0-length) tuple — for an
+    entry with no usable hostname, so every non-``None`` result is the
+    same-shaped `(http, https)` pair (SonarCloud S8495: a function's
+    tuple-returning paths must all return the same length). Callers
+    (`_media_session_kwargs` below) skip a ``None`` result instead of
+    extending with it.
+    """
+    host_part, sep, port_part = host.partition(":")
+    host_part = host_part.strip().lower()
+    if not host_part:
+        return None
+    if not sep:
+        return (("http", host_part, None), ("https", host_part, None))
+    try:
+        port = int(port_part)
+    except ValueError:
+        # Malformed `:port` suffix — degrade to "any port" for the host
+        # part rather than silently dropping the whole entry.
+        return (("http", host_part, None), ("https", host_part, None))
+    return (("http", host_part, port), ("https", host_part, port))
+
+
+def _media_session_kwargs(config: LensConfig) -> dict[str, object]:
+    """Derive `Session`'s optional media-embed kwargs from `LensConfig`.
+
+    `media_embed_prefixes` — despite the historical name, kept for a
+    minimal diff across `Session`/`render_chat_log`'s existing kwarg
+    plumbing — is a tuple of `MediaOrigin` rows (`(scheme, hostname,
+    port)`, `port=None` meaning "any port"), not URL-string prefixes. A
+    naive `url.startswith(prefix)` comparison (the pre-fix behaviour)
+    is bypassable: `https://trusted.com.evil.org/x.png` and
+    `https://trusted.com@evil.org/x.png` both start with a trusted
+    prefix string without the URL actually resolving to that host. See
+    `web/render.py::media_items`/`_is_hosted_origin` for the matching
+    side of this fix.
+
+    Built from:
+    - `media_public_base_url` (when set) — parsed into one exact-port
+      `MediaOrigin` via `_public_base_origin`.
+    - each `media_trusted_hosts` entry — widened via
+      `_trusted_host_origins` (bare hostnames match any port; a
+      `host:port` entry pins that exact port).
+
+    `media_enabled=False` collapses to no origins and mode `"off"` so a
+    disabled media feature never renders a `.lens-media` block. See
+    docs/superpowers/specs/2026-07-02-media-support-design.md
+    ("Rendering path").
+    """
+    if not config.media_enabled:
+        return {"media_embed_prefixes": (), "media_remote_embeds": "off"}
+    origins: list[tuple[str, str, int | None]] = []
+    if config.media_public_base_url:
+        base_origin = _public_base_origin(config.media_public_base_url)
+        if base_origin is not None:
+            origins.append(base_origin)
+    for host in config.media_trusted_hosts:
+        host_origins = _trusted_host_origins(host)
+        if host_origins is not None:
+            origins.extend(host_origins)
+    return {
+        "media_embed_prefixes": tuple(origins),
+        "media_remote_embeds": config.media_remote_embeds,
+    }
+
+
 async def _connect_dev_session(args: argparse.Namespace, config: LensConfig) -> Session:
     """Open the dev-mode IRC session: connect → wait_for_welcome → seed.
 
@@ -200,6 +306,7 @@ async def _connect_dev_session(args: argparse.Namespace, config: LensConfig) -> 
         port=config.server_port,
         nick=config.dev_nick,
         icon=args.icon,
+        **_media_session_kwargs(config),
     )
     try:
         await session.connect()
@@ -287,7 +394,10 @@ async def _build_app(
 
         def cf_factory(nick: str) -> Session:
             return Session(
-                host=config.server_host, port=config.server_port, nick=nick
+                host=config.server_host,
+                port=config.server_port,
+                nick=nick,
+                **_media_session_kwargs(config),
             )
 
         app = make_app(config, cf_factory)

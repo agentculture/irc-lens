@@ -14,6 +14,7 @@
     <script src="{{ static_url('vendor/sse.js') }}" defer></script>
     <script src="{{ static_url('mesh.js') }}" defer></script>
     <script src="{{ static_url('lens.js') }}" defer></script>
+    <script src="{{ static_url('media.js') }}" defer></script>
   </head>
   <body data-view="{{ session.view }}">
     <header class="lens-header">
@@ -50,6 +51,23 @@
           aria-label="Live agent-mesh graph: joined channels as rooms, their members as agents and humans, connections as edges, with messages travelling the links.">
           <canvas id="mesh-canvas"></canvas>
         </section>
+        {# Upload UI (task t8): attach button + hidden file input live
+           outside <form id="chat-form"> on purpose — a nameless input
+           wouldn't serialize into the form body anyway, but keeping it
+           out of the htmx-bound form means a future hx-encoding tweak
+           on #chat-form can never accidentally multipart-encode typed
+           chat messages. The static upload script drives both from
+           here: the button opens the picker and uploads on change;
+           drag-drop targets #chat-log; paste targets #chat-input. #}
+        <div class="lens-media-controls">
+          <button type="button" data-testid="media-attach" aria-label="Attach media">📎 attach</button>
+          <button type="button" data-testid="media-record" aria-label="Record audio">🎙 record</button>
+          <input
+            type="file"
+            accept="image/*,audio/*"
+            data-testid="media-file-input"
+            hidden>
+        </div>
         <form id="chat-form" class="lens-form" hx-post="/input" hx-trigger="submit" hx-swap="none">
           <input
             data-testid="chat-input"

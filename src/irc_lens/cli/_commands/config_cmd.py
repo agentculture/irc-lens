@@ -26,6 +26,15 @@ server:
 web:
   bind: 127.0.0.1
   port: 8765
+
+media:
+  enabled: true
+  # dir: ~/.local/share/irc-lens/media    # default: $XDG_DATA_HOME/irc-lens/media or ~/.local/share/irc-lens/media
+  # max_file_bytes: 10485760              # default: 10 MiB
+  # max_store_bytes: 268435456            # default: 256 MiB
+  # public_base_url: ""                   # default: derive from web.bind/web.port at use time
+  remote_embeds: click                    # click, auto, or off
+  # trusted_hosts: []                     # default: empty
 """
 
 

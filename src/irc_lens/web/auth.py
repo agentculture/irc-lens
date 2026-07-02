@@ -304,7 +304,17 @@ def build_cloudflare_middleware(config: LensConfig):
         # is also unauthenticated by spec — cloudflared and external
         # uptime probes hit it without a JWT, and the response is opaque
         # (`{"ok": true}`) so it doesn't leak any allowlist state.
-        if request.path.startswith("/static/") or request.path == "/healthz":
+        # `/media/{token}.{ext}` (task t6) is a capability URL — the
+        # unguessable token in the path *is* the credential, so a JWT
+        # would be redundant and would break the agent-fetch path
+        # (other agents on the mesh have no Cloudflare identity to
+        # present). See docs/superpowers/specs/
+        # 2026-07-02-media-support-design.md ("Upload path").
+        if (
+            request.path.startswith("/static/")
+            or request.path == "/healthz"
+            or request.path.startswith("/media/")
+        ):
             return await handler(request)
         token = _extract_token(request)
         if not token:

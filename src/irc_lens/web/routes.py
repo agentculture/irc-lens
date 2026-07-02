@@ -4,9 +4,16 @@
 * ``POST /input``  — read the input line (JSON or form-encoded body),
   parse via ``parse_command``, dispatch through ``Session.execute``.
   Returns ``204`` on success, ``413`` if the body exceeds the
-  bounded-memory limit (also enforced by ``client_max_size`` in
-  ``make_app``), ``400`` for invalid JSON, ``503`` when the session
-  is unhealthy or AgentIRC is unreachable.
+  bounded-memory limit (enforced in-handler — see the module docstring
+  on ``_read_bounded_body``), ``400`` for invalid JSON, ``503`` when
+  the session is unhealthy or AgentIRC is unreachable.
+* ``POST /upload`` — identity-gated + origin-checked like ``/input``;
+  streams a ``multipart/form-data`` ``file`` field into the
+  :class:`~irc_lens.web.store.MediaStore`. ``413``/``400`` on
+  too-large/bad-type, ``201`` with ``{"url", "kind"}`` on success.
+* ``GET /media/{name}`` — capability-URL media serving. Auth-exempt
+  (see the exemption lists in ``web/app.py`` / ``web/auth.py``) — the
+  unguessable token in the path *is* the credential.
 * ``GET /events``  — open an SSE stream from
   ``Session.event_bus.subscribe()``; flushes each event through
   ``format_sse``. Closes the subscription cleanly on client disconnect.
@@ -17,31 +24,44 @@ Static files (``/static/*``) are wired via ``app.router.add_static`` in
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import urllib.parse
+from collections.abc import AsyncIterator
 
+import aiohttp
 from aiohttp import web
 
 from irc_lens.commands import parse_command
 from irc_lens.session import LensConnectionLost
 from irc_lens.web.events import format_sse
 from irc_lens.web.render import render_chat_log, render_index
+from irc_lens.web.store import CONTENT_TYPES, MediaTooLargeError, MediaTypeError
 
 logger = logging.getLogger(__name__)
 
 # 4 KiB upper bound on the input body. Slash-commands and chat lines
 # are both well under this; the cap is a bounded-memory contract from
-# the spec and a cheap defence against accidental floods. The same
-# value is passed to ``web.Application(client_max_size=...)`` in
-# ``make_app`` so aiohttp rejects oversize requests *before* any
-# handler runs (covers chunked / no-Content-Length transfers that
-# would otherwise buffer the whole body before the in-handler check).
+# the spec and a cheap defence against accidental floods. Enforced
+# in-handler via `_read_bounded_body` — `client_max_size` on the
+# Application is sized for media uploads (see `make_app`), so it no
+# longer doubles as `/input`'s own cap the way it did before task t6.
 _MAX_INPUT_BODY = 4096
+
+# How many bytes `_read_bounded_body` (and `_iter_field_chunks` for
+# uploads) pull per `.read()`/`.read_chunk()` call. Small enough to
+# keep memory bounded while streaming; large enough not to thrash on
+# syscalls for a multi-megabyte media upload.
+_STREAM_CHUNK_SIZE = 65536
 
 _UNHEALTHY_HINT = (
     "AgentIRC connection lost — restart irc-lens to reconnect "
     "(no auto-reconnect in v1)."
+)
+
+_MEDIA_DISABLED_HINT = (
+    "media uploads are disabled — set `media.enabled: true` in the lens config"
 )
 
 
@@ -131,6 +151,93 @@ def _effective_port(port: int | None, scheme: str) -> int:
     return 443 if scheme == "https" else 80
 
 
+def _origin_denied_response(request: web.Request) -> web.Response:
+    """Shared 403 body + log line for a failed ``_origin_ok`` check.
+
+    Used by both ``post_input`` and ``post_upload`` — the CSRF defense
+    floor described in ``_origin_ok``'s docstring applies identically
+    to both mutating POST endpoints.
+    """
+    xfp = request.headers.get("X-Forwarded-Proto")
+    forwarded_scheme = xfp.lower().split(",")[0].strip() if xfp else request.url.scheme
+    logger.warning(
+        "origin_mismatch origin=%s request_host=%s request_port=%s "
+        "scheme=%s method=%s path=%s",
+        request.headers.get("Origin"),
+        (request.url.host or "").lower(),
+        _request_effective_port(request),
+        forwarded_scheme,
+        request.method,
+        request.path,
+    )
+    return web.json_response(
+        {
+            "error": "Origin does not match request host",
+            "hint": "this is a CSRF defense; submit from the lens UI itself",
+        },
+        status=403,
+    )
+
+
+def _media_disabled() -> web.Response:
+    return web.json_response(
+        {"error": "media is disabled", "hint": _MEDIA_DISABLED_HINT},
+        status=404,
+    )
+
+
+def _media_not_found() -> web.Response:
+    return web.json_response(
+        {
+            "error": "unknown media token",
+            "hint": "the upload may have expired, been evicted, or the URL is wrong",
+        },
+        status=404,
+    )
+
+
+async def _read_bounded_body(request: web.Request) -> bytes | None:
+    """Read the request body via ``request.content``, bailing out as
+    soon as more than ``_MAX_INPUT_BODY`` bytes have arrived.
+
+    ``client_max_size`` on the Application is now sized for media
+    uploads (see ``make_app``), so it no longer bounds ``/input``'s own
+    4 KiB contract by itself — a plain ``await request.read()`` would
+    happily buffer a multi-megabyte chunked (no ``Content-Length``)
+    body in memory before any in-handler check ran. Streaming through
+    ``request.content`` in bounded chunks with a running counter keeps
+    memory use capped at roughly ``_MAX_INPUT_BODY +
+    _STREAM_CHUNK_SIZE`` regardless of how large the framework-level
+    cap is. Returns ``None`` on overflow (caller returns ``_too_large()``).
+    """
+    total = 0
+    parts: list[bytes] = []
+    while True:
+        chunk = await request.content.read(_STREAM_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > _MAX_INPUT_BODY:
+            return None
+        parts.append(chunk)
+    return b"".join(parts)
+
+
+async def _iter_field_chunks(field: aiohttp.BodyPartReader) -> AsyncIterator[bytes]:
+    """Stream a multipart field's body in bounded chunks.
+
+    Feeds :meth:`MediaStore.save`'s ``chunks`` parameter — the store
+    enforces the per-file cap while consuming this iterator, so an
+    oversize upload is rejected mid-stream rather than after being
+    buffered whole.
+    """
+    while True:
+        chunk = await field.read_chunk(size=_STREAM_CHUNK_SIZE)
+        if not chunk:
+            break
+        yield chunk
+
+
 async def get_index(request: web.Request) -> web.Response:
     """Render the three-pane page.
 
@@ -163,7 +270,19 @@ async def get_index(request: web.Request) -> web.Response:
             logger.exception("history fetch for %s during GET / failed", channel)
             entries = None
         if entries is not None:
-            chat_log_html = render_chat_log(entries)
+            # Thread the session's media-embed state through exactly as
+            # `session.py`'s `_publish_chat`/`_fetch_and_publish_history`
+            # and `render_index`'s own buffer-fallback branch do — a
+            # gap flagged by t2: this explicit history-fetch branch
+            # previously called `render_chat_log(entries)` with no
+            # kwargs, so a page reload after a live HISTORY query would
+            # silently drop `.lens-media` embeds that a reload hitting
+            # the buffer-fallback branch would have rendered.
+            chat_log_html = render_chat_log(
+                entries,
+                media_embed_prefixes=session.media_embed_prefixes,
+                media_remote_embeds=session.media_remote_embeds,
+            )
     body = render_index(session, chat_log_html=chat_log_html)
     return web.Response(text=body, content_type="text/html")
 
@@ -174,11 +293,8 @@ async def _extract_text(request: web.Request) -> tuple[str | None, web.Response 
     Returns ``(text, None)`` on success and ``(None, error_response)`` on
     a body we can't parse. Empty body → ``("", None)`` (no-op upstream).
     """
-    raw = await request.read()
-    # `client_max_size` already rejects oversize requests at the framework
-    # level (returns 413 before we ever get called), but we keep an
-    # in-handler bound for clarity / defence in depth.
-    if len(raw) > _MAX_INPUT_BODY:
+    raw = await _read_bounded_body(request)
+    if raw is None:
         return None, _too_large()
     if not raw:
         return "", None
@@ -195,8 +311,19 @@ async def _extract_text(request: web.Request) -> tuple[str | None, web.Response 
         return str(text), None
     # Default: treat as form-encoded. HTMX submits form fields with
     # `application/x-www-form-urlencoded` by default; the shipped
-    # `index.html.j2` form sends a `text=` field that way.
-    form = await request.post()
+    # `index.html.j2` form sends a `text=` field that way. Parsed
+    # ourselves (mirroring aiohttp's own `Request.post()` urlencoded
+    # branch) rather than via `request.post()`, which would try to
+    # re-read `request.content` — already fully drained by
+    # `_read_bounded_body` above.
+    charset = request.charset or "utf-8"
+    form = dict(
+        urllib.parse.parse_qsl(
+            raw.decode(charset, errors="replace"),
+            keep_blank_values=True,
+            encoding=charset,
+        )
+    )
     return str(form.get("text", "")), None
 
 
@@ -211,27 +338,7 @@ async def post_input(request: web.Request) -> web.Response:
     # (curl, cloudflared probes, internal monitors) pass through unchanged.
     # A full CSRF-token scheme is tracked in issue #27.
     if not _origin_ok(request):
-        xfp = request.headers.get("X-Forwarded-Proto")
-        forwarded_scheme = (
-            xfp.lower().split(",")[0].strip() if xfp else request.url.scheme
-        )
-        logger.warning(
-            "origin_mismatch origin=%s request_host=%s request_port=%s "
-            "scheme=%s method=%s path=%s",
-            request.headers.get("Origin"),
-            (request.url.host or "").lower(),
-            _request_effective_port(request),
-            forwarded_scheme,
-            request.method,
-            request.path,
-        )
-        return web.json_response(
-            {
-                "error": "Origin does not match request host",
-                "hint": "this is a CSRF defense; submit from the lens UI itself",
-            },
-            status=403,
-        )
+        return _origin_denied_response(request)
 
     session = await _resolve_session(request)
     # Health gate before parsing: once the AgentIRC pipe is gone, the
@@ -253,6 +360,125 @@ async def post_input(request: web.Request) -> web.Response:
     except LensConnectionLost as exc:
         return _connection_lost(str(exc))
     return web.Response(status=204)
+
+
+async def post_upload(request: web.Request) -> web.Response:
+    """Stream a ``multipart/form-data`` ``file`` field into the media
+    store and return its capability URL.
+
+    Identity-gated exactly like ``post_input``: the auth middleware has
+    already stashed ``request["identity"]`` before this handler runs
+    (``/upload`` is not on either middleware's exemption list), so no
+    explicit auth check happens here — only the read of
+    ``request["identity"]`` itself, mirroring ``_resolve_session``.
+    Origin-checked with the same ``_origin_ok`` CSRF floor as
+    ``post_input``. See docs/superpowers/specs/
+    2026-07-02-media-support-design.md ("Upload path").
+    """
+    config = request.app["config"]
+    if not config.media_enabled:
+        return _media_disabled()
+
+    if not _origin_ok(request):
+        return _origin_denied_response(request)
+
+    if not (request.content_type or "").lower().startswith("multipart/"):
+        return web.json_response(
+            {
+                "error": "expected a multipart/form-data body",
+                "hint": 'POST the file as multipart/form-data with a "file" field',
+            },
+            status=400,
+        )
+
+    try:
+        reader = await request.multipart()
+    except ValueError:
+        return web.json_response(
+            {
+                "error": "malformed multipart body",
+                "hint": "the request must be multipart/form-data with a boundary",
+            },
+            status=400,
+        )
+
+    field: aiohttp.BodyPartReader | None = None
+    while True:
+        part = await reader.next()
+        if part is None:
+            break
+        if isinstance(part, aiohttp.BodyPartReader) and part.name == "file":
+            field = part
+            break
+
+    if field is None:
+        return web.json_response(
+            {
+                "error": 'missing "file" field',
+                "hint": 'upload the file under a multipart field named "file"',
+            },
+            status=400,
+        )
+
+    identity = request["identity"]
+    store = request.app["media_store"]
+    filename = field.filename or ""
+    try:
+        stored = await store.save(identity.principal, filename, _iter_field_chunks(field))
+    except MediaTooLargeError as exc:
+        return web.json_response({"error": exc.message, "hint": exc.hint}, status=413)
+    except MediaTypeError as exc:
+        return web.json_response({"error": exc.message, "hint": exc.hint}, status=400)
+
+    base = request.app["media_base"]
+    return web.json_response(
+        {"url": f"{base}/media/{stored.token}.{stored.ext}", "kind": stored.kind},
+        status=201,
+    )
+
+
+async def get_media(request: web.Request) -> web.Response:
+    """Serve a previously uploaded blob by its ``<token>.<ext>`` capability.
+
+    Auth-exempt by design — see the exemption lists in ``web/app.py``
+    (dev mode) and ``web/auth.py`` (cloudflare-access mode). The
+    unguessable token *is* the credential (design doc: "Why capability
+    URLs on /media/"), so no ``request["identity"]`` lookup happens
+    here and none is required.
+
+    ``store.resolve`` walks the store directory tree (``iterdir`` +
+    ``is_file``/``stat``) — real blocking filesystem work, not a token
+    await — so it's offloaded via ``asyncio.to_thread`` rather than
+    called directly on the event loop (SonarCloud S7503: an ``async
+    def`` handler should actually do async/awaited work).
+    """
+    config = request.app["config"]
+    if not config.media_enabled:
+        return _media_disabled()
+
+    store = request.app["media_store"]
+    name = request.match_info["name"]
+    path = await asyncio.to_thread(store.resolve, name)
+    if path is None:
+        return _media_not_found()
+
+    ext = name.rsplit(".", 1)[-1].lower()
+    content_type = CONTENT_TYPES.get(ext, "application/octet-stream")
+    return web.FileResponse(
+        path,
+        headers={
+            "Content-Type": content_type,
+            "X-Content-Type-Options": "nosniff",
+            # Private (not shared-cache) since the token itself is the
+            # capability — an intermediary caching this response keyed
+            # only on URL would be fine, but "private" keeps a shared
+            # proxy from persisting the blob past the token's lifetime.
+            # Immutable: the token names an exact, never-mutated blob,
+            # so a client never needs to revalidate a cached copy.
+            "Cache-Control": "private, max-age=31536000, immutable",
+            "Content-Disposition": "inline",
+        },
+    )
 
 
 async def get_events(request: web.Request) -> web.StreamResponse:

@@ -26,6 +26,7 @@ SSE keep the DOM deterministic and Playwright-driveable.
 ## Nouns
 
 - `cli` — meta-introspection of the CLI surface (`cli overview`).
+- `media` — image + audio upload, viewing, and configuration.
 
 ## Exit-code policy
 
@@ -131,6 +132,46 @@ connection and serves one browser tab.
 * Foreground only; Ctrl-C is the supported shutdown.
 """
 
+_MEDIA = """\
+# Media support
+
+Humans and agents share images and audio through the lens. The wire
+carries short `http(s)` URLs only (AgentIRC's 8192-byte inbound line cap
+rules out inline bytes); blobs move over HTTP directly between consumer
+and host.
+
+## Configuration
+
+Add a `media:` section to `config.yaml`:
+
+- `enabled` — `true` or `false` (default: `true`).
+- `dir` — blob-store directory (default: `$XDG_DATA_HOME/irc-lens/media`).
+- `max_file_bytes` — per-upload cap in bytes (default: 10 MiB).
+- `max_store_bytes` — total store cap; oldest files evicted past this
+  (default: 256 MiB). Must satisfy `max_file_bytes <= max_store_bytes`.
+- `public_base_url` — advertised base URL for cross-machine peers
+  (default: derives from `web.bind`/`web.port`; must be `http(s)` if set).
+- `remote_embeds` — `click` (click-to-load), `auto` (auto-embed), or
+  `off` (plain links) for remote media URLs (default: `click`).
+- `trusted_hosts` — list of hostnames that auto-embed even when
+  `remote_embeds: click` (default: empty list).
+
+## Security
+
+* `GET /media/{token}` is auth-exempt. The 128-bit unguessable token
+  *is* the capability — possession of the URL means you saw it in the
+  channel (IRC trust model). Uploads (`POST /upload`) remain authed.
+* Upload validation: magic-byte sniff + extension-allowlist (PNG, JPG,
+  GIF, WebP; MP3, OGG, WAV, WebM, M4A, FLAC). SVG is excluded (XSS
+  vector on auth-exempt origin).
+* CSP headers restrict markup injection and set `X-Content-Type-Options:
+  nosniff` + `Referrer-Policy: no-referrer` on all responses.
+* Remote embeds use click-to-load by default to avoid leaking viewer
+  IP/headers to arbitrary hosts; `trusted_hosts` restores auto-embed.
+
+See `docs/security-checklist.md` for the full media checklist.
+"""
+
 
 ENTRIES: dict[tuple[str, ...], str] = {
     (): _ROOT,
@@ -141,4 +182,5 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("cli",): _CLI,
     ("cli", "overview"): _CLI_OVERVIEW,
     ("serve",): _SERVE,
+    ("media",): _MEDIA,
 }

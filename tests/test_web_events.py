@@ -149,9 +149,23 @@ async def test_post_input_413_on_oversize_body(client: TestClient) -> None:
 async def test_post_input_413_on_chunked_oversize_body(client: TestClient) -> None:
     """Chunked transfer (no Content-Length) > cap — also 413.
 
-    Without `client_max_size`, the previous implementation would have
-    buffered the whole body before checking size; the framework cap
-    closes that hole.
+    # deliberately updated by task t6: client_max_size now sized for
+    # media uploads
+
+    Before task t6, `client_max_size` on the Application was pinned to
+    `_MAX_INPUT_BODY` (4 KiB), so aiohttp's own framework-level body
+    reader raised `HTTPRequestEntityTooLarge` (its own plain-text body,
+    not our `{error, hint}` JSON) before `/input`'s handler ever saw the
+    request. Task t6 raises `client_max_size` app-wide to the media
+    upload cap (megabytes), so that framework-level trip no longer
+    fires for a 5 KiB body — `/input` now has to enforce its own 4 KiB
+    bound itself. It does, via `routes._read_bounded_body`, which
+    streams `request.content` with a running byte counter and bails
+    out (without ever buffering the whole oversize body) as soon as the
+    cap is exceeded. This asserts that handler-level bound directly:
+    status 413 AND our own `{error, hint}` JSON body — the opposite of
+    the pre-t6 assertion, which explicitly declined to check the body
+    shape because the rejection was the framework's, not ours.
     """
 
     async def chunked() -> AsyncGenerator[bytes, None]:
@@ -165,6 +179,9 @@ async def test_post_input_413_on_chunked_oversize_body(client: TestClient) -> No
         headers={"Content-Type": "application/json"},
     )
     assert resp.status == 413
+    body = await resp.json()
+    assert body["error"] == "input too large"
+    assert "hint" in body
 
 
 async def test_post_input_400_on_invalid_json(client: TestClient) -> None:
