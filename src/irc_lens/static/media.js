@@ -102,8 +102,8 @@
     let resp;
     try {
       resp = await fetch("/upload", { method: "POST", body });
-    } catch (_err) {
-      // best-effort: fetch failed; toast covers it, _err not actionable. (S2486)
+    } catch (err) {
+      console.warn("[lens-media] upload fetch failed", err);
       showToast("upload failed: network error");
       return;
     }
@@ -111,8 +111,8 @@
       let payload = {};
       try {
         payload = await resp.json();
-      } catch (_err) {
-        // best-effort: non-JSON error body; fall back to status-only. (S2486)
+      } catch (err) {
+        console.warn("[lens-media] non-JSON error body", err);
       }
       let msg = payload.error || "upload failed (" + resp.status + ")";
       if (payload.hint) msg += " — " + payload.hint;
@@ -237,8 +237,8 @@
       if (globalThis.LensMedia?.uploadAndSend) {
         await globalThis.LensMedia.uploadAndSend(file);
       }
-    } catch (_err) {
-      // best-effort: upload-after-recording failed; toast covers it. (S2486)
+    } catch (err) {
+      console.warn("[lens-media] recording upload failed", err);
       toast("recording upload failed: network error");
     } finally {
       resetToIdle();
@@ -264,8 +264,8 @@
     }
     try {
       activeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (_err) {
-      // best-effort: getUserMedia rejected (e.g. permission denied). (S2486)
+    } catch (err) {
+      console.warn("[lens-media] getUserMedia rejected", err);
       toast("recording failed — hint: microphone permission was denied");
       return;
     }
@@ -273,8 +273,8 @@
     recordingExt = chosen.ext;
     try {
       mediaRecorder = new MediaRecorder(activeStream, { mimeType: chosen.mimeType });
-    } catch (_err) {
-      // best-effort: MediaRecorder construction failed; clean up and toast. (S2486)
+    } catch (err) {
+      console.warn("[lens-media] MediaRecorder construction failed", err);
       stopStreamTracks();
       toast("recording failed — hint: could not start MediaRecorder");
       return;

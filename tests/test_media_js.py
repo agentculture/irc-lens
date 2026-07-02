@@ -402,17 +402,23 @@ def test_media_js_paste_loop_uses_for_of() -> None:
     )
 
 
-def test_media_js_catch_blocks_use_underscore_bound_param() -> None:
-    """SonarCloud S2486 (handle exception or don't catch): media.js's
-    best-effort catch blocks (fetch/JSON/getUserMedia/MediaRecorder) keep
-    their swallow semantics but bind the exception as `_err` with a
-    short comment documenting why it's ignored, rather than an
-    unreferenced `err` binding."""
+def test_media_js_catch_blocks_log_the_bound_error() -> None:
+    """SonarCloud S2486 (handle exception or don't catch): every catch
+    block references its bound error via console.warn, matching the
+    established lens.js convention (`console.warn("[lens] ...", err)`).
+    A comment-only swallow does not clear S2486 — the caught error must
+    actually be used."""
     js = _read_media_js()
-    assert js.count("catch (_err)") == 5, (
-        "media.js must have exactly 5 best-effort catch blocks bound as "
-        "_err with a documenting comment (S2486)"
+    # No unused underscore bindings left behind.
+    assert "catch (_err)" not in js, (
+        "media.js catch blocks must use the caught error, not swallow it "
+        "as _err with a comment (S2486)"
     )
-    assert "catch (err)" not in js, (
-        "media.js must not leave plain unused `err` catch bindings (S2486)"
+    # Every catch binds `err` and logs it via the repo's console.warn form.
+    assert js.count("} catch (err) {") == 5, (
+        "media.js must have exactly 5 catch blocks binding `err` (S2486)"
+    )
+    assert js.count('console.warn("[lens-media]') == 5, (
+        "each catch must log its bound error via console.warn, matching "
+        "the lens.js convention (S2486)"
     )
