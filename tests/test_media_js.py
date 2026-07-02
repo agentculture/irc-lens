@@ -117,12 +117,12 @@ def test_media_js_guards_missing_chat_log() -> None:
 
 
 def test_media_js_stays_small() -> None:
-    # deliberately raised by task t8: upload half added
-    """Build-plan budget: media.js stays well under ~200 lines so the
+    # deliberately raised by task t9: recording half added
+    """Build-plan budget: media.js stays well under ~300 lines so the
     module is lean."""
     js = _read_media_js()
     n = len(js.splitlines())
-    assert n <= 200, f"media.js grew to {n} lines — refactor or split"
+    assert n <= 300, f"media.js grew to {n} lines — refactor or split"
 
 
 def test_media_js_uses_iife_pattern() -> None:
@@ -240,4 +240,71 @@ def test_index_html_has_attach_button_and_hidden_file_input() -> None:
     assert 'type="file"' in html
     assert 'accept="image/*,audio/*"' in html, (
         "the hidden file input must accept image/* and audio/* only"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Task t9 — mic recording: MediaRecorder capture.
+# ---------------------------------------------------------------------------
+
+
+def test_media_js_records_via_getusermedia_and_mediarecorder() -> None:
+    """Record button captures audio via
+    navigator.mediaDevices.getUserMedia({audio: true}) into a
+    MediaRecorder — the capture APIs the acceptance criteria name."""
+    js = _read_media_js()
+    assert "getUserMedia" in js, "media.js must call getUserMedia to capture the mic"
+    assert "MediaRecorder" in js, "media.js must use MediaRecorder to capture audio"
+
+
+def test_media_js_prefers_webm_opus_with_mp4_fallback() -> None:
+    """MediaRecorder is constructed with audio/webm;codecs=opus when
+    MediaRecorder.isTypeSupported says so, else audio/mp4."""
+    js = _read_media_js()
+    assert "audio/webm;codecs=opus" in js, (
+        "media.js must prefer audio/webm;codecs=opus"
+    )
+    assert "audio/mp4" in js, "media.js must fall back to audio/mp4"
+    assert "isTypeSupported" in js, (
+        "media.js must probe MediaRecorder.isTypeSupported before picking a mimeType"
+    )
+
+
+def test_media_js_caps_recording_at_five_minutes() -> None:
+    """Client-side hard cap: auto-stop at 300 seconds (5 minutes)."""
+    js = _read_media_js()
+    assert "300" in js, "media.js must cap recording duration at 300 seconds"
+
+
+def test_media_js_stops_stream_tracks_when_recording_ends() -> None:
+    """No dangling mic indicator: every track on the captured stream is
+    stopped once recording ends."""
+    js = _read_media_js()
+    assert "getTracks" in js, "media.js must enumerate the stream's tracks"
+    assert ".stop()" in js, "media.js must call track.stop() to release the mic"
+
+
+def test_media_js_record_button_reuses_upload_and_send_path() -> None:
+    """The finished recording is sent through the SAME upload-then-send
+    path t8 built (window.LensMedia.uploadAndSend) — no duplicated
+    /input POST logic in the recording IIFE."""
+    js = _read_media_js()
+    assert "LensMedia" in js, (
+        "media.js must reuse the shared LensMedia.uploadAndSend helper"
+    )
+    assert "uploadAndSend" in js
+
+
+def test_media_js_wires_record_button() -> None:
+    """media.js queries the record button by its testid and element-guards
+    it, so the script stays safe on pages without the button."""
+    js = _read_media_js()
+    assert "media-record" in js, "media.js must reference the record button testid"
+
+
+def test_index_html_has_record_button() -> None:
+    """index.html.j2 has the record button next to the attach button."""
+    html = _read_index_html()
+    assert 'data-testid="media-record"' in html, (
+        "index.html.j2 must add the record button"
     )
