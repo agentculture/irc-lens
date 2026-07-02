@@ -50,17 +50,23 @@ _DESCRIPTION = (
 def _iter_command_modules() -> tuple[object, ...]:
     """Yield each command module exposing a ``register_into(app)`` hook.
 
-    The list is **explicit** (no dynamic import). ``serve`` and ``config`` are
-    host commands; ``cli`` is the CLI-introspection noun; ``tools`` (t5) is
-    the ephemeral-session live-verb catalog (``send``/``join``/``part``/...)
-    living at :mod:`irc_lens.tools`. The ``overview`` and ``doctor`` meta-verbs
-    are *not* here — agentfront reserves their names, so they are routed by
-    :func:`main` to :mod:`irc_lens.cli._meta` instead.
+    The list is **explicit** (no dynamic import). ``serve``, ``config``, and
+    ``tui`` (t9) are host commands; ``cli`` is the CLI-introspection noun;
+    ``tools`` (t5) is the ephemeral-session live-verb catalog
+    (``send``/``join``/``part``/...) living at :mod:`irc_lens.tools`. The
+    ``overview`` and ``doctor`` meta-verbs are *not* here — agentfront
+    reserves their names, so they are routed by :func:`main` to
+    :mod:`irc_lens.cli._meta` instead.
     """
     from irc_lens import tools
-    from irc_lens.cli._commands import cli_noun, config_cmd, serve
+    from irc_lens.cli._commands import (
+        cli_noun,
+        tui_cmd,
+        config_cmd,
+        serve,
+    )
 
-    return (serve, config_cmd, cli_noun, tools)
+    return (serve, config_cmd, cli_noun, tui_cmd, tools)
 
 
 def build_app() -> "App":
