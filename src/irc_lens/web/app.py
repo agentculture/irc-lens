@@ -163,7 +163,7 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
         app["media_base"] = (
             config.media_public_base_url.rstrip("/")
             if config.media_public_base_url
-            else f"http://{config.web_bind}:{config.web_port}"
+            else f"http://{config.web_bind}:{config.web_port}"  # NOSONAR — loopback default; TLS terminates at cloudflared in CF mode
         )
 
     app.router.add_get("/", routes.get_index)

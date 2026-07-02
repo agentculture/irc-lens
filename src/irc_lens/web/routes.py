@@ -24,6 +24,7 @@ Static files (``/static/*``) are wired via ``app.router.add_static`` in
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import urllib.parse
@@ -444,6 +445,12 @@ async def get_media(request: web.Request) -> web.Response:
     unguessable token *is* the credential (design doc: "Why capability
     URLs on /media/"), so no ``request["identity"]`` lookup happens
     here and none is required.
+
+    ``store.resolve`` walks the store directory tree (``iterdir`` +
+    ``is_file``/``stat``) — real blocking filesystem work, not a token
+    await — so it's offloaded via ``asyncio.to_thread`` rather than
+    called directly on the event loop (SonarCloud S7503: an ``async
+    def`` handler should actually do async/awaited work).
     """
     config = request.app["config"]
     if not config.media_enabled:
@@ -451,7 +458,7 @@ async def get_media(request: web.Request) -> web.Response:
 
     store = request.app["media_store"]
     name = request.match_info["name"]
-    path = store.resolve(name)
+    path = await asyncio.to_thread(store.resolve, name)
     if path is None:
         return _media_not_found()
 

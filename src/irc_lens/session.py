@@ -257,7 +257,7 @@ class Session:
         *,
         icon: str | None = None,
         event_bus: SessionEventBus | None = None,
-        media_embed_prefixes: tuple[str, ...] = (),
+        media_embed_prefixes: tuple[tuple[str, str, int | None], ...] = (),
         media_remote_embeds: str = "click",
     ) -> None:
         self.host = host
@@ -274,6 +274,12 @@ class Session:
         # (`media_public_base_url` + `media_trusted_hosts` for
         # `media_embed_prefixes`, `media_remote_embeds` passed through
         # as-is; `media_enabled=False` collapses to `((), "off")`).
+        # Despite the name (kept for a minimal diff across this
+        # kwarg's plumbing), `media_embed_prefixes` holds `MediaOrigin`
+        # rows — `(scheme, hostname, port)` tuples, `port=None` meaning
+        # "any port" — not URL-string prefixes: see
+        # `web/render.py::media_items`'s docstring for why a naive
+        # `str.startswith(prefix)` comparison was a trusted-host bypass.
         self.media_embed_prefixes = media_embed_prefixes
         self.media_remote_embeds = media_remote_embeds
 

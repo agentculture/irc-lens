@@ -166,8 +166,16 @@ async def media_hosted_lens_client(
     ``app["media_base"]`` (what ``POST /upload`` stamps into the returned
     URL) and the session's ``media_embed_prefixes`` (what ``media_items``
     matches against) to the server's real reachable origin. An uploaded URL
-    is then both prefix-matched (→ direct embed) and loopback-reachable
+    is then both origin-matched (→ direct embed) and loopback-reachable
     (→ the browser can load it / the ``/media/`` route serves it).
+
+    ``media_embed_prefixes`` holds ``(scheme, hostname, port)`` origin
+    tuples, not URL-string prefixes (fixed after a Qodo PR #50 finding —
+    see ``tests/test_render_media.py``'s "Trusted-host matching is
+    origin-exact, not prefix-based" section and
+    ``web/render.py::MediaOrigin``), so this fixture derives one exact
+    origin from the same ``host``/``port`` used to build ``base`` below
+    rather than passing ``f"{base}/media/"`` as a string.
 
     Seeds ``tests/fixtures/basic.yaml`` so ``#general`` is the active
     channel with two historical chat lines, matching ``seeded_lens_client``.
@@ -199,7 +207,7 @@ async def media_hosted_lens_client(
     # mutate any time — point it at the same origin uploads will advertise,
     # so a lens-hosted URL renders as a direct embed rather than a remote
     # placeholder.
-    lens_session.media_embed_prefixes = (f"{base}/media/",)
+    lens_session.media_embed_prefixes = (("http", host, port),)
     test_server = TestServer(app, host=host, port=port)
     client = TestClient(test_server)
     await client.start_server()
