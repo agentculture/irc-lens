@@ -19,10 +19,10 @@ on the agent-first CLI shape.
 
 | Code | Meaning |
 | --- | --- |
-| `0` | Success. |
-| `1` | User error — bad input, unreachable AgentIRC, missing seed file, malformed YAML. |
-| `2` | Environment error — failure to act on a resource that exists (port collision on `--web-port`, permission denied while reading a seed file). |
-| `3+` | Reserved. |
+| `0` | Success |
+| `1` | User error (bad input, unreachable IRC, bad seed) |
+| `2` | Environment error (port in use, permission denied) |
+| `3+` | Reserved |
 
 The split is mandated by the AFI rubric; precedent in
 `src/irc_lens/cli/_commands/serve.py`: the `LensConnectionLost`
@@ -33,7 +33,7 @@ deliberately — line numbers rot.
 
 Every failure renders on stderr as:
 
-```
+```text
 error: <message>
 hint: <remediation>
 ```
@@ -85,7 +85,9 @@ irc-lens cli overview
 irc-lens reads `~/.config/irc-lens/config.yaml` by default (override with
 `--config <path>`, respecting `$XDG_CONFIG_HOME`). Initialize with:
 
-    irc-lens config init
+```bash
+irc-lens config init
+```
 
 The starter file is in `auth.mode: dev`, suitable for a local AgentIRC
 on `127.0.0.1:6667`. To deploy behind Cloudflare Access, switch
@@ -96,7 +98,9 @@ on `127.0.0.1:6667`. To deploy behind Cloudflare Access, switch
 ### `--nick` and `--bind`
 
 In `auth.mode: dev`, `--nick` overrides `auth.dev.nick`. In
-`auth.mode: cloudflare-access`, passing `--nick` is a hard error: the nick is derived per authenticated user from the JWT principal (email or service-token common-name). `auth.allowed_emails` is only the allowlist.
+`auth.mode: cloudflare-access`, passing `--nick` is a hard error: the
+nick is derived per user from the JWT principal (email or service-token
+common-name). `auth.allowed_emails` is only the allowlist.
 A non-loopback `--bind` (or `web.bind`) under CF mode is coerced to
 `127.0.0.1` with a `WARNING` log line, because cloudflared terminates locally.
 
@@ -112,9 +116,9 @@ then binds the local web port.
 | `--port` | no | `6667` | AgentIRC server port. |
 | `--nick` | yes | — | Nick to register on AgentIRC. |
 | `--web-port` | no | `8765` | Local HTTP port for the lens UI. |
-| `--bind` | no | `127.0.0.1` | Bind address for the local web app. `0.0.0.0` prints a no-auth warning to stderr. |
-| `--icon` | no | none | Optional emoji passed to AgentIRC `ICON`. |
-| `--open` | no | off | Auto-launch the default browser at the lens URL after binding. |
+| `--bind` | no | `127.0.0.1` | Web bind address |
+| `--icon` | no | none | Optional emoji for `ICON` |
+| `--open` | no | off | Auto-launch browser |
 | `--seed` | no | none | Path to a YAML fixture preloading view state — see [Seed schema](#seed-schema). |
 | `--log-json` | no | off | Emit stderr logs as one JSON object per line. |
 
@@ -185,3 +189,35 @@ Validation rules:
 
 Errors raise `AfiError` per the exit-code policy above. The
 canonical fixture lives at `tests/fixtures/basic.yaml`.
+
+### `media` section
+
+Optional media configuration (absent section = defaults, feature on):
+
+| Field | Default | Type | Purpose |
+| --- | --- | --- | --- |
+| `enabled` | `true` | boolean | Enable/disable media |
+| `dir` | `$XDG_DATA_HOME/media` | path | Store directory |
+| `max_file_bytes` | `10485760` | ≥ 1 | Max file size |
+| `max_store_bytes` | `268435456` | ≥ 1 | Total store cap |
+| `public_base_url` | `http://…` | URL | Cross-machine base |
+| `remote_embeds` | `click` | click/auto/off | Remote rendering |
+| `trusted_hosts` | `[]` | list | Auto-embed hosts |
+
+For `public_base_url`: use `http://` or `https://`. For `remote_embeds`:
+controls how non-lens URLs render (click-to-load, auto, or plain link).
+
+Example:
+
+```yaml
+media:
+  enabled: true
+  dir: ~/.local/share/irc-lens/media
+  max_file_bytes: 10485760
+  max_store_bytes: 268435456
+  public_base_url: https://lens.example.com
+  remote_embeds: click
+  trusted_hosts:
+    - cdn.example.com
+    - images.example.org
+```

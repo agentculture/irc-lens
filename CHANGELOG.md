@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+## [0.8.0] - 2026-07-02
+
+### Added
+
+- **Media (image + audio) support:** humans and agents share images and
+  audio through the lens via HTTP capability URLs. `POST /upload` accepts
+  multipart/form-data files (PNG, JPG, GIF, WebP for images; MP3, OGG,
+  WAV, WebM, M4A, FLAC for audio); `GET /media/{token}` serves them with
+  auth-exempt capability-URL tokens (128-bit unguessable URLs matching
+  the IRC trust model). Console upload UI: file picker, drag-drop, paste,
+  and microphone recording (MediaRecorder → opus/webm). Lens-hosted URLs
+  auto-embed as `<img>` / `<audio>`; remote URLs render as click-to-load
+  placeholder cards by default (configurable per `media.remote_embeds`).
+  Configuration: new optional `media:` section with `enabled`, `dir`,
+  `max_file_bytes` (10 MiB), `max_store_bytes` (256 MiB with eviction),
+  `public_base_url`, `remote_embeds`, and `trusted_hosts`. Security
+  headers (CSP, nosniff, referrer-policy) land with this feature.
+
 ## [0.7.0] - 2026-06-23
 
 ### Added
@@ -24,8 +44,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from `culture.yaml`. Runtime dep: the `eidetic` CLI on PATH (else a local
   eidetic-cli checkout with `uv`). Propagated by rollout-cli's `eidetic-memory`
   recipe.
-
-## [Unreleased]
 
 ## [0.6.1] - 2026-06-07
 
