@@ -117,11 +117,12 @@ def test_media_js_guards_missing_chat_log() -> None:
 
 
 def test_media_js_stays_small() -> None:
-    """Build-plan budget: media.js stays well under ~80 lines so the
+    # deliberately raised by task t8: upload half added
+    """Build-plan budget: media.js stays well under ~200 lines so the
     module is lean."""
     js = _read_media_js()
     n = len(js.splitlines())
-    assert n <= 80, f"media.js grew to {n} lines — refactor or split"
+    assert n <= 200, f"media.js grew to {n} lines — refactor or split"
 
 
 def test_media_js_uses_iife_pattern() -> None:
@@ -149,3 +150,94 @@ def test_index_html_loads_media_js() -> None:
     # Verify it's not duplicated
     count = html.count("media.js")
     assert count == 1, f"media.js appears {count} times; should be exactly 1"
+
+
+# ---------------------------------------------------------------------------
+# Task t8 — upload-UI half: attach button, drag-drop, paste, auto-send.
+# ---------------------------------------------------------------------------
+
+
+def test_media_js_wires_attach_button_to_hidden_file_input() -> None:
+    """Clicking the attach button (data-testid=media-attach) opens the
+    hidden file picker (data-testid=media-file-input) via .click()."""
+    js = _read_media_js()
+    assert "media-attach" in js, "media.js must reference the attach button testid"
+    assert "media-file-input" in js, "media.js must reference the hidden file input testid"
+    assert ".click()" in js, "attach button must open the hidden file input via .click()"
+
+
+def test_media_js_uploads_via_fetch_post_upload() -> None:
+    """Uploads go through fetch("/upload", {method: "POST", ...}) with a
+    FormData body carrying the file — never a hand-rolled XHR."""
+    js = _read_media_js()
+    assert '"/upload"' in js or "'/upload'" in js, "media.js must POST to /upload"
+    assert "FormData" in js, "media.js must build a multipart body via FormData"
+    assert 'method: "POST"' in js or "method: 'POST'" in js
+
+
+def test_media_js_one_send_path_uses_requestsubmit_not_direct_input_post() -> None:
+    """On 201, the URL is submitted through the SAME pipeline typed
+    messages use: set #chat-input's value then call requestSubmit() on
+    #chat-form. media.js must never POST /input directly — that would
+    create a second, divergent send path."""
+    js = _read_media_js()
+    assert "requestSubmit" in js, (
+        "media.js must submit the uploaded URL via form.requestSubmit(), "
+        "reusing the existing HTMX POST /input pipeline"
+    )
+    assert '"/input"' not in js and "'/input'" not in js, (
+        "media.js must not POST /input directly — one send path only"
+    )
+
+
+def test_media_js_drag_drop_prevents_default_on_dragover() -> None:
+    """dragover must call preventDefault or drop never fires; drop reads
+    dataTransfer.files[0]."""
+    js = _read_media_js()
+    assert "dragover" in js, "media.js must listen for dragover on the chat area"
+    assert "drop" in js, "media.js must listen for drop on the chat area"
+    assert "dataTransfer" in js, "media.js must read dataTransfer.files on drop"
+    assert "preventDefault" in js
+
+
+def test_media_js_paste_listener_reads_clipboard_file_items() -> None:
+    """Paste on the message input checks clipboardData items for a file
+    (image) entry and uploads it."""
+    js = _read_media_js()
+    assert "paste" in js, "media.js must listen for paste on the message input"
+    assert "clipboardData" in js, "media.js must read event.clipboardData"
+    assert "getAsFile" in js, "media.js must pull the File out of a clipboard item"
+
+
+def test_media_js_upload_failure_uses_toast_pattern_with_error_hint() -> None:
+    """Upload failures surface via the same #toast-region / .lens-toast
+    DOM pattern lens.js uses, reading the {error, hint} JSON body — no
+    new SSE events are introduced for this."""
+    js = _read_media_js()
+    assert "toast-region" in js, "media.js must reuse the #toast-region toast pattern"
+    assert "lens-toast" in js, "media.js toast helper must reuse the lens-toast class"
+    assert ".error" in js, "media.js must read the {error, hint} payload's error field"
+    assert ".hint" in js, "media.js must read the {error, hint} payload's hint field"
+
+
+def test_media_js_guards_missing_upload_elements() -> None:
+    """Attach/drag-drop/paste wiring is all guarded by element-existence
+    checks, so the script stays safe on pages without the form."""
+    js = _read_media_js()
+    assert "attachButton && fileInput" in js or (
+        "if (attachButton" in js and "if (fileInput" in js
+    ), "attach-button wiring must guard on both elements existing"
+
+
+def test_index_html_has_attach_button_and_hidden_file_input() -> None:
+    """index.html.j2 has the attach button and hidden file input the
+    upload half of media.js drives, near the existing chat-input form."""
+    html = _read_index_html()
+    assert 'data-testid="media-attach"' in html, "index.html.j2 must add the attach button"
+    assert 'data-testid="media-file-input"' in html, (
+        "index.html.j2 must add the hidden file input"
+    )
+    assert 'type="file"' in html
+    assert 'accept="image/*,audio/*"' in html, (
+        "the hidden file input must accept image/* and audio/* only"
+    )
