@@ -240,3 +240,6 @@ __marimo__/
 
 # devague working state (not committed by default)
 .devague/reviews/
+
+# colleague run reports (local working state)
+.colleague/
