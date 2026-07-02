@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **agentfront[mcp] dependency:** adds support for agentfront models and
+  MCP servers at version 0.20.0 or later.
+
+### Changed
+
+- **Python 3.12 floor:** `requires-python` bumped from `>=3.11` to `>=3.12`.
+  This aligns with agentfront's Python version support and simplifies the
+  dependency baseline.
+
 ## [0.8.0] - 2026-07-02
 
 ### Added
