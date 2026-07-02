@@ -53,14 +53,31 @@ def _iter_command_modules() -> tuple[object, ...]:
     The list is **explicit** (no dynamic import). ``serve`` and ``config`` are
     host commands; ``cli`` is the CLI-introspection noun; ``tools`` (t5) is
     the ephemeral-session live-verb catalog (``send``/``join``/``part``/...)
-    living at :mod:`irc_lens.tools`. The ``overview`` and ``doctor`` meta-verbs
-    are *not* here — agentfront reserves their names, so they are routed by
-    :func:`main` to :mod:`irc_lens.cli._meta` instead.
+    living at :mod:`irc_lens.tools`; ``mcp_cmd`` (t8) is the ``mcp`` host
+    command serving the same registry over MCP stdio. The ``overview`` and
+    ``doctor`` meta-verbs are *not* here — agentfront reserves their names,
+    so they are routed by :func:`main` to :mod:`irc_lens.cli._meta` instead.
+
+    One import/tuple entry per line on purpose: a same-wave sibling task
+    (the ``tui`` host verb) adds its own module here too, and a one-name
+    line diff keeps that merge trivial instead of both edits colliding on
+    the same source line.
     """
     from irc_lens import tools
-    from irc_lens.cli._commands import cli_noun, config_cmd, serve
+    from irc_lens.cli._commands import (
+        cli_noun,
+        mcp_cmd,
+        config_cmd,
+        serve,
+    )
 
-    return (serve, config_cmd, cli_noun, tools)
+    return (
+        serve,
+        config_cmd,
+        cli_noun,
+        mcp_cmd,
+        tools,
+    )
 
 
 def build_app() -> "App":
