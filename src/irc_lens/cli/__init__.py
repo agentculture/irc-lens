@@ -50,23 +50,23 @@ _DESCRIPTION = (
 def _iter_command_modules() -> tuple[object, ...]:
     """Yield each command module exposing a ``register_into(app)`` hook.
 
-    The list is **explicit** (no dynamic import). ``serve`` and ``config`` are
-    host commands; ``cli`` is the CLI-introspection noun; ``tools`` (t5) is
-    the ephemeral-session live-verb catalog (``send``/``join``/``part``/...)
-    living at :mod:`irc_lens.tools`; ``mcp_cmd`` (t8) is the ``mcp`` host
-    command serving the same registry over MCP stdio. The ``overview`` and
-    ``doctor`` meta-verbs are *not* here — agentfront reserves their names,
-    so they are routed by :func:`main` to :mod:`irc_lens.cli._meta` instead.
+    The list is **explicit** (no dynamic import). ``serve``, ``config``,
+    ``mcp`` (t8), and ``tui`` (t9) are host commands; ``cli`` is the
+    CLI-introspection noun; ``tools`` (t5) is the ephemeral-session
+    live-verb catalog (``send``/``join``/``part``/...) living at
+    :mod:`irc_lens.tools`. The ``overview`` and ``doctor`` meta-verbs are
+    *not* here — agentfront reserves their names, so they are routed by
+    :func:`main` to :mod:`irc_lens.cli._meta` instead.
 
-    One import/tuple entry per line on purpose: a same-wave sibling task
-    (the ``tui`` host verb) adds its own module here too, and a one-name
-    line diff keeps that merge trivial instead of both edits colliding on
-    the same source line.
+    One import/tuple entry per line on purpose: parallel tasks each add
+    their own module here, and a one-name line diff keeps those merges
+    trivial instead of colliding on the same source line.
     """
     from irc_lens import tools
     from irc_lens.cli._commands import (
         cli_noun,
         mcp_cmd,
+        tui_cmd,
         config_cmd,
         serve,
     )
@@ -76,6 +76,7 @@ def _iter_command_modules() -> tuple[object, ...]:
         config_cmd,
         cli_noun,
         mcp_cmd,
+        tui_cmd,
         tools,
     )
 
