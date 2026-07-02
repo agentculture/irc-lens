@@ -143,10 +143,12 @@ def test_serve_missing_config_errors(
 
 
 def test_serve_help_lists_all_flags(capsys: pytest.CaptureFixture[str]) -> None:
-    """Every flag from the spec's CLI shape is registered."""
-    with pytest.raises(SystemExit) as exc:
-        main(["serve", "--help"])
-    assert exc.value.code == 0
+    """Every flag from the spec's CLI shape is registered.
+
+    Rendered CLI: run_cli translates argparse's `--help` exit into a 0 return
+    value (rather than raising SystemExit); the help text still prints to stdout.
+    """
+    assert main(["serve", "--help"]) == 0
     out = capsys.readouterr().out
     for flag in (
         "--host",
@@ -189,8 +191,7 @@ def test_serve_help_renders_defaults_from_argparse(
         and action.dest != "help"
     }
 
-    with pytest.raises(SystemExit):
-        main(["serve", "--help"])
+    assert main(["serve", "--help"]) == 0
     out = capsys.readouterr().out
 
     # Every defaulted flag's stored default must surface in the rendered help.

@@ -1,140 +1,149 @@
-"""Unified CLI entry point for irc-lens.
+"""irc-lens CLI — rendered from one agentfront ``App`` registry.
 
-Noun-based command groups and globals are registered here. Top-level globals
-(``learn``, ``explain``) live under :mod:`irc_lens.cli._commands`; per-noun
-groups follow the same pattern.
+The CLI is *assembled*, not hand-maintained: :func:`build_app` constructs a
+single :class:`agentfront.app.App`, registers a few doc pages, and calls each
+command module's ``register_into(app)`` hook (the colleague blueprint — "import,
+don't duplicate"). :func:`main` then dispatches an argv against that App via
+``agentfront.cli_surface.run_cli``, which generates the agent-first surface for
+free: ``learn`` / ``explain`` meta-verbs, per-verb ``--json``, structured
+``error:`` / ``hint:`` diagnostics on stderr, and no traceback leak. The same
+App also backs the (future) MCP and HTTP surfaces, so they cannot drift.
 
-Error-propagation contract: every handler raises
-:class:`irc_lens.cli._errors.AfiError` on failure; :func:`main` catches it
-via :func:`_dispatch` and routes through :mod:`irc_lens.cli._output`.
-Unknown exceptions are wrapped so no Python traceback leaks.
+Two meta-verbs are the exception. ``overview`` must emit ``{subject, sections}``
+and ``doctor`` must emit ``{healthy, checks}`` under ``--json`` — richer shapes
+than agentfront 0.20.0's stock meta-verbs produce, and their names are reserved
+so they cannot be re-registered on the App. :func:`main` therefore routes those
+two verbs to :mod:`irc_lens.cli._meta`, which derives its output from the *same*
+App registry, and delegates everything else to ``run_cli``.
+
+The ``[project.scripts]`` entry (``irc-lens = "irc_lens.cli:main"``) is
+unchanged; only the internals moved from bespoke argparse scaffolding to the
+rendered path.
 """
 
 from __future__ import annotations
 
-import argparse
 import sys
+from typing import TYPE_CHECKING
 
 from irc_lens import __version__
-from irc_lens.cli._commands import config_cmd as _config_cmd
-from irc_lens.cli._commands import explain as _explain_cmd
-from irc_lens.cli._commands import learn as _learn_cmd
-from irc_lens.cli._commands import overview as _overview_cmd
-from irc_lens.cli._commands import serve as _serve_cmd
-from irc_lens.cli._errors import EXIT_USER_ERROR, AfiError
-from irc_lens.cli._output import emit_error
 
+if TYPE_CHECKING:  # pragma: no cover - typing only
+    import argparse
 
-def _argv_requested_json(argv: list[str] | None) -> bool:
-    """Detect ``--json`` on the raw argv before argparse has parsed it.
+    from agentfront.app import App
 
-    Used by :class:`_ArgumentParser`'s parse-time error path: by the time
-    argparse calls ``error()``, the namespace doesn't exist yet, so we
-    can't read ``args.json``. Sniff the raw arg list instead so a user
-    who passed ``--json`` still gets a JSON-shaped error.
-    """
-    return bool(argv) and "--json" in argv
-
-
-# Captured at the start of each `main()` so `_ArgumentParser.error` can read it
-# even though argparse hasn't built a namespace yet. Process-global is fine —
-# `main()` is the only entry point and is single-threaded.
-_PARSE_JSON_MODE: bool = False
-
-
-_SERVE_NICK_HINT = (
-    "try 'irc-lens serve --nick <name>' (e.g. --nick lens); "
-    "run 'irc-lens serve --help' for all flags"
+_DESCRIPTION = (
+    "irc-lens — reactive web console for AgentIRC. Purpose: launch an "
+    "aiohttp + HTMX + SSE web app over a plain TCP AgentIRC connection so a "
+    "browser-automation agent can administer any AgentIRC server without a "
+    "human in the loop — a pure client, no agent loop, one process per browser "
+    "tab. Commands: `serve` launches the console and `config` manages the "
+    "config file; the meta-verbs learn, explain, overview, and doctor are "
+    "generated from this registry. Exit codes: 0 success, 1 user-input error, "
+    "2 environment/setup error, 3+ reserved. Every command supports --json "
+    "(results to stdout, errors to stderr, never mixed); run "
+    "'irc-lens explain <path>' for per-command docs."
 )
 
+# Doc pages the ``explain`` / HTTP surfaces render. Kept brief and distinct from
+# the docs/ tree (a later task authors the full agent pages); enough for
+# ``explain`` and the sitemap to be useful, and for the doctor sitemap check.
+_ABOUT_DOC = """\
+# About irc-lens
 
-def _hint_for(prog: str, message: str) -> str:
-    """Pick a remediation tailored to the failing parser + message.
+irc-lens is the **lens** CLI for AgentIRC in the Culture ecosystem: a
+read-only-leaning observability console. One process owns one IRC connection
+and serves one browser tab; server-rendered HTML fragments delivered over SSE
+keep the DOM deterministic and Playwright-driveable, so a browser-automation
+agent can drive any AgentIRC server without a human in the loop.
+"""
 
-    The default ``run '<prog> --help' …`` is fine for most cases, but when
-    ``serve`` complains about a missing required arg (now just ``--nick``
-    after the host/port defaults) a concrete example is more useful than a
-    pointer to ``--help``.
+_SERVE_DOC = """\
+# Running the console — `irc-lens serve`
+
+Launch the aiohttp web console against an AgentIRC server. A config file is
+required (`irc-lens config init` writes a starter one).
+
+    irc-lens serve --nick lens
+    irc-lens serve --host irc.example.org --port 6667 --nick ops --open
+
+The server connects to AgentIRC before binding the web port: an unreachable
+AgentIRC exits 1 with `error:` + `hint:` and never binds; a web port already in
+use exits 2. `--bind 0.0.0.0` prints a loud no-auth warning (there is no
+built-in auth in v1). Ctrl-C is the supported shutdown.
+"""
+
+
+def _iter_command_modules() -> tuple[object, ...]:
+    """Yield each command module exposing a ``register_into(app)`` hook.
+
+    The list is **explicit** (no dynamic import). ``serve`` and ``config`` are
+    host commands; ``cli`` is the CLI-introspection noun. The ``overview`` and
+    ``doctor`` meta-verbs are *not* here — agentfront reserves their names, so
+    they are routed by :func:`main` to :mod:`irc_lens.cli._meta` instead.
     """
-    if prog == "irc-lens serve" and "--nick" in message and "required" in message:
-        return _SERVE_NICK_HINT
-    return f"run '{prog} --help' to see valid arguments"
+    from irc_lens.cli._commands import cli_noun, config_cmd, serve
+
+    return (serve, config_cmd, cli_noun)
 
 
-class _ArgumentParser(argparse.ArgumentParser):
-    """ArgumentParser that emits errors via our structured format."""
+def build_app() -> "App":
+    """Assemble the irc-lens :class:`agentfront.app.App` from the registry.
 
-    def error(self, message: str) -> None:  # type: ignore[override]
-        err = AfiError(
-            code=EXIT_USER_ERROR,
-            message=message,
-            remediation=_hint_for(self.prog, message),
-        )
-        emit_error(err, json_mode=_PARSE_JSON_MODE)
-        raise SystemExit(err.code)
+    Registers the doc pages, then invokes every command module's
+    ``register_into(app)`` hook. Side-effect-free beyond constructing the App.
+    """
+    from agentfront.app import App
 
-
-def _build_parser() -> argparse.ArgumentParser:
-    parser = _ArgumentParser(
-        prog="irc-lens",
-        description="irc-lens — agent-first CLI.",
-    )
-    parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {__version__}"
-    )
-    sub = parser.add_subparsers(dest="command")
-
-    _learn_cmd.register(sub)
-    _explain_cmd.register(sub)
-    _overview_cmd.register(sub)
-    _serve_cmd.register(sub)
-
-    # Noun groups. Every noun with action-verbs must also expose `overview`.
-    cli_noun = sub.add_parser(
-        "cli",
-        help="Meta-introspection of the irc-lens CLI surface itself.",
-    )
-    cli_sub = cli_noun.add_subparsers(dest="cli_command")
-    _overview_cmd.register_cli_noun_overview(cli_sub)
-    # `irc-lens cli` with no verb prints the noun's own help instead of
-    # raising AttributeError out of _dispatch.
-    cli_noun.set_defaults(func=lambda _args: (cli_noun.print_help() or 0))
-
-    _config_cmd.register(sub)
-
-    return parser
+    app = App(name="irc-lens", version=__version__, description=_DESCRIPTION)
+    app.add_doc(slug="about", title="About irc-lens", text=_ABOUT_DOC)
+    app.add_doc(slug="serve", title="Running the console", text=_SERVE_DOC)
+    for module in _iter_command_modules():
+        register_into = getattr(module, "register_into", None)
+        if register_into is not None:
+            register_into(app)
+    return app
 
 
-def _dispatch(args: argparse.Namespace) -> int:
-    json_mode = bool(getattr(args, "json", False))
-    try:
-        return args.func(args)
-    except AfiError as err:
-        emit_error(err, json_mode=json_mode)
-        return err.code
-    except Exception as err:  # noqa: BLE001 - last-resort
-        wrapped = AfiError(
-            code=EXIT_USER_ERROR,
-            message=f"unexpected: {err.__class__.__name__}: {err}",
-            remediation="file a bug",
-        )
-        emit_error(wrapped, json_mode=json_mode)
-        return wrapped.code
+def _build_parser() -> "argparse.ArgumentParser":
+    """Return the rendered argparse parser for the assembled App.
+
+    Retained for tests that introspect the ``serve`` subparser's argparse
+    actions; the live entry point (:func:`main`) dispatches through ``run_cli``,
+    not this parser.
+    """
+    from agentfront.cli_surface import make_cli
+
+    return make_cli(build_app())
 
 
 def main(argv: list[str] | None = None) -> int:
-    global _PARSE_JSON_MODE
-    effective_argv = sys.argv[1:] if argv is None else argv
-    _PARSE_JSON_MODE = _argv_requested_json(effective_argv)
-    try:
-        parser = _build_parser()
-        args = parser.parse_args(argv)
-    finally:
-        _PARSE_JSON_MODE = False
-    if args.command is None:
-        parser.print_help()
+    """Dispatch *argv* against the assembled irc-lens App.
+
+    Everything routes through ``agentfront.cli_surface.run_cli`` except the
+    ``overview`` and ``doctor`` meta-verbs (whose ``--json`` contracts agentfront
+    0.20.0's stock verbs can't yet satisfy, and whose names are reserved) and the
+    ``--version`` flag; those are handled here against the same App.
+    """
+    args = list(sys.argv[1:] if argv is None else argv)
+    app = build_app()
+
+    if args[:1] in (["--version"], ["-V"]):
+        sys.stdout.write(f"irc-lens {__version__}\n")
         return 0
-    return _dispatch(args)
+    if args[:1] == ["overview"]:
+        from irc_lens.cli._meta import overview_command
+
+        return overview_command(app, args[1:])
+    if args[:1] == ["doctor"]:
+        from irc_lens.cli._meta import doctor_command
+
+        return doctor_command(app, args[1:])
+
+    from agentfront.cli_surface import run_cli
+
+    return run_cli(app, args)
 
 
 if __name__ == "__main__":

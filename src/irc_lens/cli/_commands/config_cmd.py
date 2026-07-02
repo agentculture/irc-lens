@@ -76,23 +76,51 @@ def cmd_config_overview(_args: argparse.Namespace) -> int:
     return 0
 
 
-def register(sub: argparse._SubParsersAction) -> None:
-    cfg = sub.add_parser(
+_CONFIG_HELP = "Manage the irc-lens config file."
+
+
+def register_into(app) -> None:
+    """Register ``config`` (a noun with ``init`` + ``overview`` verbs).
+
+    Transitional (t3): agentfront's ``App.add_command`` models a host verb, and
+    a noun-with-verbs is expressed as a single host command whose ``configure``
+    hook adds the verb subparsers — the same definitions the old
+    ``register(sub)`` used, so ``config init``/``config overview`` and the
+    bare-``config`` help are byte-compatible. t4 owns the clean migration.
+    """
+    # The parser agentfront builds for us is captured here so the bare-``config``
+    # handler (no verb) can print the noun's help, matching the pre-migration
+    # ``cfg.print_help()`` behaviour.
+    holder: dict[str, argparse.ArgumentParser] = {}
+
+    def configure(cfg: argparse.ArgumentParser) -> None:
+        holder["parser"] = cfg
+        # ``add_subparsers`` inherits the parent parser class (agentfront's
+        # structured-error parser), so ``config <bad-verb>`` still routes
+        # through the error:/hint: contract.
+        cfg_sub = cfg.add_subparsers(dest="config_command")
+
+        init = cfg_sub.add_parser("init", help="Write a starter dev-mode config.")
+        init.add_argument("--path", default=None, help="Override the default config path.")
+        init.add_argument(
+            "--force",
+            action="store_true",
+            help="Overwrite an existing file (default refuses).",
+        )
+        init.set_defaults(func=cmd_config_init)
+
+        overview = cfg_sub.add_parser("overview", help="Help for the config noun.")
+        overview.set_defaults(func=cmd_config_overview)
+
+    def handle_bare(_args: argparse.Namespace) -> int:
+        parser = holder.get("parser")
+        if parser is not None:
+            parser.print_help()
+        return 0
+
+    app.add_command(
         "config",
-        help="Manage the irc-lens config file.",
+        handler=handle_bare,
+        help=_CONFIG_HELP,
+        configure=configure,
     )
-    cfg_sub = cfg.add_subparsers(dest="config_command")
-
-    init = cfg_sub.add_parser("init", help="Write a starter dev-mode config.")
-    init.add_argument("--path", default=None, help="Override the default config path.")
-    init.add_argument(
-        "--force",
-        action="store_true",
-        help="Overwrite an existing file (default refuses).",
-    )
-    init.set_defaults(func=cmd_config_init)
-
-    overview = cfg_sub.add_parser("overview", help="Help for the config noun.")
-    overview.set_defaults(func=cmd_config_overview)
-
-    cfg.set_defaults(func=lambda _args: (cfg.print_help() or 0))

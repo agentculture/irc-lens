@@ -529,27 +529,34 @@ def cmd_serve(args: argparse.Namespace) -> int:
     return 0
 
 
-def register(sub: argparse._SubParsersAction) -> None:
-    p = sub.add_parser(
-        "serve",
-        help="Launch the aiohttp web console against an AgentIRC server.",
-        description=(
-            "Launch the aiohttp web console against an AgentIRC server. "
-            "A config file is required — run 'irc-lens config init' to create one. "
-            "Defaults target a local culture server on 127.0.0.1:6667."
-        ),
-        epilog=(
-            "examples:\n"
-            "  irc-lens serve --nick lens\n"
-            "      Connect to a local AgentIRC (127.0.0.1:6667) and serve the\n"
-            "      web console on http://127.0.0.1:8765/.\n"
-            "  irc-lens serve --nick lens --open\n"
-            "      Same, and auto-launch your default browser at the URL.\n"
-            "  irc-lens serve --host irc.example.org --port 6667 --nick ops\n"
-            "      Point at a remote AgentIRC server.\n"
-        ),
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+_SERVE_HELP = "Launch the aiohttp web console against an AgentIRC server."
+
+
+def _configure_serve(p: argparse.ArgumentParser) -> None:
+    """Add ``serve``'s flags + rich help to the parser agentfront hands us.
+
+    Transitional (t3): agentfront's ``App.add_command`` creates the ``serve``
+    subparser and calls this ``configure`` hook to populate it, so the argument
+    definitions below are the same ones the old ``register(sub)`` used — the CLI
+    surface (flags, defaults, help text) is byte-compatible. t4 owns the full
+    clean migration of this module.
+    """
+    p.description = (
+        "Launch the aiohttp web console against an AgentIRC server. "
+        "A config file is required — run 'irc-lens config init' to create one. "
+        "Defaults target a local culture server on 127.0.0.1:6667."
     )
+    p.epilog = (
+        "examples:\n"
+        "  irc-lens serve --nick lens\n"
+        "      Connect to a local AgentIRC (127.0.0.1:6667) and serve the\n"
+        "      web console on http://127.0.0.1:8765/.\n"
+        "  irc-lens serve --nick lens --open\n"
+        "      Same, and auto-launch your default browser at the URL.\n"
+        "  irc-lens serve --host irc.example.org --port 6667 --nick ops\n"
+        "      Point at a remote AgentIRC server.\n"
+    )
+    p.formatter_class = argparse.RawDescriptionHelpFormatter
     p.add_argument(
         "--config",
         default=None,
@@ -626,4 +633,13 @@ def register(sub: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Emit stderr logs as one JSON object per line.",
     )
-    p.set_defaults(func=cmd_serve)
+
+
+def register_into(app) -> None:
+    """Register ``serve`` as a host command on the agentfront App."""
+    app.add_command(
+        "serve",
+        handler=cmd_serve,
+        help=_SERVE_HELP,
+        configure=_configure_serve,
+    )
