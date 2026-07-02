@@ -5,7 +5,7 @@ Per-phase build plan: `docs/superpowers/plans/2026-04-27-irc-lens-build-plan.md`
 
 ## Runtime topology
 
-```
+```text
 ┌──────────────────────┐      ┌────────────────────────────┐      ┌──────────────────┐
 │ Browser (HTMX + SSE) │ HTTP │ aiohttp.web.Application    │ TCP  │ AgentIRC server  │
 │ lens.js + lens.css   │ ◄──► │   GET /                    │ ◄──► │ (culture mesh)   │
@@ -33,7 +33,7 @@ Per-phase build plan: `docs/superpowers/plans/2026-04-27-irc-lens-build-plan.md`
 
 ## Module layout
 
-```
+```text
 src/irc_lens/
 ├── __init__.py            # __version__ via importlib.metadata
 ├── __main__.py            # python -m irc_lens entry point
@@ -51,11 +51,13 @@ src/irc_lens/
 ├── web/
 │   ├── __init__.py        # public make_app re-export
 │   ├── app.py             # Application factory + client_max_size
-│   ├── routes.py          # get_index / post_input / get_events
+│   ├── routes.py          # get_index / post_input / post_upload / get_media / get_events
+│   ├── media.py           # classify_url + render_message_html + compose_media_message
+│   ├── store.py           # MediaStore (blob-file management + token safety)
 │   ├── render.py          # Jinja2 env + render_index/render_fragment
 │   └── events.py          # format_sse + SessionEvent re-export
 ├── templates/             # *.html.j2 (index + fragments)
-└── static/                # lens.js, lens.css, vendor/
+└── static/                # lens.js, lens.css, media.js, vendor/
 ```
 
 The CLI scaffold (`cli/_errors.py`, `cli/_output.py`, the dispatcher,
@@ -68,12 +70,19 @@ dependency. Divergences from the citation source (the
 `add_listener` hook on the transport, the optional `timestamp`
 kwarg on `MessageBuffer.add`) are tracked in `CITATION.md`.
 
+The app factory (`make_app` in `web/app.py`) stamps security headers
+via a middleware: `Content-Security-Policy` (on HTML documents),
+`X-Content-Type-Options: nosniff`, and `Referrer-Policy: no-referrer`.
+See `docs/security-checklist.md` for the CSP directives and rationale.
+
 ## Request shapes
 
 | Route | Verb | Body | Response |
 | --- | --- | --- | --- |
 | `/` | `GET` | — | 200 HTML (`render_index`). |
 | `/input` | `POST` | JSON `{"text": "..."}` *or* form-encoded `text=...` | 204 success, 400 bad JSON, 413 oversize, 503 unhealthy. |
+| `/upload` | `POST` | multipart/form-data `file` field | 201 `{"url": "...", "kind": "image\|audio"}`, 400 bad type, 413 oversize, 403 origin mismatch, 404 media disabled. |
+| `/media/{token}.{ext}` | `GET` | — | 200 blob (auth-exempt capability URL), 404 unknown token, 404 media disabled. |
 | `/events` | `GET` | — | 200 SSE stream (`text/event-stream`, `Cache-Control: no-store`). |
 | `/static/{path}` | `GET` | — | Vendored assets + `lens.js` / `lens.css`. |
 
@@ -207,6 +216,27 @@ line numbers rot.
 case so SonarCloud's S7503 rule clears for the inner body. The
 outer `_exec_*` methods accept S7503 with the dispatch-contract
 rationale.
+
+### Why media URLs, not inline bytes
+
+AgentIRC's `MAX_INBOUND_LINE` (8192 bytes) rejects inbound lines that
+exceed it; even a tiny image as a base64 data URI exceeds that on one
+line. The IRCv3 `batch` and `draft/multiline` caps that could carry
+inline bytes are explicitly deferred by AgentIRC's accessibility spec.
+A short `http(s)` URL in a PRIVMSG needs zero protocol work and leaves
+the protocol-side improvements (media tag hint, cross-machine
+reachability) as clean, optional follow-ups.
+
+### Why GET /media/ is auth-exempt capability URLs
+
+Auth-gating media would mean only browser humans could view it — agents
+have no CF/JWT identity, so the "agents see images" payoff would wait
+on sibling-repo credential work. Unguessable-token URLs (128-bit
+`secrets.token_urlsafe(16)`) match the IRC trust model: the URL is only
+ever disclosed inside a channel, so possession of the URL means you saw
+it there. Uploads remain authed. In cloudflare-access mode, Cloudflare
+Access still fronts the tunnel in front of everything. Ratified
+2026-07-02.
 
 ## Vendored frontend assets
 

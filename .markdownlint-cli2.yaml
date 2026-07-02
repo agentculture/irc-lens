@@ -1,0 +1,13 @@
+# Project-level markdownlint-cli2 configuration for irc-lens
+# Extends global config (~/.markdownlint-cli2.yaml)
+
+config:
+  default: true
+  # MD013: Line length — disabled for content-heavy documentation
+  MD013: false
+  # MD024: Duplicate headings — allowed for changelog sections
+  MD024: false
+  # MD060: Table pipe spacing — disabled (stylistic preference)
+  MD060: false
+  # MD040: Code block language — opt-in (already strict in most files)
+  MD040: true

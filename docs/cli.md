@@ -33,7 +33,7 @@ deliberately — line numbers rot.
 
 Every failure renders on stderr as:
 
-```
+```text
 error: <message>
 hint: <remediation>
 ```
@@ -85,7 +85,9 @@ irc-lens cli overview
 irc-lens reads `~/.config/irc-lens/config.yaml` by default (override with
 `--config <path>`, respecting `$XDG_CONFIG_HOME`). Initialize with:
 
-    irc-lens config init
+```bash
+irc-lens config init
+```
 
 The starter file is in `auth.mode: dev`, suitable for a local AgentIRC
 on `127.0.0.1:6667`. To deploy behind Cloudflare Access, switch
@@ -185,3 +187,32 @@ Validation rules:
 
 Errors raise `AfiError` per the exit-code policy above. The
 canonical fixture lives at `tests/fixtures/basic.yaml`.
+
+### `media` section
+
+Optional media configuration (absent section = defaults, feature on):
+
+| Field | Default | Validation | Purpose |
+| --- | --- | --- | --- |
+| `enabled` | `true` | boolean | Enable/disable media uploads and serving. |
+| `dir` | `$XDG_DATA_HOME/irc-lens/media` | string path | Local blob-store directory. |
+| `max_file_bytes` | `10485760` (10 MiB) | integer, ≥ 1 | Per-upload size cap in bytes. |
+| `max_store_bytes` | `268435456` (256 MiB) | integer, ≥ 1 | Total store cap; enforces `max_file_bytes <= max_store_bytes`. |
+| `public_base_url` | `http://<web.bind>:<web.port>` | string URL or empty | Advertised base for capability links (set for cross-machine peers). Must start with `http://` or `https://` when non-empty. |
+| `remote_embeds` | `click` | `click` \| `auto` \| `off` | How remote (non-lens-hosted) media URLs render: click-to-load, auto-embed, or plain links. |
+| `trusted_hosts` | `[]` | list of hostnames | Hosts that auto-embed even when `remote_embeds: click`. |
+
+Example:
+
+```yaml
+media:
+  enabled: true
+  dir: ~/.local/share/irc-lens/media
+  max_file_bytes: 10485760
+  max_store_bytes: 268435456
+  public_base_url: https://lens.example.com
+  remote_embeds: click
+  trusted_hosts:
+    - cdn.example.com
+    - images.example.org
+```

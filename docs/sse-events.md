@@ -18,7 +18,9 @@ and streamed to subscribers. Each subscriber owns a bounded queue
 
 The `view` and `error` payloads are spec-strict (handover-design
 spec lines 162–163) — additional fields are intentionally not
-emitted to keep the contract tight.
+emitted to keep the contract tight. Chat fragments may now contain a
+`.lens-media` block when the message text includes media URLs; no new
+SSE event types are introduced by media rendering.
 
 ## Publish points
 
@@ -40,7 +42,7 @@ Source: `src/irc_lens/session.py`.
 
 `format_sse` produces one event block per `SessionEvent`:
 
-```
+```text
 event: <name>
 data: <line 1>
 data: <line 2>
@@ -69,6 +71,11 @@ pinned by `tests/test_render.py`.
 | `[data-testid="chat-line"]` | `_chat_line.html.j2` | One rendered chat line (timestamp + nick + text spans). |
 | `[data-testid="chat-line-nick"]` | `_chat_line.html.j2` | Nick span. |
 | `[data-testid="chat-line-text"]` | `_chat_line.html.j2` | Text span. |
+| `[data-testid="media-embed"]` | `_chat_line.html.j2`, `media.js` | Direct `<img>` or `<audio>` embed; on click-to-load placeholder replacement. |
+| `[data-testid="media-placeholder"]` | `_chat_line.html.j2` | Click-to-load placeholder card for remote media. |
+| `[data-testid="media-attach"]` | `index.html.j2` | Attach button (opens hidden file picker). |
+| `[data-testid="media-file-input"]` | `index.html.j2` | Hidden file input element. |
+| `[data-testid="media-record"]` | `index.html.j2` | Mic recording button (idle → recording → uploading). |
 | `[data-testid="chat-input"]` | `index.html.j2` | The input element (also `id="chat-input"`). |
 | `[data-testid="chat-submit"]` | `index.html.j2` | Submit button. |
 | `[data-testid="info"]` | `index.html.j2` | Info-pane container `#info`. |

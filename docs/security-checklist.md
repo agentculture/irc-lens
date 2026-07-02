@@ -32,6 +32,31 @@ item is a yes/no.
 - [ ] cloudflared and irc-lens both run as a non-root user.
 - [ ] cloudflared's `tunnel-credentials` file is `chmod 600`.
 
+## Media
+
+- [ ] Capability-URL model: `GET /media/{token}` is auth-exempt by design.
+      Unguessable 128-bit tokens (via `secrets.token_urlsafe(16)`) are
+      the capability — possession of the URL means you saw it in the
+      channel (IRC trust model). Uploads (`POST /upload`) remain
+      authenticated; CF Access still gates the tunnel in front.
+- [ ] CSP headers: set on HTML documents:
+      `default-src 'self'; script-src 'self'; img-src 'self' https: http:; media-src 'self' https: http:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'`.
+      The load-bearing directives are `script-src` / `object-src`;
+      `img-src` / `media-src` stay broad because mesh peers advertise
+      plain-HTTP LAN URLs and click-to-load is the actual gate.
+- [ ] Security headers on all responses: `X-Content-Type-Options: nosniff`
+      and `Referrer-Policy: no-referrer`.
+- [ ] Media store size caps are enforced: `max_file_bytes` (default
+      10 MiB) per upload, `max_store_bytes` (default 256 MiB) for
+      eviction; oldest files by mtime are evicted past the store cap.
+- [ ] Upload validation: magic-byte sniff + extension-allowlist
+      agreement (PNG, JPG, GIF, WebP for images; MP3, OGG, WAV, WebM,
+      M4A, FLAC for audio). SVG is deliberately excluded (stored-XSS
+      vector on auth-exempt origin). Bad type → 400 error.
+- [ ] `media.public_base_url` must be set to an `http(s)` URL for
+      cross-machine viewers to fetch blobs. Leave empty for same-host
+      only (defaults to `http://<web.bind>:<web.port>`).
+
 ## Operational
 
 - [ ] Logs are persisted somewhere auditable (systemd journal is
