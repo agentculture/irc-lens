@@ -30,6 +30,7 @@ from irc_lens.cli._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.cli._output import emit_error, emit_result
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
+    from agentfront._registry import ToolEntry
     from agentfront.app import App
     from agentfront.doctor_live import Check
 
@@ -124,6 +125,21 @@ def _nouns_md(app: "App") -> str:
     )
 
 
+def _top_level_tools(app: "App") -> list["ToolEntry"]:
+    """Ungrouped (bare-verb) tools — e.g. t5's live-verb catalog
+    (``send``/``join``/...). Distinct from :func:`_nouns`, which only
+    covers *grouped* tools; before t5 registered the first ungrouped
+    tools, irc-lens had none, so this gap was invisible."""
+    return [t for t in app.list_tools() if not t.group]
+
+
+def _top_level_tools_md(app: "App") -> str:
+    tools = _top_level_tools(app)
+    if not tools:
+        return "_(none registered)_"
+    return "\n".join(f"- `{app.name} {t.name}` — {t.description}" for t in tools)
+
+
 def _docs_md(app: "App") -> str:
     docs = app.list_docs()
     if not docs:
@@ -140,6 +156,7 @@ def _all_sections(app: "App") -> list[dict[str, str]]:
         {"heading": app.name, "body_md": (app.description or "").strip()},
         {"heading": "Meta-verbs", "body_md": _meta_md(app)},
         {"heading": "Commands", "body_md": _commands_md(app)},
+        {"heading": "Tools", "body_md": _top_level_tools_md(app)},
         {"heading": "Nouns", "body_md": _nouns_md(app)},
         {"heading": "Docs", "body_md": _docs_md(app)},
     ]
@@ -154,6 +171,14 @@ def _scoped_sections(app: "App", head: str) -> Optional[list[dict[str, str]]]:
     for cmd in app.list_commands():
         if cmd.name == head:
             return [{"heading": f"{app.name} {head}", "body_md": cmd.help}]
+    for tool in _top_level_tools(app):
+        if tool.name == head:
+            return [
+                {
+                    "heading": f"{app.name} {head}",
+                    "body_md": tool.description or "_(no description)_",
+                }
+            ]
     return None
 
 
