@@ -315,8 +315,14 @@ def test_media_js_stops_stream_tracks_when_recording_ends() -> None:
 
 def test_media_js_record_button_reuses_upload_and_send_path() -> None:
     """The finished recording is sent through the SAME upload-then-send
-    path t8 built (window.LensMedia.uploadAndSend) — no duplicated
-    /input POST logic in the recording IIFE."""
+    path t8 built (globalThis.LensMedia.uploadAndSend) — no duplicated
+    /input POST logic in the recording IIFE.
+
+    Pin updated deliberately: media.js moved off `window.` for its module
+    namespace per SonarCloud S7764 (prefer globalThis over window), so
+    this docstring now names the accessor the code actually uses.
+    # SonarCloud S7764: window -> globalThis
+    """
     js = _read_media_js()
     assert "LensMedia" in js, (
         "media.js must reuse the shared LensMedia.uploadAndSend helper"
@@ -336,4 +342,77 @@ def test_index_html_has_record_button() -> None:
     html = _read_index_html()
     assert 'data-testid="media-record"' in html, (
         "index.html.j2 must add the record button"
+    )
+
+
+# ---------------------------------------------------------------------------
+# SonarCloud cleanup pins (media.js style/quality fixes, no behavior change).
+# ---------------------------------------------------------------------------
+
+
+def test_media_js_has_single_toast_implementation() -> None:
+    """SonarCloud S4144 (duplicate function implementation): the upload
+    IIFE (t8) and the recording IIFE (t9) used to each define an
+    identical `toast` helper. The fix keeps exactly ONE implementation —
+    `showToast`, defined once in the upload IIFE and exposed on
+    `globalThis.LensMedia.showToast` — and has the recording IIFE reuse
+    it via a local alias instead of redefining it. This pins that there
+    is exactly one function body for the toast helper."""
+    js = _read_media_js()
+    assert js.count("function showToast(") == 1, (
+        "media.js must define the toast helper exactly once (S4144 dedup)"
+    )
+    assert "function toast(" not in js, (
+        "media.js must not keep the old duplicated `toast` function name"
+    )
+    assert "globalThis.LensMedia.showToast" in js, (
+        "the recording IIFE must reuse the shared showToast via globalThis.LensMedia"
+    )
+    assert "showToast: showToast" in js, (
+        "the upload IIFE must expose showToast on globalThis.LensMedia"
+    )
+
+
+def test_media_js_uses_globalthis_not_window() -> None:
+    """SonarCloud S7764 (prefer globalThis over window): media.js's
+    module-namespace references (`LensMedia`) must go through
+    `globalThis`, matching the fix already applied to mesh.js
+    (`globalThis.LensMesh`). No bare `window.` reference should remain.
+    # SonarCloud S7764: window -> globalThis
+    """
+    js = _read_media_js()
+    assert "window." not in js, (
+        "media.js must not reference window. — use globalThis instead (S7764)"
+    )
+    assert "globalThis.LensMedia" in js, (
+        "media.js must expose/consume its namespace via globalThis.LensMedia"
+    )
+
+
+def test_media_js_paste_loop_uses_for_of() -> None:
+    """SonarCloud S4138 (prefer for-of): the clipboard-items paste loop
+    never used its index for anything but `items[i]`, so it's a for-of
+    candidate. Pins that the classic indexed loop is gone."""
+    js = _read_media_js()
+    assert "for (const item of items)" in js, (
+        "media.js must iterate clipboard items via for-of (S4138)"
+    )
+    assert "for (let i = 0; i < items.length; i++)" not in js, (
+        "media.js must not keep the old indexed loop over clipboard items"
+    )
+
+
+def test_media_js_catch_blocks_use_underscore_bound_param() -> None:
+    """SonarCloud S2486 (handle exception or don't catch): media.js's
+    best-effort catch blocks (fetch/JSON/getUserMedia/MediaRecorder) keep
+    their swallow semantics but bind the exception as `_err` with a
+    short comment documenting why it's ignored, rather than an
+    unreferenced `err` binding."""
+    js = _read_media_js()
+    assert js.count("catch (_err)") == 5, (
+        "media.js must have exactly 5 best-effort catch blocks bound as "
+        "_err with a documenting comment (S2486)"
+    )
+    assert "catch (err)" not in js, (
+        "media.js must not leave plain unused `err` catch bindings (S2486)"
     )

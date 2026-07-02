@@ -76,7 +76,10 @@
   const attachButton = document.querySelector('[data-testid="media-attach"]');
   const fileInput = document.querySelector('[data-testid="media-file-input"]');
 
-  function toast(message) {
+  // S4144: the ONE toast implementation in this file. Exposed below via
+  // globalThis.LensMedia.showToast so the recording IIFE (task t9) reuses
+  // it instead of redefining an identical copy.
+  function showToast(message) {
     const toasts = document.getElementById("toast-region");
     if (!toasts) return;
     toasts.setAttribute("aria-live", "assertive");
@@ -99,20 +102,21 @@
     let resp;
     try {
       resp = await fetch("/upload", { method: "POST", body });
-    } catch (err) {
-      toast("upload failed: network error");
+    } catch (_err) {
+      // best-effort: fetch failed; toast covers it, _err not actionable. (S2486)
+      showToast("upload failed: network error");
       return;
     }
     if (resp.status !== 201) {
       let payload = {};
       try {
         payload = await resp.json();
-      } catch (err) {
-        // Non-JSON error body — fall back to the status-only message.
+      } catch (_err) {
+        // best-effort: non-JSON error body; fall back to status-only. (S2486)
       }
       let msg = payload.error || "upload failed (" + resp.status + ")";
       if (payload.hint) msg += " — " + payload.hint;
-      toast(msg);
+      showToast(msg);
       return;
     }
     const data = await resp.json();
@@ -120,17 +124,17 @@
     form.requestSubmit();
   }
 
-  // Expose the upload-then-send helper so other media.js modules (task
-  // t9's mic-recording IIFE below) can reuse the exact same send path
-  // instead of duplicating it — mirrors how mesh.js exposes
-  // `window.LensMesh`.
-  window.LensMedia = { uploadAndSend: uploadAndSend };
+  // Expose the upload-then-send helper and the shared toast helper so
+  // other media.js modules (task t9's mic-recording IIFE below) can reuse
+  // them instead of duplicating — mirrors how mesh.js exposes
+  // `globalThis.LensMesh` (S7764: globalThis, not window).
+  globalThis.LensMedia = { uploadAndSend: uploadAndSend, showToast: showToast };
 
   // Attach button opens the hidden file picker; picking a file uploads it.
   if (attachButton && fileInput) {
     attachButton.addEventListener("click", () => fileInput.click());
     fileInput.addEventListener("change", () => {
-      const file = fileInput.files && fileInput.files[0];
+      const file = fileInput.files?.[0];
       fileInput.value = ""; // reset so re-picking the same file still fires change
       if (file) uploadAndSend(file);
     });
@@ -142,8 +146,8 @@
     chatArea.addEventListener("dragover", (e) => e.preventDefault());
     chatArea.addEventListener("drop", (e) => {
       e.preventDefault();
-      const files = e.dataTransfer && e.dataTransfer.files;
-      const file = files && files[0];
+      const files = e.dataTransfer?.files;
+      const file = files?.[0];
       if (file) uploadAndSend(file);
     });
   }
@@ -151,10 +155,10 @@
   // Paste an image while focused on the message input.
   if (input) {
     input.addEventListener("paste", (e) => {
-      const items = e.clipboardData && e.clipboardData.items;
+      const items = e.clipboardData?.items;
       if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
+      // S4138: for-of, since the index was only ever used for items[i].
+      for (const item of items) {
         if (item.kind === "file" && item.type.startsWith("image/")) {
           const file = item.getAsFile();
           if (file) {
@@ -171,8 +175,8 @@
 // irc-lens mic recording (task t9): getUserMedia + MediaRecorder capture.
 // Button-text states: idle -> recording (elapsed seconds, click again to
 // stop) -> uploading -> idle. Hard-caps at 300s, closes every stream
-// track on stop, and sends the file via window.LensMedia.uploadAndSend —
-// the SAME send path file uploads use above, so there's only one.
+// track on stop, and sends the file via globalThis.LensMedia.uploadAndSend
+// — the SAME send path file uploads use above, so there's only one.
 (function () {
   "use strict";
 
@@ -190,17 +194,10 @@
   let elapsedSeconds = 0;
   let recordingExt = "webm";
 
-  function toast(message) {
-    const toasts = document.getElementById("toast-region");
-    if (!toasts) return;
-    toasts.setAttribute("aria-live", "assertive");
-    const el = document.createElement("div");
-    el.className = "lens-toast lens-toast--error";
-    el.setAttribute("role", "alert");
-    el.textContent = message;
-    toasts.appendChild(el);
-    setTimeout(() => el.remove(), 4000);
-  }
+  // S4144: no local toast copy here — reuse the single implementation the
+  // upload IIFE above exposes on globalThis.LensMedia.showToast.
+  const toast = globalThis.LensMedia.showToast;
+
   function stopStreamTracks() {
     if (!activeStream) return;
     activeStream.getTracks().forEach((track) => track.stop());
@@ -221,8 +218,7 @@
   function pickMimeType() {
     const supportsOpus =
       typeof MediaRecorder !== "undefined" &&
-      MediaRecorder.isTypeSupported &&
-      MediaRecorder.isTypeSupported(OPUS_MIME);
+      MediaRecorder.isTypeSupported?.(OPUS_MIME);
     return supportsOpus
       ? { mimeType: OPUS_MIME, ext: "webm" }
       : { mimeType: "audio/mp4", ext: "m4a" };
@@ -232,16 +228,17 @@
     stopStreamTracks();
     state = "uploading";
     recordButton.textContent = "uploading…";
-    const mimeType = (mediaRecorder && mediaRecorder.mimeType) || "audio/webm";
+    const mimeType = mediaRecorder?.mimeType || "audio/webm";
     const blob = new Blob(chunks, { type: mimeType });
     chunks = [];
     const filename = recordingExt === "webm" ? "recording.webm" : "recording.m4a";
     const file = new File([blob], filename, { type: mimeType });
     try {
-      if (window.LensMedia && window.LensMedia.uploadAndSend) {
-        await window.LensMedia.uploadAndSend(file);
+      if (globalThis.LensMedia?.uploadAndSend) {
+        await globalThis.LensMedia.uploadAndSend(file);
       }
-    } catch (err) {
+    } catch (_err) {
+      // best-effort: upload-after-recording failed; toast covers it. (S2486)
       toast("recording upload failed: network error");
     } finally {
       resetToIdle();
@@ -260,14 +257,15 @@
   }
 
   async function startRecording() {
-    const noApi = typeof MediaRecorder === "undefined" || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia;
+    const noApi = typeof MediaRecorder === "undefined" || !navigator.mediaDevices?.getUserMedia;
     if (noApi) {
       toast("recording failed — hint: this browser has no mic/MediaRecorder support");
       return;
     }
     try {
       activeStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (err) {
+    } catch (_err) {
+      // best-effort: getUserMedia rejected (e.g. permission denied). (S2486)
       toast("recording failed — hint: microphone permission was denied");
       return;
     }
@@ -275,7 +273,8 @@
     recordingExt = chosen.ext;
     try {
       mediaRecorder = new MediaRecorder(activeStream, { mimeType: chosen.mimeType });
-    } catch (err) {
+    } catch (_err) {
+      // best-effort: MediaRecorder construction failed; clean up and toast. (S2486)
       stopStreamTracks();
       toast("recording failed — hint: could not start MediaRecorder");
       return;
