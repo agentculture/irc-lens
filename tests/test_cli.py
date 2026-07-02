@@ -85,6 +85,38 @@ def test_overview_graceful_on_bad_path(
     assert "warning" in out.lower()
 
 
+def test_overview_lists_top_level_tools(capsys: pytest.CaptureFixture[str]) -> None:
+    """t5 registered irc-lens's first ungrouped (top-level) tools — the
+    live-verb catalog (send/join/...). Before that, ``_nouns_md`` (which
+    only covers *grouped* tools) was the whole registry-derived listing,
+    so a top-level tool had nowhere to surface in ``overview`` at all.
+    Regression guard for that gap: every live verb must appear in the
+    rollup's own dedicated ``Tools`` section, not just ``learn``."""
+    assert main(["overview"]) == 0
+    out = capsys.readouterr().out
+    assert "## Tools" in out
+    for verb in ("send", "join", "part", "read", "channels", "who", "mesh", "switch", "topic", "me", "icon"):
+        assert f"`irc-lens {verb}`" in out, f"overview's Tools section is missing {verb!r}"
+
+
+def test_overview_scopes_to_a_top_level_tool(capsys: pytest.CaptureFixture[str]) -> None:
+    """``overview <tool-name>`` for a real ungrouped tool must return that
+    tool's own scoped section, not fall through to the "unknown path"
+    warning branch — it is not an unknown path."""
+    assert main(["overview", "send"]) == 0
+    out = capsys.readouterr().out
+    assert "warning" not in out.lower()
+    assert "irc-lens send" in out
+
+
+def test_overview_json_scopes_to_a_top_level_tool(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["overview", "send", "--json"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["subject"] == "send"
+    assert len(payload["sections"]) == 1
+    assert payload["sections"][0]["heading"] == "irc-lens send"
+
+
 def test_doctor_exits_zero_when_healthy(capsys: pytest.CaptureFixture[str]) -> None:
     """`doctor` audits the derived surfaces; a healthy app exits 0."""
     rc = main(["doctor"])

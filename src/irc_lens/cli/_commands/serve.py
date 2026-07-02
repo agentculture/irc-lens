@@ -46,7 +46,7 @@ from aiohttp import web
 
 from irc_lens.cli._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
 from irc_lens.cli._output import emit_diagnostic
-from irc_lens.config import LensConfig, default_config_path, load_config
+from irc_lens.config import LensConfig, resolve_config
 from irc_lens.session import LensConnectionLost, Session
 from irc_lens.web import make_app
 from irc_lens.web.auth import warm_jwks
@@ -158,35 +158,13 @@ def _validate_cli_against_config(
 def _resolve_config(args: argparse.Namespace) -> LensConfig:
     """Load a LensConfig from ``--config`` or the default path.
 
-    The config file is required (T4.4). If the user passes ``--config
-    <path>`` that path must exist. If no ``--config`` is given, the default
-    location (``~/.config/irc-lens/config.yaml``) must exist. Either way,
-    a missing file exits 1 with ``error:`` / ``hint:`` pointing at
-    ``irc-lens config init``.
+    The config file is required (T4.4). Thin wrapper around
+    :func:`irc_lens.config.resolve_config` — the shared helper t5's
+    live-verb tools (:mod:`irc_lens.tools`) also use, so the two surfaces
+    raise byte-identical ``error:``/``hint:`` text for the same
+    missing-config cases.
     """
-    if args.config:
-        explicit = Path(args.config)
-        if not explicit.exists():
-            raise AfiError(
-                code=EXIT_USER_ERROR,
-                message=f"--config {args.config!r} does not exist",
-                remediation=(
-                    "fix the path, or run `irc-lens config init "
-                    f"--path {args.config}` to drop a starter config there"
-                ),
-            )
-        return load_config(explicit)
-    default = default_config_path()
-    if not default.exists():
-        raise AfiError(
-            code=EXIT_USER_ERROR,
-            message=f"no config at {default}",
-            remediation=(
-                "run 'irc-lens config init' to create one, "
-                "or pass --config <path>"
-            ),
-        )
-    return load_config(default)
+    return resolve_config(args.config)
 
 
 def _public_base_origin(base_url: str) -> tuple[str, str, int] | None:
