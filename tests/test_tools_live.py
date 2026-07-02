@@ -233,6 +233,23 @@ def test_bad_channel_format_exits_user_error(dev_config_path) -> None:
     assert "Traceback" not in result.stderr
 
 
+def test_mesh_bad_channel_format_exits_user_error(dev_config_path) -> None:
+    """`mesh` validates channel names like `join` does (qodo PR #51 review:
+    `Session.join` silently no-ops on non-`#` names, so without up-front
+    validation `mesh dev` would "succeed" with an incomplete graph)."""
+    result = _run(["mesh", "dev"], dev_config_path)
+    assert result.exit_code == 1
+    assert "invalid channel" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
+def test_mesh_mixed_channel_list_rejects_invalid_entry(dev_config_path) -> None:
+    result = _run(["mesh", "#agora dev"], dev_config_path)
+    assert result.exit_code == 1
+    assert "invalid channel" in result.stderr
+    assert "dev" in result.stderr
+
+
 def test_unreachable_server_exits_env_error(tmp_path, fake_server: ThreadedAgentIRCTestServer) -> None:
     """A server that refuses the connection maps to EXIT_ENV_ERROR (2) —
     an environment failing to deliver an existing resource, per this

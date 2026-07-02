@@ -246,11 +246,21 @@ def _split_channels(raw: str) -> list[str]:
 
     Blank entries are dropped; order and duplicates are preserved (the
     caller joins each in order, so a duplicate is a harmless no-op
-    re-join). No format validation here — ``Session.join`` already no-ops
-    silently on a non-``#`` entry, matching its existing permissive
-    contract for the direct (non-``_exec_join``) join path.
+    re-join). Every entry is format-validated up front: ``Session.join``
+    silently no-ops on a non-``#`` name (its permissive direct-path
+    contract), which would let ``mesh dev`` "succeed" with an incomplete
+    graph — inconsistent with ``join``/``switch``, which surface an
+    ``invalid channel`` error for the same input (qodo PR #51 review).
     """
-    return [c.strip() for c in raw.replace(",", " ").split() if c.strip()]
+    channels_list = [c.strip() for c in raw.replace(",", " ").split() if c.strip()]
+    for ch in channels_list:
+        if not ch.startswith("#"):
+            raise AfiError(
+                EXIT_USER_ERROR,
+                f"invalid channel: {ch} (must start with #)",
+                "channel names start with '#', e.g. '#agora'",
+            )
+    return channels_list
 
 
 # ---------------------------------------------------------------------------

@@ -163,7 +163,9 @@ uv run pytest -q
 
 `requires-python = ">=3.12"` (`pyproject.toml`). Linting:
 `flake8`, `pylint`, `bandit -r src/`, `black`, `isort`. Markdown via
-`markdownlint-cli2` (global config at `~/.markdownlint-cli2.yaml`).
+`markdownlint-cli2 "path/to/file.md"` (picks up whatever markdownlint
+config is active on the machine; the repo commits none and CI runs no
+markdown lint gate).
 
 ## Versioning and PR conventions
 
