@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-07-03
+
+### Fixed
+
+- Retired the one-shot `test_adoption_diff_does_not_touch_forbidden_paths`
+  boundary guard from `tests/test_adoption_boundaries.py`. It asserted the
+  agentfront-adoption branch had a nonempty `git diff main...HEAD`; once
+  PR #51 merged into `main` that diff became empty and the test failed on
+  `main`. The remaining boundary guards (media auth-exempt paths,
+  no afi-scaffolding references) are unaffected.
+
 ## [0.9.0] - 2026-07-02
 
 ### Added
