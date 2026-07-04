@@ -11,10 +11,37 @@
      numeric `timestamp` + strftime filter. Without that guard, a parse
      failure would call `strftime` with an undefined value. #}
   <span class="lens-chat-ts">{{ msg.ts_display if msg.ts_display is defined else (msg.timestamp|strftime) }}</span>
+  {# `msg.text` renders through the `linkify` filter (media.render_message_html):
+     escape-first, then wrap any http(s) URL in an `<a>` — see
+     docs/superpowers/specs/2026-07-02-media-support-design.md
+     ("Rendering path"). The filter returns a Markup, so autoescape does
+     not double-escape it; a plain non-URL string round-trips exactly as
+     `{{ msg.text }}` used to render it. #}
   {% if msg.kind == 'action' %}
-    <span data-testid="chat-line-text" class="lens-chat-text">* {{ msg.nick }} {{ msg.text }}</span>
+    <span data-testid="chat-line-text" class="lens-chat-text">* {{ msg.nick }} {{ msg.text|linkify }}</span>
   {% else %}
     <span data-testid="chat-line-nick" class="lens-chat-nick">{{ msg.nick }}</span>
-    <span data-testid="chat-line-text" class="lens-chat-text">{{ msg.text }}</span>
+    <span data-testid="chat-line-text" class="lens-chat-text">{{ msg.text|linkify }}</span>
+  {% endif %}
+  {# `media_embed_prefixes`/`media_remote_embeds` are optional context
+     vars — session.py/render.py thread them through from Session's
+     matching state; direct calls to render_fragment (e.g. existing
+     tests) that omit them fall back to "no lens-hosted prefixes" /
+     "click" mode, which is also Session's own default. #}
+  {% set _media_prefixes = media_embed_prefixes if media_embed_prefixes is defined else () %}
+  {% set _media_mode = media_remote_embeds if media_remote_embeds is defined else "click" %}
+  {% set media = media_items(msg.text, _media_prefixes, _media_mode) %}
+  {% if media %}
+  <div class="lens-media">
+    {% for item in media %}
+      {% if item.direct and item.kind == 'image' %}
+        <img class="lens-media-item" src="{{ item.url }}" loading="lazy" data-testid="media-embed" data-kind="image">
+      {% elif item.direct and item.kind == 'audio' %}
+        <audio class="lens-media-item" controls preload="metadata" src="{{ item.url }}" data-testid="media-embed" data-kind="audio"></audio>
+      {% else %}
+        <button type="button" class="lens-media-load" data-testid="media-placeholder" data-src="{{ item.url }}" data-kind="{{ item.kind }}">Load {{ item.kind }}</button>
+      {% endif %}
+    {% endfor %}
+  </div>
   {% endif %}
 </div>

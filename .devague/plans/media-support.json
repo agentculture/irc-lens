@@ -1,0 +1,365 @@
+{
+  "slug": "media-support",
+  "title": "media support",
+  "frame_slug": "media-support",
+  "schema_version": 1,
+  "status": "exported",
+  "created": "2026-07-02T06:00:11Z",
+  "updated": "2026-07-02T06:04:57Z",
+  "targets": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "irc-lens ships image and audio support: media URLs render inline in the chat console (click-to-load for remote hosts), and the console can send media via file upload, drag-drop, paste, and mic recording \u2014 blobs hosted by the lens and shared as links over the mesh"
+    },
+    {
+      "id": "h6",
+      "kind": "honesty",
+      "text": "the announcement is honest only if both directions work end-to-end in the console: media URLs render (image embed visible, audio playable) AND all four input paths (picker, drag-drop, paste, mic) produce a playable/viewable message in-channel"
+    },
+    {
+      "id": "c6",
+      "kind": "audience",
+      "text": "humans using the lens console, and mesh agents that will fetch media URLs from channel messages (agent-side model input is the cultureagent follow-up)"
+    },
+    {
+      "id": "h7",
+      "kind": "honesty",
+      "text": "both constituencies are actually served in v1: humans get the console UX, and same-machine agents can fetch a posted media URL with no credentials (capability URL, no auth header)"
+    },
+    {
+      "id": "c7",
+      "kind": "after_state",
+      "text": "a channel member sees images and plays audio inline in the console, and a human can share a screenshot or voice note into a channel without leaving the lens"
+    },
+    {
+      "id": "h8",
+      "kind": "honesty",
+      "text": "a Playwright run shows an image embed visible and an audio element playable inside the chat log, and a share initiated from the console lands as an ordinary channel message"
+    },
+    {
+      "id": "c8",
+      "kind": "before_state",
+      "text": "chat is text-only everywhere: no media concept exists in irc-lens, agentirc, or cultureagent (verified in the 2026-07-02 scope sweep \u2014 no attachment verb, no blob store, no unfurl logic)"
+    },
+    {
+      "id": "h9",
+      "kind": "honesty",
+      "text": "the sweep finding still holds at implementation time: no media/attachment/upload concept exists in agentirc, cultureagent, or irc-lens main branches before this feature lands"
+    },
+    {
+      "id": "c9",
+      "kind": "why_it_matters",
+      "text": "agents and humans in the mesh can collaborate on visual and audio artifacts (screenshots, charts, voice notes) instead of describing them in prose"
+    },
+    {
+      "id": "h10",
+      "kind": "honesty",
+      "text": "sharing an artifact requires no tool outside the lens: no external image host is needed for a same-machine viewer to see it"
+    },
+    {
+      "id": "c10",
+      "kind": "boundary",
+      "text": "no inline media bytes on the IRC wire: agentirc rejects inbound lines over 8192 bytes (MAX_INBOUND_LINE, constants.py) and batch/multiline caps are explicitly deferred by agentirc's 2026-07-01 accessibility spec"
+    },
+    {
+      "id": "h11",
+      "kind": "honesty",
+      "text": "no code path in irc-lens sends media bytes on the IRC wire: posted messages carry only http(s) URLs and every generated message line stays under the 8192-byte inbound cap"
+    },
+    {
+      "id": "c11",
+      "kind": "boundary",
+      "text": "no SVG uploads: an SVG served from the auth-exempt /media/ route executes scripts on the lens origin when navigated directly \u2014 raster formats only (spec decision log)"
+    },
+    {
+      "id": "h12",
+      "kind": "honesty",
+      "text": "the upload allowlist excludes SVG and a crafted SVG upload is rejected 400 with {error, hint} \u2014 pinned by a test"
+    },
+    {
+      "id": "c14",
+      "kind": "requirement",
+      "text": "rendering: a new web/media.py does escape-first-then-linkify on chat text (http/https only) and classifies media URLs by extension allowlist; lens-hosted media embeds directly, remote media renders a click-to-load card per decision c3; ships in the existing chat/log SSE fragments unchanged"
+    },
+    {
+      "id": "h1",
+      "kind": "honesty",
+      "text": "no raw user text ever passes through |safe \u2014 injected markup is built only from escaped components, and the pinned autoescape test (test_render.py chat-line XSS guard) stays green"
+    },
+    {
+      "id": "c15",
+      "kind": "requirement",
+      "text": "security headers land with rendering: CSP (script-src 'self', object-src 'none'), X-Content-Type-Options nosniff, Referrer-Policy no-referrer \u2014 the lens currently sets none (verified: no CSP anywhere in src/)"
+    },
+    {
+      "id": "h2",
+      "kind": "honesty",
+      "text": "after the CSP lands the console still works: no inline scripts remain in index.html.j2 and htmx/sse/lens.js/media.js all load under script-src 'self'"
+    },
+    {
+      "id": "c16",
+      "kind": "requirement",
+      "text": "upload and serve: authed multipart POST /upload with magic-byte sniffing and size caps into a local blob store; auth-exempt GET /media/{token}.{ext} via FileResponse with capability tokens per decision c4"
+    },
+    {
+      "id": "h3",
+      "kind": "honesty",
+      "text": "a GET without a valid token 404s; tokens are 128-bit (secrets.token_urlsafe(16)); an uploaded file that fails the magic-byte sniff is rejected 400 with the {error, hint} shape"
+    },
+    {
+      "id": "c17",
+      "kind": "requirement",
+      "text": "console input UI: attach button, drag-drop, paste-from-clipboard, and mic recording (MediaRecorder to opus/webm) in a new static module media.js; on upload success the URL is sent through the existing /input pipeline (one send path)"
+    },
+    {
+      "id": "h4",
+      "kind": "honesty",
+      "text": "there is exactly one send path: every media input (picker, drop, paste, mic) posts the returned URL through POST /input, so the wire message is an ordinary PRIVMSG"
+    },
+    {
+      "id": "c18",
+      "kind": "requirement",
+      "text": "config: a new optional media section (dir, max_file_bytes, max_store_bytes, public_base_url, remote_embeds, trusted_hosts) following the existing _validate_web_section loader pattern in config.py"
+    },
+    {
+      "id": "h5",
+      "kind": "honesty",
+      "text": "a config file with no media section yields working defaults (feature on, XDG data dir, 10 MiB cap); afi cli verify and config init round-trip both pass"
+    },
+    {
+      "id": "c19",
+      "kind": "success_signal",
+      "text": "e2e proof: upload via POST /upload, the URL appears as a PRIVMSG on the fake-IRCd wire, and the chat fragment renders the embed; existing autoescape guard tests stay green; afi cli verify rubric still passes"
+    },
+    {
+      "id": "h13",
+      "kind": "honesty",
+      "text": "the proof is automated, not manual: the e2e chain, the autoescape guard, and afi cli verify all run in the CI test suite"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t1",
+      "summary": "URL classification + escape-first linkify engine (web/media.py)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "classify_url maps image (png jpg jpeg gif webp) and audio (mp3 ogg wav webm m4a flac) extensions and returns link for everything else; only http/https schemes are ever linkified (javascript: and data: URLs stay inert text) \u2014 pinned in tests/test_media.py",
+        "render_message_html escapes ALL input text before any markup is injected; adversarial tests cover HTML in text, quotes inside URLs, and the existing test_render.py autoescape guard stays green",
+        "a helper composes outbound media messages as plain URL text and a test asserts every composed message line stays under 8192 bytes (agentirc MAX_INBOUND_LINE)",
+        "task owns only src/irc_lens/web/media.py and tests/test_media.py"
+      ],
+      "deps": [],
+      "covers": [
+        "c10",
+        "h11",
+        "c14",
+        "h1"
+      ]
+    },
+    {
+      "id": "t2",
+      "summary": "Chat-line media embeds: template + render wiring + CSS",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "_chat_line.html.j2 renders a lens-media block under the text when media URLs are present: lens-hosted URLs become img loading=lazy or audio controls preload=metadata; remote URLs become a click-to-load placeholder button with data-src and data-kind (markup only, no JS here)",
+        "chat/log SSE fragment contract unchanged: data-testid chat-line still present, test_render.py and docs/sse-events.md DOM table stay valid",
+        "lens.css gains lens-media rules with max-width/max-height caps; task owns templates/_chat_line.html.j2, web/render.py or session.py glue, static/lens.css, and their tests"
+      ],
+      "deps": [
+        "t1"
+      ],
+      "covers": [
+        "c14",
+        "h1"
+      ]
+    },
+    {
+      "id": "t3",
+      "summary": "Security headers middleware: CSP + nosniff + referrer-policy",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "all HTML responses carry CSP with script-src 'self' and object-src 'none' (img-src/media-src allow self https: http:); every response carries X-Content-Type-Options nosniff and Referrer-Policy no-referrer \u2014 pinned in tests/test_security_headers.py",
+        "no inline scripts remain in index.html.j2; console still boots and htmx/sse/lens.js/mesh.js load under script-src 'self' (existing e2e suite green)",
+        "task owns web/app.py middleware addition, templates/index.html.j2, tests/test_security_headers.py"
+      ],
+      "deps": [],
+      "covers": [
+        "c15",
+        "h2"
+      ]
+    },
+    {
+      "id": "t4",
+      "summary": "Config: optional media section",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "LensConfig gains media fields (enabled, dir, max_file_bytes, max_store_bytes, public_base_url, remote_embeds, trusted_hosts); _validate_media_section follows the _validate_web_section pattern; a config file with NO media section yields working defaults (feature on, XDG data dir, 10 MiB per-file cap) \u2014 pinned in tests/test_config_loader.py",
+        "config init starter template includes the media keys and round-trips through load_config; afi cli verify still passes",
+        "task owns src/irc_lens/config.py, cli/_commands/config_cmd.py, tests/test_config_loader.py, tests/test_config_init.py"
+      ],
+      "deps": [],
+      "covers": [
+        "c18",
+        "h5"
+      ]
+    },
+    {
+      "id": "t5",
+      "summary": "Media blob store: tokens, sniffing, caps, eviction",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "store writes to dir/principal/token.ext with token = secrets.token_urlsafe(16); magic-byte sniff must agree with the extension allowlist; SVG (and any non-allowlisted type) is rejected with a typed error the route layer maps to 400 {error, hint} \u2014 SVG rejection pinned by an explicit test",
+        "per-file cap enforced while streaming (no full-file buffering before the size check); total-store cap evicts oldest-by-mtime; both pinned in tests/test_media_store.py",
+        "task owns new src/irc_lens/web/store.py and tests/test_media_store.py only"
+      ],
+      "deps": [
+        "t4"
+      ],
+      "covers": [
+        "c11",
+        "h12",
+        "c16",
+        "h3"
+      ]
+    },
+    {
+      "id": "t6",
+      "summary": "Routes: authed POST /upload + capability GET /media/",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "POST /upload is identity-gated and origin-checked like /input; multipart field file; over-cap 413 and bad-type 400 both return {error, hint}; success returns 201 with url and kind",
+        "GET /media/token.ext is exempt from auth middleware (test: fetch with NO auth headers succeeds \u2014 the agent-fetch path) and serves via FileResponse with nosniff, immutable private cache, inline disposition; a request without a valid token 404s; token pattern is strictly matched (no traversal)",
+        "client_max_size raised to the media cap while POST /input keeps rejecting over-4KiB bodies including chunked ones \u2014 the pinned test in test_web_events.py is updated deliberately to assert the handler-level cap",
+        "task owns web/routes.py, web/app.py exemption list, tests/test_upload_routes.py"
+      ],
+      "deps": [
+        "t5",
+        "t3"
+      ],
+      "covers": [
+        "c16",
+        "h3",
+        "c6",
+        "h7"
+      ]
+    },
+    {
+      "id": "t7",
+      "summary": "media.js: click-to-load embeds",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "clicking a lens-media-load placeholder swaps in the real img/audio element using data-src and data-kind; no innerHTML with unescaped input \u2014 element construction via createElement/setAttribute only",
+        "lens.js stays within its 120-line test budget (media behavior lives entirely in the new static/media.js, loaded from index.html.j2); grep-style tests added following tests/test_lens_js.py conventions",
+        "task owns static/media.js and tests/test_media_js.py"
+      ],
+      "deps": [
+        "t2"
+      ],
+      "covers": [
+        "c14"
+      ]
+    },
+    {
+      "id": "t8",
+      "summary": "Console upload UI: picker, drag-drop, paste, auto-send",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "attach button, drag-drop onto the chat area, and paste-from-clipboard all POST the file to /upload; on 201 the returned URL is submitted through the existing POST /input pipeline \u2014 one send path, asserted by a test that observes /input receiving the URL",
+        "upload failures surface through the existing toast pattern using the {error, hint} payload; no new SSE events introduced",
+        "task owns the upload-UI half of static/media.js, the form template block in index.html.j2, and Playwright coverage for drag-drop + paste"
+      ],
+      "deps": [
+        "t7",
+        "t6"
+      ],
+      "covers": [
+        "c17",
+        "h4"
+      ]
+    },
+    {
+      "id": "t9",
+      "summary": "Mic recording: MediaRecorder capture",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "record button captures via getUserMedia + MediaRecorder to audio/webm codecs=opus (audio/mp4 fallback); states idle / recording-with-timer / uploading; client-side max duration stops at 5 minutes",
+        "the finished recording goes through the SAME /upload then /input path as file uploads (one send path preserved); Playwright smoke uses chromium fake-media-stream flags",
+        "task owns the recording half of static/media.js, its form-bar button markup, and the fake-media Playwright test"
+      ],
+      "deps": [
+        "t8"
+      ],
+      "covers": [
+        "c17",
+        "h4"
+      ]
+    },
+    {
+      "id": "t10",
+      "summary": "End-to-end + Playwright proof chain",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "e2e (tests/test_e2e_http.py pattern): POST /upload then the URL arrives as a PRIVMSG on the fake-IRCd wire then the chat fragment contains the embed markup \u2014 the whole chain in one automated test",
+        "Playwright: an image embed is visible and an audio element is playable inside the chat log; a share initiated from the console lands as an ordinary channel message; click-to-load swap verified; all running in CI, no manual steps",
+        "the lens-hosted flow needs no external host: the e2e chain runs entirely against loopback fixtures; existing autoescape guard and afi cli verify run green in the same suite",
+        "task owns tests/test_e2e_http.py additions, tests/test_e2e_playwright.py additions, and any conftest fixtures they need"
+      ],
+      "deps": [
+        "t9"
+      ],
+      "covers": [
+        "c1",
+        "h6",
+        "c7",
+        "h8",
+        "c9",
+        "h10",
+        "c19",
+        "h13"
+      ]
+    },
+    {
+      "id": "t11",
+      "summary": "Docs, explain catalog, version bump",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "architecture.md (request-shapes table + decision log), sse-events.md DOM contract, security-checklist.md (capability-URL model + CSP), and cli.md (media config keys) all updated; learn/explain catalog mentions media per the AFI rubric",
+        "PR description records the before-state verification: no media/attachment concept existed in irc-lens, agentirc, or cultureagent main branches when this landed (re-checked at PR time, citing the 2026-07-02 sweep)",
+        "minor version bump applied per repo convention; task owns docs/, explain/catalog.py, pyproject.toml/__init__.py version only"
+      ],
+      "deps": [
+        "t9"
+      ],
+      "covers": [
+        "c8",
+        "h9"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "r1",
+      "text": "backend image support varies across claude/codex/copilot/acp \u2014 degradation shape lands in the cultureagent follow-up issue, not this plan",
+      "kind": "unknown_nonblocking",
+      "task_id": null
+    },
+    {
+      "id": "r2",
+      "text": "cross-machine media reachability depends on operators setting media.public_base_url until the agentirc mesh-reachability proposal lands",
+      "kind": "follow_up",
+      "task_id": null
+    }
+  ]
+}

@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -32,6 +33,13 @@ class LensConfig:
     server_port: int
     web_bind: str
     web_port: int
+    media_enabled: bool
+    media_dir: str
+    media_max_file_bytes: int
+    media_max_store_bytes: int
+    media_public_base_url: str
+    media_remote_embeds: str
+    media_trusted_hosts: tuple[str, ...]
 
 
 def default_config_path() -> Path:
@@ -214,6 +222,111 @@ def _validate_web_section(raw: dict) -> tuple[str, int]:
     return web_bind, web_port
 
 
+def _default_media_dir() -> str:
+    """Return default media directory: $XDG_DATA_HOME/irc-lens/media or ~/.local/share/irc-lens/media."""
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return str(Path(base) / "irc-lens" / "media")
+
+
+def _coerce_bool(value: object, where: str) -> bool:
+    """Coerce *value* to a boolean."""
+    if isinstance(value, bool):
+        return value
+    raise _err(
+        f"{where} must be a boolean (true or false), got {value!r}",
+        f"set `{where}:` to either `true` or `false`",
+    )
+
+
+def _coerce_int(value: object, where: str) -> int:
+    """Coerce *value* to an integer (reject bool, accept float if whole number, int, str)."""
+    if isinstance(value, bool):
+        raise _err(
+            f"{where} must be an integer, got {value!r}",
+            f"set `{where}:` to an integer value",
+        )
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        if not value.is_integer():
+            raise _err(
+                f"{where} must be an integer, got {value!r}",
+                f"set `{where}:` to an integer (no decimal part)",
+            )
+        return int(value)
+    if isinstance(value, str):
+        try:
+            return int(value.strip())
+        except ValueError:
+            raise _err(
+                f"{where} must be an integer, got {value!r}",
+                f"set `{where}:` to an integer value",
+            ) from None
+    raise _err(
+        f"{where} must be an integer, got {value!r}",
+        f"set `{where}:` to an integer value",
+    )
+
+
+def _validate_media_section(raw: dict) -> tuple[bool, str, int, int, str, str, tuple[str, ...]]:
+    """Return (enabled, dir, max_file_bytes, max_store_bytes, public_base_url, remote_embeds, trusted_hosts)."""
+    media_raw = raw.get("media")
+    if media_raw is None:
+        media: dict = {}
+    elif not isinstance(media_raw, dict):
+        raise _err(
+            "media: must be a mapping",
+            _HINT_CONFIG_INIT,
+        )
+    else:
+        media = media_raw
+
+    media_enabled = _coerce_bool(media.get("enabled", True), "media.enabled")
+    media_dir = str(media.get("dir", _default_media_dir()))
+    media_max_file_bytes = _coerce_int(media.get("max_file_bytes", 10485760), "media.max_file_bytes")
+    media_max_store_bytes = _coerce_int(media.get("max_store_bytes", 268435456), "media.max_store_bytes")
+    media_public_base_url = str(media.get("public_base_url", ""))
+
+    if media_max_file_bytes > media_max_store_bytes:
+        raise _err(
+            "media.max_file_bytes must not exceed media.max_store_bytes "
+            f"({media_max_file_bytes} > {media_max_store_bytes}); "
+            "eviction could never free room for a single file",
+            "raise `media.max_store_bytes:` or lower `media.max_file_bytes:`",
+        )
+
+    if media_public_base_url:
+        # SonarCloud S5332: avoid an insecure-protocol string literal
+        # (`"http://"`) in the validation check itself — parse the
+        # scheme with `urlsplit` instead of a `str.startswith` prefix
+        # comparison. A non-empty `netloc` is also required so a bare
+        # `"https://"` (valid scheme, no host) is rejected too.
+        parsed_base = urlsplit(media_public_base_url)
+        if parsed_base.scheme not in ("http", "https") or not parsed_base.netloc:
+            raise _err(
+                "media.public_base_url must start with http:// or https://, "
+                f"got {media_public_base_url!r}",
+                "set `media.public_base_url:` to a full base URL, "
+                "e.g. https://lens.example.com",
+            )
+
+    remote_embeds = media.get("remote_embeds", "click")
+    if remote_embeds not in ("click", "auto", "off"):
+        raise _err(
+            f"media.remote_embeds must be one of ('click', 'auto', 'off'), got {remote_embeds!r}",
+            "set `media.remote_embeds:` to one of: click, auto, off",
+        )
+
+    trusted_hosts_raw = _require_str_list(
+        media.get("trusted_hosts", []),
+        "media.trusted_hosts",
+        "set `media.trusted_hosts: []` or add hostnames",
+    )
+    trusted_hosts = tuple(trusted_hosts_raw)
+
+    return media_enabled, media_dir, media_max_file_bytes, media_max_store_bytes, media_public_base_url, remote_embeds, trusted_hosts
+
+
 # ---------------------------------------------------------------------------
 # Public loader — flat orchestrator, no nested conditionals beyond auth.mode
 # ---------------------------------------------------------------------------
@@ -259,6 +372,15 @@ def load_config(path: Path) -> LensConfig:
 
     server_name, server_host, server_port = _validate_server_section(raw)
     web_bind, web_port = _validate_web_section(raw)
+    (
+        media_enabled,
+        media_dir,
+        media_max_file_bytes,
+        media_max_store_bytes,
+        media_public_base_url,
+        media_remote_embeds,
+        media_trusted_hosts,
+    ) = _validate_media_section(raw)
 
     return LensConfig(
         auth_mode=mode,
@@ -273,4 +395,51 @@ def load_config(path: Path) -> LensConfig:
         server_port=server_port,
         web_bind=web_bind,
         web_port=web_port,
+        media_enabled=media_enabled,
+        media_dir=media_dir,
+        media_max_file_bytes=media_max_file_bytes,
+        media_max_store_bytes=media_max_store_bytes,
+        media_public_base_url=media_public_base_url,
+        media_remote_embeds=media_remote_embeds,
+        media_trusted_hosts=media_trusted_hosts,
     )
+
+
+# ---------------------------------------------------------------------------
+# Shared --config resolution — one convention, two callers
+# ---------------------------------------------------------------------------
+# `irc-lens serve` (via `cli/_commands/serve.py::_resolve_config`) and every
+# live-verb tool in `irc_lens.tools` both need "an explicit path if given,
+# else the default location, else a clean error" — factored here so both
+# surfaces raise byte-identical `error:`/`hint:` text for the same
+# missing-config cases instead of maintaining two copies that could drift.
+
+
+def resolve_config(config_path: str | None) -> LensConfig:
+    """Load a ``LensConfig`` from an explicit path or the default location.
+
+    If *config_path* is truthy it must exist — a typo'd ``--config`` must
+    never silently fall back to the default location (that would risk
+    quietly starting against the wrong server/identity). If *config_path*
+    is falsy, :func:`default_config_path` must exist instead. Either way, a
+    missing file raises :class:`AfiError` (``EXIT_USER_ERROR``) with a
+    remediation pointing at ``irc-lens config init``.
+    """
+    if config_path:
+        explicit = Path(config_path)
+        if not explicit.exists():
+            raise _err(
+                f"--config {config_path!r} does not exist",
+                (
+                    "fix the path, or run `irc-lens config init "
+                    f"--path {config_path}` to drop a starter config there"
+                ),
+            )
+        return load_config(explicit)
+    default = default_config_path()
+    if not default.exists():
+        raise _err(
+            f"no config at {default}",
+            "run 'irc-lens config init' to create one, or pass --config <path>",
+        )
+    return load_config(default)
