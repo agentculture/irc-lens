@@ -6,6 +6,7 @@ Session. Builds the per-principal :class:`SessionRegistry`, mounts the
 appropriate identity middleware for the configured auth mode, and exposes
 a ``/healthz`` endpoint.
 """
+
 from __future__ import annotations
 
 from importlib.resources import files
@@ -172,6 +173,7 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
     app.router.add_post("/upload", routes.post_upload)
     app.router.add_get("/media/{name}", routes.get_media)
     app.router.add_get("/events", routes.get_events)
+    app.router.add_get("/residents", routes.get_residents)
     app.router.add_get("/healthz", routes.get_healthz)
 
     static_dir = files("irc_lens").joinpath("static")
