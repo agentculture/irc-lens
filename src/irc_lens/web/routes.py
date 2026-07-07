@@ -17,6 +17,9 @@
 * ``GET /events``  — open an SSE stream from
   ``Session.event_bus.subscribe()``; flushes each event through
   ``format_sse``. Closes the subscription cleanly on client disconnect.
+* ``GET /residents`` — standalone page rendering culture's resident
+  presence resource view, fetched server-side. Always ``200``: every
+  upstream failure renders a kind-specific notice, never an error page.
 
 Static files (``/static/*``) are wired via ``app.router.add_static`` in
 :mod:`irc_lens.web.app`, not as a handler here.
@@ -36,7 +39,12 @@ from aiohttp import web
 from irc_lens.commands import parse_command
 from irc_lens.session import LensConnectionLost
 from irc_lens.web.events import format_sse
-from irc_lens.web.render import render_chat_log, render_index
+from irc_lens.web.render import render_chat_log, render_index, render_residents_page
+from irc_lens.web.residents import (
+    ResidentsResult,
+    fetch_residents,
+    resolve_residents_url,
+)
 from irc_lens.web.store import CONTENT_TYPES, MediaTooLargeError, MediaTypeError
 
 logger = logging.getLogger(__name__)
@@ -424,7 +432,9 @@ async def post_upload(request: web.Request) -> web.Response:
     store = request.app["media_store"]
     filename = field.filename or ""
     try:
-        stored = await store.save(identity.principal, filename, _iter_field_chunks(field))
+        stored = await store.save(
+            identity.principal, filename, _iter_field_chunks(field)
+        )
     except MediaTooLargeError as exc:
         return web.json_response({"error": exc.message, "hint": exc.hint}, status=413)
     except MediaTypeError as exc:
@@ -521,6 +531,51 @@ async def get_events(request: web.Request) -> web.StreamResponse:
     finally:
         sub.close()
     return response
+
+
+async def get_residents(request: web.Request) -> web.Response:
+    """Render the standalone residents page (culture's resource view).
+
+    Server-side fetch by design: the browser talks only to the console,
+    and culture's overview endpoint (loopback-only, ephemeral port —
+    resolved via ``resolve_residents_url``) is queried from this
+    process. The overview name falls back to ``server.name`` when
+    ``culture.overview_name`` is unset, matching culture's
+    ``overview-{server_name}.port`` pidfile convention.
+
+    Deliberately NOT the ``{error, hint}`` JSON contract of the POST
+    endpoints: every outcome — unreachable IRCd, presence not yet
+    supported, unconfigured or dead overview server — renders HTTP 200
+    with a kind-specific notice. The graceful-degrade requirement
+    (docs/specs/2026-07-07-residents-presence-page.md) exists because a
+    down mesh is exactly when the operator opens this page; a 5xx here
+    would repeat the 2026-07-03 console-500 incident.
+
+    Touches no ``Session`` — this page reads culture's HTTP surface,
+    not the AgentIRC connection.
+    """
+    config = request.app["config"]
+    # The resolver reads the overview port file — a blocking read that
+    # stays off the event loop like every other file read in this app
+    # (the `store.resolve` / `precompute_static_hashes` convention).
+    url = await asyncio.to_thread(
+        resolve_residents_url,
+        config.culture_residents_url,
+        config.culture_overview_name or config.server_name,
+    )
+    if url is None:
+        result = ResidentsResult("unavailable", None)
+    else:
+        result = await fetch_residents(url)
+    try:
+        body = render_residents_page(result.kind, result.payload)
+    except Exception:
+        # Backstop for the never-an-error-page contract: a payload that
+        # slipped past fetch-layer validation still degrades to the
+        # unavailable notice rather than a 500.
+        logger.exception("residents render failed; degrading to notice")
+        body = render_residents_page("unavailable", None)
+    return web.Response(text=body, content_type="text/html")
 
 
 async def get_healthz(_request: web.Request) -> web.Response:  # NOSONAR S7503

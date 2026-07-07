@@ -40,6 +40,8 @@ DEV_CONFIG = LensConfig(
     media_public_base_url="",
     media_remote_embeds="click",
     media_trusted_hosts=(),
+    culture_residents_url=None,
+    culture_overview_name=None,
 )
 
 

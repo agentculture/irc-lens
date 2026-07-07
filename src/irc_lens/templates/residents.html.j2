@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>residents — irc-lens</title>
+    <meta name="color-scheme" content="dark">
+    {# Standalone page (plan task t3): rendered per-request, not a
+       console view mode — so it carries its own minimal, inline
+       styling rather than linking the console's static/lens.css.
+       Values below mirror that stylesheet's :root palette
+       (near-black page, lifted surfaces, green accent) so the page
+       reads as the same console, without adding a static-asset
+       dependency to a page that must also render cleanly for the
+       three degrade notices. #}
+    <style>
+      :root {
+        --lens-bg: #0B0F12;
+        --lens-surface: #11161B;
+        --lens-fg: #F3F5F7;
+        --lens-fg-soft: #C7D0D9;
+        --lens-muted: #8A97A3;
+        --lens-accent: #41D67A;
+        --lens-border: #1A222B;
+        --lens-down: #c44;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        background: var(--lens-bg);
+        color: var(--lens-fg);
+        font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+        font-size: 14px;
+        line-height: 1.4;
+      }
+      body { padding: 1em 1.5em 2em; }
+      h1 {
+        font-size: 1.05em;
+        color: var(--lens-muted);
+        text-transform: uppercase;
+        margin: 0 0 0.75em;
+      }
+      .residents-notice {
+        border: 1px solid var(--lens-border);
+        background: var(--lens-surface);
+        color: var(--lens-fg-soft);
+        padding: 0.75em 1em;
+        max-width: 64ch;
+      }
+      table.residents-table {
+        border-collapse: collapse;
+        width: 100%;
+        margin-top: 0.5em;
+      }
+      .residents-table th,
+      .residents-table td {
+        border-bottom: 1px solid var(--lens-border);
+        padding: 0.35em 1ch;
+        text-align: left;
+        white-space: nowrap;
+      }
+      .residents-table th {
+        color: var(--lens-muted);
+        text-transform: uppercase;
+        font-size: 0.8em;
+      }
+      tr.presumed-hung td { color: var(--lens-down); font-weight: 700; }
+      tr.budget-warning td { color: var(--lens-down); }
+      .residents-empty { color: var(--lens-muted); font-style: italic; margin-top: 0.5em; }
+      .residents-footer { color: var(--lens-muted); font-size: 0.8em; margin-top: 1em; }
+    </style>
+  </head>
+  <body data-residents-kind="{{ kind }}">
+    <h1>Mesh residents</h1>
+    {% if notice %}
+      <p data-testid="residents-notice" class="residents-notice">{{ notice }}</p>
+    {% endif %}
+    {% if kind == "supported" %}
+      <table data-testid="residents-table" class="residents-table">
+        <thead>
+          <tr>
+            <th>Nick</th>
+            <th>Server</th>
+            <th>State</th>
+            <th>Since</th>
+            <th>Task</th>
+            <th>Tokens (in/out)</th>
+            <th>Budget %</th>
+            <th>Flags</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+          <tr class="resident-row{% if row.row_class %} {{ row.row_class }}{% endif %}">
+            <td>{{ row.nick }}</td>
+            <td>{{ row.server }}</td>
+            <td>{{ row.state }}</td>
+            <td>{{ row.since }}</td>
+            <td>{{ row.task }}</td>
+            <td>{{ row.tokens_cell }}</td>
+            <td>{{ row.budget_cell }}</td>
+            <td>{{ row.flags_cell }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if not rows %}
+        <p class="residents-empty">No residents connected.</p>
+      {% endif %}
+      <p class="residents-footer">as of {{ generated_at }}</p>
+    {% endif %}
+  </body>
+</html>

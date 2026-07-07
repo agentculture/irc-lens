@@ -40,6 +40,8 @@ class LensConfig:
     media_public_base_url: str
     media_remote_embeds: str
     media_trusted_hosts: tuple[str, ...]
+    culture_residents_url: str | None = None
+    culture_overview_name: str | None = None
 
 
 def default_config_path() -> Path:
@@ -327,6 +329,52 @@ def _validate_media_section(raw: dict) -> tuple[bool, str, int, int, str, str, t
     return media_enabled, media_dir, media_max_file_bytes, media_max_store_bytes, media_public_base_url, remote_embeds, trusted_hosts
 
 
+def _validate_culture_section(raw: dict) -> tuple[str | None, str | None]:
+    """Return (culture_residents_url, culture_overview_name)."""
+    culture_raw = raw.get("culture")
+    if culture_raw is None:
+        culture: dict = {}
+    elif not isinstance(culture_raw, dict):
+        raise _err(
+            "culture: must be a mapping",
+            _HINT_CONFIG_INIT,
+        )
+    else:
+        culture = culture_raw
+
+    residents_url = culture.get("residents_url")
+    if residents_url is not None:
+        if not isinstance(residents_url, str):
+            raise _err(
+                f"culture.residents_url must be a string, got {residents_url!r}",
+                "set `culture.residents_url:` to a full URL, e.g. "
+                "http://127.0.0.1:9000/residents.json",
+            )
+        parsed_residents = urlsplit(residents_url)
+        if parsed_residents.scheme not in ("http", "https") or not parsed_residents.netloc:
+            raise _err(
+                "culture.residents_url must start with http:// or https://, "
+                f"got {residents_url!r}",
+                "set `culture.residents_url:` to a full URL, e.g. "
+                "http://127.0.0.1:9000/residents.json",
+            )
+
+    overview_name = culture.get("overview_name")
+    if overview_name is not None:
+        if not isinstance(overview_name, str):
+            raise _err(
+                f"culture.overview_name must be a string, got {overview_name!r}",
+                "set `culture.overview_name:` to a culture server name",
+            )
+        if not overview_name.strip():
+            raise _err(
+                "culture.overview_name must not be empty",
+                "set `culture.overview_name:` to a culture server name, or remove the key",
+            )
+
+    return residents_url, overview_name
+
+
 # ---------------------------------------------------------------------------
 # Public loader — flat orchestrator, no nested conditionals beyond auth.mode
 # ---------------------------------------------------------------------------
@@ -381,6 +429,7 @@ def load_config(path: Path) -> LensConfig:
         media_remote_embeds,
         media_trusted_hosts,
     ) = _validate_media_section(raw)
+    culture_residents_url, culture_overview_name = _validate_culture_section(raw)
 
     return LensConfig(
         auth_mode=mode,
@@ -402,6 +451,8 @@ def load_config(path: Path) -> LensConfig:
         media_public_base_url=media_public_base_url,
         media_remote_embeds=media_remote_embeds,
         media_trusted_hosts=media_trusted_hosts,
+        culture_residents_url=culture_residents_url,
+        culture_overview_name=culture_overview_name,
     )
 
 

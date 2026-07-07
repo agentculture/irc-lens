@@ -267,7 +267,9 @@ def _normalize_history_entry(entry: Any) -> dict:
             try:
                 ts = float(raw) if raw is not None else None
                 ts_display = (
-                    time.strftime("%H:%M:%S", time.localtime(ts)) if ts is not None else ""
+                    time.strftime("%H:%M:%S", time.localtime(ts))
+                    if ts is not None
+                    else ""
                 )
             except (ValueError, TypeError):
                 ts_display = ""
@@ -312,6 +314,129 @@ def render_chat_log(
         for e in entries
     ]
     return "".join(parts)
+
+
+# /residents (plan task t3): the four render-time outcomes the t2 fetch
+# layer classifies into. Three of them are graceful-degrade notices with
+# fixed, pinned text — the fourth ("supported") carries a parsed culture
+# payload. See docs/specs/2026-07-07-residents-presence-page.md and
+# docs/resident-presence.md (culture's canonical JSON schema) for the
+# payload shape this renders.
+_RESIDENTS_NOTICES: dict[str, str] = {
+    "unsupported": "Presence is pending the agentirc release (agentirc#53).",
+    "unreachable": "IRCd down: the culture server is unreachable.",
+    "unavailable": (
+        "Resource view unavailable: the culture overview server is not "
+        "reachable or not configured."
+    ),
+}
+
+_RESIDENTS_DASH = "-"
+
+
+def _resident_token_cell(resident: dict) -> str:
+    """Format the "Tokens (in/out)" cell, matching culture's own
+    `culture residents` table renderer (culture_core/cli/residents.py
+    `_tokens_cell`): a single dash when both counters are null (a
+    state-only backend reporting no token counters at all), otherwise
+    "in/out" with either side dashed individually.
+    """
+    tokens_in = resident.get("tokens_in")
+    tokens_out = resident.get("tokens_out")
+    if tokens_in is None and tokens_out is None:
+        return _RESIDENTS_DASH
+    left = _RESIDENTS_DASH if tokens_in is None else str(tokens_in)
+    right = _RESIDENTS_DASH if tokens_out is None else str(tokens_out)
+    return f"{left}/{right}"
+
+
+def _resident_budget_cell(resident: dict) -> str:
+    """Format "Budget %", matching culture's `_budget_cell`: `{pct:g}%`
+    (trims trailing zeros — `100.0` renders `100%`), dash when the
+    resident has no configured budget or reported no token counters.
+    """
+    budget_used_pct = resident.get("budget_used_pct")
+    # Numeric-only, not just non-None: a version-skewed serializer could
+    # put a string here, and `:g` on a str raises — degrade to a dash
+    # like every other absent value (bool is an int subclass; exclude it).
+    if not isinstance(budget_used_pct, (int, float)) or isinstance(
+        budget_used_pct, bool
+    ):
+        return _RESIDENTS_DASH
+    return f"{budget_used_pct:g}%"
+
+
+def _resident_row(resident: dict) -> dict[str, str]:
+    """Prepare one resident record for the template: dash-fill every
+    nullable field, compute the Flags cell text, and the CSS class(es)
+    that flag a `budget_warning`/`presumed_hung` row for the reader.
+
+    Flags-cell ordering ("HUNG?" before "BUDGET" when both apply) and
+    the tokens/budget cell formats mirror culture's own
+    `culture residents` table (`culture_core/cli/residents.py`) so the
+    console page and the CLI read as the same shape.
+    """
+    presumed_hung = bool(resident.get("presumed_hung"))
+    budget_warning = bool(resident.get("budget_warning"))
+
+    flags: list[str] = []
+    if presumed_hung:
+        flags.append("HUNG?")
+    if budget_warning:
+        flags.append("BUDGET")
+
+    row_classes: list[str] = []
+    if presumed_hung:
+        row_classes.append("presumed-hung")
+    if budget_warning:
+        row_classes.append("budget-warning")
+
+    return {
+        "nick": resident.get("nick") or _RESIDENTS_DASH,
+        "server": resident.get("server") or _RESIDENTS_DASH,
+        "state": resident.get("state") or _RESIDENTS_DASH,
+        "since": resident.get("since") or _RESIDENTS_DASH,
+        "task": resident.get("task") or _RESIDENTS_DASH,
+        "tokens_cell": _resident_token_cell(resident),
+        "budget_cell": _resident_budget_cell(resident),
+        "flags_cell": ",".join(flags) if flags else _RESIDENTS_DASH,
+        "row_class": " ".join(row_classes),
+    }
+
+
+def render_residents_page(kind: str, payload: dict | None) -> str:
+    """Render the standalone `/residents` page (plan task t3).
+
+    `kind` is one of "supported" | "unsupported" | "unreachable" |
+    "unavailable" — the t2 fetch layer's classification of the upstream
+    culture `/residents.json` call. `payload` is the parsed culture
+    payload dict (`residents`, `generated_at`) when `kind == "supported"`;
+    otherwise it is ignored (the three degrade kinds render a fixed
+    notice instead of a table, but always the same full HTML document —
+    the notice is page content, never an exception path).
+
+    Rows are defensively re-sorted by nick here regardless of input
+    order, since the payload's own "sorted by nick" contract
+    (docs/resident-presence.md) is culture's promise, not something this
+    renderer can verify. Nothing in this function or its template ever
+    touches the upstream host/port/URL — the t2 module resolves and
+    calls it server-side; this layer only ever sees the parsed result.
+    """
+    if kind == "supported":
+        residents = (payload or {}).get("residents") or []
+        rows = [
+            _resident_row(r)
+            for r in sorted(residents, key=lambda r: str(r.get("nick") or ""))
+        ]
+        generated_at = (payload or {}).get("generated_at") or _RESIDENTS_DASH
+        notice = None
+    else:
+        rows = []
+        generated_at = _RESIDENTS_DASH
+        notice = _RESIDENTS_NOTICES.get(kind, _RESIDENTS_NOTICES["unavailable"])
+    return _env.get_template("residents.html.j2").render(
+        kind=kind, notice=notice, rows=rows, generated_at=generated_at
+    )
 
 
 def render_index(session: "Session", *, chat_log_html: str | None = None) -> str:

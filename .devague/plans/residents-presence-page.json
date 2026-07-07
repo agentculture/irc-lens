@@ -1,0 +1,316 @@
+{
+  "slug": "residents-presence-page",
+  "title": "residents presence page",
+  "frame_slug": "residents-presence-page",
+  "schema_version": 1,
+  "status": "exported",
+  "created": "2026-07-07T03:46:54Z",
+  "updated": "2026-07-07T03:50:23Z",
+  "targets": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "The irc-lens console now has a residents page: one glance shows every mesh resident's presence state, current task, and token spend \u2014 rendered from culture's live resource view, behind the same CF Access as the rest of the console, and degrading to a clear notice (never an error page) when presence or the mesh is unavailable."
+    },
+    {
+      "id": "h4",
+      "kind": "honesty",
+      "text": "A reviewer behind CF Access can load /residents on the deployed console and always gets a table or a notice \u2014 never an error page \u2014 matching the announcement's promise"
+    },
+    {
+      "id": "c2",
+      "kind": "audience",
+      "text": "The operator viewing the console at chat.agentculture.org \u2014 a human behind CF Access, not agents (agents read presence via culture's own surfaces)"
+    },
+    {
+      "id": "h5",
+      "kind": "honesty",
+      "text": "In cloudflare-access mode, GET /residents without a valid CF JWT is rejected by the middleware exactly like the console root \u2014 proving the operator-only audience"
+    },
+    {
+      "id": "c3",
+      "kind": "before_state",
+      "text": "Culture tracks resident presence (six-state signal + token counters over the PRESENCE verb) and serves an aggregated resource view, but the console operator has no way to see it; the 2026-07-03 incident showed the console 500ing when the IRCd is down"
+    },
+    {
+      "id": "h6",
+      "kind": "honesty",
+      "text": "Before this change GET /residents is a 404 on the console \u2014 the route table in docs/architecture.md gains the row in this same PR"
+    },
+    {
+      "id": "c4",
+      "kind": "after_state",
+      "text": "A residents page renders one row per resident \u2014 nick, server, state, since, current-task hint, tokens in/out, budget % with warning highlight, and a clear presumed-hung flag \u2014 sorted by nick"
+    },
+    {
+      "id": "h7",
+      "kind": "honesty",
+      "text": "A rendering test asserts every promised column (nick, server, state, since, task, tokens in/out, budget percent with warning highlight, presumed-hung flag) appears for a fully-populated resident row"
+    },
+    {
+      "id": "c5",
+      "kind": "why_it_matters",
+      "text": "One glance tells the operator who is busy, hung, or burning budget \u2014 culture presence v1 is observe-only, so the console page IS the operator-facing deliverable of the whole feature (culture plan task t8)"
+    },
+    {
+      "id": "h8",
+      "kind": "honesty",
+      "text": "Rows with budget_warning=true or presumed_hung=true are visually distinguished in the rendered HTML (warning highlight, hung flag) and a test asserts the distinguishing markup"
+    },
+    {
+      "id": "c6",
+      "kind": "requirement",
+      "text": "Data source is culture's GET /residents.json (served by 'culture mesh overview --serve', loopback-only bind by default), consumed SERVER-SIDE by irc-lens so the endpoint never needs public exposure; the browser talks only to the console"
+    },
+    {
+      "id": "h3",
+      "kind": "honesty",
+      "text": "The rendered HTML never references the upstream URL or port; only the console origin is visible to the browser"
+    },
+    {
+      "id": "c7",
+      "kind": "requirement",
+      "text": "Payload contract is byte-identical to 'culture residents --json' (culture's canonical serializer); nullable fields (task, tokens_in/out, token_budget/budget_used_pct/budget_warning) render as dashes, never as errors"
+    },
+    {
+      "id": "h2",
+      "kind": "honesty",
+      "text": "A test renders a resident with every nullable field null and asserts dashes with no error, and asserts rows are sorted by nick"
+    },
+    {
+      "id": "c8",
+      "kind": "requirement",
+      "text": "Graceful degrade, the hard requirement: three states render HTTP 200 with a notice, never a 500 \u2014 supported:false \u2192 'presence pending agentirc release' notice; endpoint answers 503 \u2192 'IRCd down' notice; endpoint unreachable \u2192 'resource view unavailable' notice"
+    },
+    {
+      "id": "h1",
+      "kind": "honesty",
+      "text": "An automated test drives all three degrade states (supported:false, upstream 503, endpoint unreachable) end-to-end through GET /residents and asserts HTTP 200 plus each state's specific notice text"
+    },
+    {
+      "id": "c9",
+      "kind": "boundary",
+      "text": "Read-only page: no actions, no enforcement (culture v1 is observe-only by design); CF Access like every other console page, no new auth surface"
+    },
+    {
+      "id": "h9",
+      "kind": "honesty",
+      "text": "The page registers only a GET route and issues only GET requests upstream \u2014 no mutation path exists anywhere in the feature"
+    },
+    {
+      "id": "c11",
+      "kind": "requirement",
+      "text": "Upstream failure bodies are structured per culture's contract: 503 (server unreachable or presence stream stalled) and 500 (internal) both carry culture's {code, message, remediation} JSON with Content-Type application/json; supported:false is a 200 'known mesh state', never an error (docs/resident-presence.md, Response cases)"
+    },
+    {
+      "id": "h10",
+      "kind": "honesty",
+      "text": "The fetch layer distinguishes 200-supported, 200-unsupported, structured 503, and any other failure, mapping each to its specific notice; a malformed 503 body still degrades to the notice rather than raising"
+    },
+    {
+      "id": "c13",
+      "kind": "requirement",
+      "text": "Any failure to obtain a valid supported payload \u2014 connection refused, timeout, upstream 503 or 500, non-JSON body \u2014 renders the same 200-with-notice degrade path; the page never proxies the upstream status code to the browser"
+    },
+    {
+      "id": "h12",
+      "kind": "honesty",
+      "text": "A test feeds each failure mode (connection refused, timeout, upstream 503, upstream 500, non-JSON body) through GET /residents and asserts the response is 200 in every case, with the upstream status code appearing nowhere in the body"
+    },
+    {
+      "id": "c14",
+      "kind": "requirement",
+      "text": "The server-side fetch reuses the repo's one existing outbound-HTTP pattern (aiohttp ClientSession, ClientTimeout(total=5), catching both aiohttp.ClientError and asyncio.TimeoutError) as established in web/auth.py's JWKS refresh"
+    },
+    {
+      "id": "h13",
+      "kind": "honesty",
+      "text": "The residents fetch sets ClientTimeout(total=5) and its except clause names both aiohttp.ClientError and asyncio.TimeoutError \u2014 verifiable by inspection in the PR diff"
+    },
+    {
+      "id": "c15",
+      "kind": "requirement",
+      "text": "GET /residents stays OFF both auth-middleware exempt lists (dev middleware in web/app.py and CF middleware in web/auth.py) so Cloudflare Access applies to it exactly as to the console root"
+    },
+    {
+      "id": "h14",
+      "kind": "honesty",
+      "text": "Neither middleware exempt list (dev in web/app.py, CF in web/auth.py) mentions /residents, and a test proves an unauthenticated request to it is rejected in auth-enforcing mode"
+    },
+    {
+      "id": "c16",
+      "kind": "requirement",
+      "text": "Tests use an in-tree fake culture endpoint server (the tests/_jwks_server.py idiom) covering: supported payload with rows, supported:false, upstream 503, endpoint unreachable, and an all-nullables resident row"
+    },
+    {
+      "id": "h15",
+      "kind": "honesty",
+      "text": "The fake culture endpoint server lives under tests/ with no network egress, and each listed scenario is a distinct test case running in 'uv run pytest -q'"
+    },
+    {
+      "id": "c17",
+      "kind": "requirement",
+      "text": "Config lands as a new optional 'culture:' section plumbed through LensConfig, a section validator, load_config, both test config literals (tests/helpers.py and tests/conftest.py), and the 'config init' starter template"
+    },
+    {
+      "id": "h16",
+      "kind": "honesty",
+      "text": "'config init' writes a starter containing the culture: section, load_config accepts and validates it (including rejecting malformed values), and both test config literals carry the new fields"
+    },
+    {
+      "id": "c18",
+      "kind": "requirement",
+      "text": "Ship mechanics: architecture.md route-table row + decision-log entry (why server-side fetch), docs/cli.md config section, CHANGELOG entry, minor version bump, and a reply on issue #53 naming the irc-lens release so culture can note it in the rollout"
+    },
+    {
+      "id": "h17",
+      "kind": "honesty",
+      "text": "The PR diff contains the architecture.md route row and decision-log entry, the docs/cli.md config section, a CHANGELOG entry, and the version bump; the issue #53 reply is posted once the release ships"
+    },
+    {
+      "id": "c23",
+      "kind": "success_signal",
+      "text": "GET /residents returns 200 with the correct specific notice in each of the three degrade states, and with a live payload renders rows sorted by nick with dashes for every null \u2014 verified by tests against a fake culture endpoint; culture notes the shipping irc-lens release on issue #53"
+    },
+    {
+      "id": "h11",
+      "kind": "honesty",
+      "text": "The degrade-state, sorting, and dash-rendering tests run in CI via 'uv run pytest -q'; replying on issue #53 with the release is an explicit step in the ship checklist"
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t1",
+      "summary": "Config: optional culture section through LensConfig",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "LensConfig gains culture_residents_url and culture_overview_name (both str-or-None) parsed from an optional culture: section with keys residents_url and overview_name in src/irc_lens/config.py; an absent section yields both None and stays valid",
+        "Malformed culture values (non-string, or a residents_url that is not an absolute http/https URL) are rejected by load_config with the existing config error contract, covered by tests",
+        "The config init starter template (src/irc_lens/cli/_commands/config_cmd.py) includes a commented culture: section; both test config literals (tests/helpers.py DEV_CONFIG and tests/conftest.py _dev_config) carry the new fields; uv run pytest -q passes"
+      ],
+      "deps": [],
+      "covers": [
+        "c17",
+        "h16"
+      ]
+    },
+    {
+      "id": "t2",
+      "summary": "Fetch layer: residents client, URL discovery, classification",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "New module src/irc_lens/web/residents.py exposes resolve_residents_url(residents_url, overview_name) returning the explicit URL when set, else `http://127.0.0.1:{port}/residents.json` with the port read from `~/.culture/pids/overview-{overview_name}.port`, else None; a missing or garbled port file yields None and never raises",
+        "fetch_residents(url) classifies outcomes: HTTP 200 with supported true -> SUPPORTED(payload); 200 with supported false -> UNSUPPORTED; 503 (even with a malformed body) -> UNREACHABLE; connection refused, timeout, upstream 500, or non-JSON body -> UNAVAILABLE; it uses aiohttp ClientSession with ClientTimeout(total=5) and its except clause names both aiohttp.ClientError and asyncio.TimeoutError",
+        "tests/_culture_server.py provides an in-tree fake culture endpoint (no network egress) able to serve every scenario; tests/test_residents_fetch.py covers each classification branch as a distinct case and runs in uv run pytest -q"
+      ],
+      "deps": [],
+      "covers": [
+        "c6",
+        "c11",
+        "c13",
+        "c14",
+        "c16",
+        "h10",
+        "h13",
+        "h15"
+      ]
+    },
+    {
+      "id": "t3",
+      "summary": "Rendering: residents template, notices, dashes, flags",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "templates/residents.html.j2 renders a full HTML document: for SUPPORTED a table with columns nick, server, state, since, task, tokens in/out, budget percent, and flags; for UNSUPPORTED a presence-pending-agentirc-release notice; for UNREACHABLE an IRCd-down notice; for UNAVAILABLE a resource-view-unavailable notice",
+        "Null task/tokens/budget fields render as dashes; rows render sorted by nick (defensively re-sorted at render time); budget_warning true and presumed_hung true rows carry distinguishing markup \u2014 all asserted in tests/test_render_residents.py including a fully-populated row asserting every promised column",
+        "The rendered HTML never contains the upstream URL, host, or port; the console help pane (templates/_info.html.j2) gains a one-line mention of /residents"
+      ],
+      "deps": [],
+      "covers": [
+        "c4",
+        "c5",
+        "c7",
+        "h2",
+        "h7",
+        "h8",
+        "h3"
+      ]
+    },
+    {
+      "id": "t4",
+      "summary": "Route: authed GET /residents wired end-to-end, 200 in every outcome",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "GET /residents is registered in web/app.py and handled in web/routes.py: it resolves LensConfig culture fields, fetches server-side via the t2 module, renders via the t3 template, and returns HTTP 200 text/html in every outcome \u2014 connection refused, timeout, upstream 503, upstream 500, non-JSON body \u2014 with the upstream status code appearing nowhere in the response body",
+        "/residents appears on NEITHER middleware exempt list (dev middleware in web/app.py, CF middleware in web/auth.py); tests prove an unauthenticated request is rejected in auth-enforcing mode, and the feature registers only a GET route with no mutation path",
+        "tests/test_residents_route.py drives the three degrade states (supported false, upstream 503, endpoint unreachable) end-to-end against the fake culture server asserting HTTP 200 plus each state-specific notice text, and asserts a supported payload renders the table sorted by nick",
+        "Route docstrings/comments note the deliberate contrast: this page returns 200-with-notice rather than the {error, hint} JSON contract used by POST endpoints \u2014 matching the graceful-degrade requirement"
+      ],
+      "deps": [
+        "t1",
+        "t2",
+        "t3"
+      ],
+      "covers": [
+        "c1",
+        "c2",
+        "c3",
+        "c8",
+        "c9",
+        "c15",
+        "c23",
+        "h1",
+        "h4",
+        "h5",
+        "h6",
+        "h9",
+        "h12",
+        "h14"
+      ]
+    },
+    {
+      "id": "t5",
+      "summary": "Ship: docs, changelog, version bump, and the issue-53 release reply",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "docs/architecture.md gains the /residents route-table row and a decision-log entry explaining the server-side fetch and port-file discovery choice; docs/cli.md documents the culture: config section",
+        "CHANGELOG.md gains the feature entry and pyproject.toml [project].version gets a minor bump; uv run pytest -q passes on the final tree",
+        "After merge/release, a reply is posted on issue 53 naming the shipping irc-lens release so culture can note it in the rollout \u2014 recorded as an explicit ship-checklist step in the PR description"
+      ],
+      "deps": [
+        "t4"
+      ],
+      "covers": [
+        "c18",
+        "h17",
+        "h6",
+        "h11",
+        "c3"
+      ]
+    }
+  ],
+  "risks": [
+    {
+      "id": "r1",
+      "text": "The port-file path (~/.culture/pids) is a culture internal, not a published contract; if culture relocates it, discovery silently degrades to the unavailable notice until the residents_url override is set",
+      "kind": "unknown_nonblocking",
+      "task_id": null
+    },
+    {
+      "id": "r2",
+      "text": "culture may later grow a pinned --serve-port flag on mesh overview --serve; if it does, a static residents_url config becomes the simpler primary path",
+      "kind": "follow_up",
+      "task_id": null
+    },
+    {
+      "id": "r3",
+      "text": "Auto-refresh is deferred by decision (spec parked item v1); any future cadence must weigh that each upstream request costs culture a fresh IRC connect+register",
+      "kind": "follow_up",
+      "task_id": null
+    }
+  ]
+}

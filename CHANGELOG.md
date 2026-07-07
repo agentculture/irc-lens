@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-07-07
+
+### Added
+
+- **`GET /residents` — culture resident-presence page** (issue #53; culture
+  presence-v1 plan task t8): a standalone, authed console page rendering
+  culture's live resource view — one row per resident (nick, server, state,
+  since, current-task hint, tokens in/out, budget % with warning highlight,
+  presumed-hung flag), sorted by nick, every nullable field as a dash. The
+  payload is fetched **server-side** from culture's loopback-only
+  `/residents.json`: the endpoint is discovered via the overview server's
+  port file (`culture.overview_name`, defaulting to `server.name`) or an
+  explicit `culture.residents_url` override, so it needs no public exposure
+  and Cloudflare Access stays the only auth surface. Hard graceful degrade —
+  every upstream state renders HTTP 200 with a kind-specific notice, never
+  an error page: `supported: false` → "presence pending the agentirc
+  release (agentirc#53)", upstream 503 → "IRCd down", endpoint unreachable
+  or unconfigured → "resource view unavailable". New optional `culture:`
+  config section (validated, in the `config init` starter), a help-pane
+  mention, an in-tree fake culture endpoint server for tests, and 39 new
+  tests across config, fetch classification, rendering, and the route.
+  Spec and plan exported via devague under `docs/specs/` and `docs/plans/`.
+  Auto-refresh is deliberately deferred (each upstream request costs
+  culture a fresh IRC connect+register).
+
 ## [0.9.2] - 2026-07-04
 
 ### Added

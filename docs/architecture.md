@@ -105,6 +105,7 @@ See `docs/security-checklist.md` for the CSP directives and rationale.
 | `/events` | `GET` | — | 200 SSE stream |
 | `/static/{path}` | `GET` | — | 200 vendored assets |
 | `/agent`, `/agent/{slug}` | `GET` | — | 200 markdown/XML (agentfront HTTP front) |
+| `/residents` | `GET` | — | 200 HTML, always (kind-specific notice on degrade) |
 
 Details: `/input` accepts JSON or form-encoded `text` field; errors are
 bad JSON, oversize, unhealthy. `/upload` media responses include
@@ -117,7 +118,11 @@ ordinary, **non-exempt** routes: unlike `/static`, `/healthz`, and
 `/media`, they sit *behind* the same identity middleware as the console
 root (dev mode's synthetic identity, or a valid Cloudflare Access JWT in
 `cloudflare-access` mode). See `web/front.py` and the decision log entry
-below.
+below. `/residents` is likewise non-exempt, and is the one route that
+never returns an error status: every upstream state — presence not yet
+supported, culture server down, overview endpoint unreachable or
+unconfigured — renders 200 with a kind-specific notice (see "Why
+`/residents` fetches server-side" in the decision log).
 
 `POST /input` content-negotiates: `application/json` triggers JSON
 parsing, anything else (including HTMX's default
@@ -190,6 +195,29 @@ network. Vendored assets live under
 `src/irc_lens/static/vendor/` and ship in the wheel. Refreshing
 them is a one-line `curl` per pin (see [Vendored frontend
 assets](#vendored-frontend-assets)).
+
+### Why `/residents` fetches server-side and never proxies an error
+
+Culture's resource-view endpoint (`GET /residents.json`, served by
+`culture mesh overview --serve`) is loopback-only on an **ephemeral**
+port — there is no port flag; the overview server writes the actual
+port to `~/.culture/pids/overview-<name>.port` on every start. So the
+page (a) fetches **server-side** — the console process reads the port
+file (`culture.overview_name`, defaulting to `server.name`) or an
+explicit `culture.residents_url` override, and the browser only ever
+talks to the console, keeping the endpoint off the public internet and
+Cloudflare Access as the only auth surface; and (b) never proxies an
+upstream status: `supported: false` is a known mesh state (presence
+pending the agentirc release, agentirc#53), a 503 means the culture
+server is unreachable, and anything else — connection refused, timeout,
+500, non-JSON — means the overview server itself is absent. A down
+mesh is exactly when the operator opens this page (the 2026-07-03
+console-500 incident is the counterexample this guards against), so
+every one of those states renders HTTP 200 with a kind-specific notice.
+This is a deliberate contrast with the `{error, hint}` JSON contract of
+the POST endpoints, not an inconsistency. Spec:
+`docs/specs/2026-07-07-residents-presence-page.md` (ratified on
+issue #53).
 
 ### Why cite-don't-import from culture
 
