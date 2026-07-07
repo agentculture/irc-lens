@@ -192,3 +192,25 @@ def test_resident_kinds_are_the_four_documented_values() -> None:
         "unreachable",
         "unavailable",
     )
+
+
+async def test_200_supported_with_non_list_residents_classifies_unavailable(
+    culture_server: FakeCultureServer,
+) -> None:
+    # A truthy non-list survives `serve_supported`'s `or []` untouched:
+    # the envelope says supported, the array shape is garbage. Must
+    # degrade at the fetch layer, never reach the renderer (PR #54
+    # review, comment 3533556372).
+    culture_server.serve_supported(residents="garbage")  # type: ignore[arg-type]
+    result = await fetch_residents(culture_server.residents_url)
+    assert result.kind == "unavailable"
+    assert result.payload is None
+
+
+async def test_200_supported_with_non_dict_rows_classifies_unavailable(
+    culture_server: FakeCultureServer,
+) -> None:
+    culture_server.serve_supported(residents=["spark-a", "spark-b"])  # type: ignore[list-item]
+    result = await fetch_residents(culture_server.residents_url)
+    assert result.kind == "unavailable"
+    assert result.payload is None

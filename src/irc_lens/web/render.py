@@ -356,7 +356,12 @@ def _resident_budget_cell(resident: dict) -> str:
     resident has no configured budget or reported no token counters.
     """
     budget_used_pct = resident.get("budget_used_pct")
-    if budget_used_pct is None:
+    # Numeric-only, not just non-None: a version-skewed serializer could
+    # put a string here, and `:g` on a str raises — degrade to a dash
+    # like every other absent value (bool is an int subclass; exclude it).
+    if not isinstance(budget_used_pct, (int, float)) or isinstance(
+        budget_used_pct, bool
+    ):
         return _RESIDENTS_DASH
     return f"{budget_used_pct:g}%"
 
@@ -421,7 +426,7 @@ def render_residents_page(kind: str, payload: dict | None) -> str:
         residents = (payload or {}).get("residents") or []
         rows = [
             _resident_row(r)
-            for r in sorted(residents, key=lambda r: r.get("nick") or "")
+            for r in sorted(residents, key=lambda r: str(r.get("nick") or ""))
         ]
         generated_at = (payload or {}).get("generated_at") or _RESIDENTS_DASH
         notice = None

@@ -110,5 +110,15 @@ async def fetch_residents(url: str) -> ResidentsResult:
         return ResidentsResult("unavailable", None)
 
     if payload["supported"]:
+        # The envelope checks above trust nothing about the body, and the
+        # residents array gets the same treatment: an ephemeral-port
+        # endpoint can be answered by the wrong process or a
+        # version-skewed serializer, and a malformed-but-200 payload must
+        # degrade, not raise downstream in the renderer (PR #54 review).
+        residents = payload.get("residents")
+        if not isinstance(residents, list) or not all(
+            isinstance(r, dict) for r in residents
+        ):
+            return ResidentsResult("unavailable", None)
         return ResidentsResult("supported", payload)
     return ResidentsResult("unsupported", None)

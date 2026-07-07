@@ -555,7 +555,11 @@ async def get_residents(request: web.Request) -> web.Response:
     not the AgentIRC connection.
     """
     config = request.app["config"]
-    url = resolve_residents_url(
+    # The resolver reads the overview port file — a blocking read that
+    # stays off the event loop like every other file read in this app
+    # (the `store.resolve` / `precompute_static_hashes` convention).
+    url = await asyncio.to_thread(
+        resolve_residents_url,
         config.culture_residents_url,
         config.culture_overview_name or config.server_name,
     )
@@ -563,10 +567,15 @@ async def get_residents(request: web.Request) -> web.Response:
         result = ResidentsResult("unavailable", None)
     else:
         result = await fetch_residents(url)
-    return web.Response(
-        text=render_residents_page(result.kind, result.payload),
-        content_type="text/html",
-    )
+    try:
+        body = render_residents_page(result.kind, result.payload)
+    except Exception:
+        # Backstop for the never-an-error-page contract: a payload that
+        # slipped past fetch-layer validation still degrades to the
+        # unavailable notice rather than a 500.
+        logger.exception("residents render failed; degrading to notice")
+        body = render_residents_page("unavailable", None)
+    return web.Response(text=body, content_type="text/html")
 
 
 async def get_healthz(_request: web.Request) -> web.Response:  # NOSONAR S7503

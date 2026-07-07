@@ -258,3 +258,22 @@ def test_supported_empty_list_renders_no_residents_connected() -> None:
 
     assert 'data-testid="residents-table"' in out
     assert "No residents connected." in out
+
+
+def test_messy_scalars_inside_rows_render_without_raising() -> None:
+    # Version-skewed serializers can put wrong scalar types inside an
+    # otherwise well-shaped row; the renderer coerces rather than
+    # raising (PR #54 review, comment 3533556372): non-string nicks
+    # sort via str(), a non-numeric budget_used_pct renders a dash.
+    html = render_residents_page(
+        "supported",
+        {
+            "generated_at": "2026-07-07T12:00:00Z",
+            "residents": [
+                {"nick": 1, "budget_used_pct": "not-a-number"},
+                {"nick": "spark-a", "budget_used_pct": True},
+            ],
+        },
+    )
+    assert 'data-testid="residents-table"' in html
+    assert "not-a-number" not in html

@@ -220,3 +220,14 @@ async def test_only_get_is_registered(culture) -> None:
         assert resp.status == 405
     finally:
         await client.close()
+
+
+@pytest.mark.asyncio
+async def test_malformed_supported_payload_still_renders_200_notice(culture) -> None:
+    # supported:true with a garbage residents shape must degrade to the
+    # unavailable notice, never a 500 (PR #54 review, comment
+    # 3533556372 — the never-an-error-page contract).
+    culture.serve_supported(residents="garbage")
+    status, body = await _get_residents(_config_for(culture))
+    assert status == 200
+    assert NOTICE_UNAVAILABLE in body
