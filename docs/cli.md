@@ -114,6 +114,19 @@ config file is required for `serve` and for every live tool below —
 `irc-lens config init` is the remediation every one of them points at
 when it's missing.
 
+### `culture:` — the residents resource view
+
+The optional `culture:` section points the `/residents` console page at
+culture's resource-view endpoint (`GET /residents.json`, served by
+`culture mesh overview --serve`). `residents_url` is an explicit
+override; when unset, the page discovers the endpoint by reading the
+overview server's port file
+(`~/.culture/pids/overview-<name>.port`, where `<name>` is
+`culture.overview_name`, defaulting to `server.name`) — the overview
+server binds an ephemeral port, so discovery survives restarts. When
+neither resolves, the page renders a "resource view unavailable" notice
+rather than failing.
+
 ### `--nick` and `--bind`
 
 In `auth.mode: dev`, `--nick` overrides `auth.dev.nick`. In
