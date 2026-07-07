@@ -59,6 +59,8 @@ def _dev_config(server_host: str, server_port: int, nick: str) -> LensConfig:
         media_public_base_url="",
         media_remote_embeds="click",
         media_trusted_hosts=(),
+        culture_residents_url=None,
+        culture_overview_name=None,
     )
 
 

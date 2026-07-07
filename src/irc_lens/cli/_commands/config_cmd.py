@@ -35,6 +35,10 @@ media:
   # public_base_url: ""                   # default: derive from web.bind/web.port at use time
   remote_embeds: click                    # click, auto, or off
   # trusted_hosts: []                     # default: empty
+
+# culture:
+#   residents_url: ""   # explicit override for culture's /residents.json endpoint
+#   overview_name: ""   # culture server name used to discover the overview port file (defaults to server.name when unset)
 """
 
 
