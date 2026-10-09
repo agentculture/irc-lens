@@ -250,7 +250,7 @@ def test_password_stored_as_argon2id_hash_not_plaintext(tmp_path: Path) -> None:
         con.close()
     assert len(rows) == 1
     blob = " ".join(str(col) for col in rows[0]).encode()
-    assert blob.startswith(b"$argon2id$"), "password column must hold an argon2id hash"
+    assert rows[0][-1].startswith("$argon2id$"), "hash column must be argon2id"
     assert secret.encode() not in blob
     assert hashlib.sha256(secret.encode()).hexdigest().encode() not in blob
     # And nowhere else in the file either.
