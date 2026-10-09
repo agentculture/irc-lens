@@ -6,12 +6,24 @@ don't recognize, refresh once and retry — but never on every request
 (anti-flood window). Identity (email or service-token common-name)
 becomes ``request['identity']``; missing/invalid → 401, allowlist
 deny → 403.
+
+Tiers (guest mode): a verified, allowlisted JWT yields the ``approved``
+tier. With ``guest_mode.enabled`` off that is the only way through —
+behavior is exactly as above. With it on, every request that is not
+approved (no JWT, unverifiable JWT, verified-but-not-allowlisted
+principal) resolves to the ``anonymous`` tier instead of a 401/403, and
+reaches its handler only when that route is explicitly marked with
+:func:`allows_anonymous`; every other route (the real-mesh console,
+stream, input, upload, residents, ``/agent``) still answers 401. Deny by
+default: a route that forgets the marker stays approved-only.
 """
+
 from __future__ import annotations
 
 import asyncio
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 import aiohttp
@@ -21,7 +33,12 @@ from jwt.algorithms import RSAAlgorithm
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
-from irc_lens.web.identity import Identity, derive_nick
+from irc_lens.web.identity import (
+    ANONYMOUS_IDENTITY,
+    TIER_APPROVED,
+    Identity,
+    derive_nick,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +59,39 @@ def _scheme_for(team_domain: str) -> str:
 # default threshold 3) stays quiet and so the wording can't drift across
 # the three jwt-decode failure arms below.
 _ERR_JWT_VERIFICATION = "Cloudflare Access JWT failed verification"
+
+
+# Single response for an anonymous request on an approved-only route. The
+# same body whether the JWT was missing, unverifiable, or for an email not
+# on the allowlist, so the route leaks no membership signal (spec c45).
+_ERR_APPROVED_REQUIRED = "approved sign-in required"
+_HINT_APPROVED_REQUIRED = "sign in through /login to reach the real mesh"
+
+# _AuthDenied statuses that mean "not approved" and therefore fall back to
+# the anonymous tier in guest mode. 500 (nick derivation) and 502 (JWKS
+# unreachable) are server-side faults and surface unchanged.
+_ANONYMOUS_FALLBACK_STATUSES = frozenset({401, 403})
+
+_ALLOWS_ANONYMOUS_ATTR = "_irc_lens_allows_anonymous"
+
+Handler = Callable[[web.Request], Awaitable[web.StreamResponse]]
+
+
+def allows_anonymous(handler: Handler) -> Handler:
+    """Mark a route handler as reachable by the ``anonymous`` tier.
+
+    Only consulted when ``guest_mode.enabled``; the handler then sees
+    ``request["identity"]`` with ``tier == "anonymous"`` (or ``approved``)
+    and must branch on it. Unmarked handlers stay approved-only.
+    """
+    setattr(handler, _ALLOWS_ANONYMOUS_ATTR, True)
+    return handler
+
+
+def _route_allows_anonymous(request: web.Request) -> bool:
+    route = getattr(request.match_info, "route", None)
+    route_handler = getattr(route, "handler", None)
+    return bool(getattr(route_handler, _ALLOWS_ANONYMOUS_ATTR, False))
 
 
 def _build_jwks_url(team_domain: str) -> str:
@@ -256,6 +306,7 @@ def _authorize_principal(
         principal=principal,
         nick=nick,
         raw_jwt_subject=str(claims.get("sub", "")),
+        tier=TIER_APPROVED,
     )
 
 
@@ -296,6 +347,20 @@ def build_cloudflare_middleware(config: LensConfig):
     allowed_emails = set(config.allowed_emails)
     allowed_tokens = set(config.allowed_service_tokens)
     server_name = config.server_name
+    guest_enabled = config.guest_enabled
+
+    async def _as_anonymous(request: web.Request, handler, reason: str):
+        """Guest mode: resolve to the anonymous tier, deny-by-default routes."""
+        logger.info(
+            "auth=anonymous reason=%s method=%s path=%s",
+            reason,
+            request.method,
+            request.path,
+        )
+        if not _route_allows_anonymous(request):
+            return _http_error(401, _ERR_APPROVED_REQUIRED, _HINT_APPROVED_REQUIRED)
+        request["identity"] = ANONYMOUS_IDENTITY
+        return await handler(request)
 
     @web.middleware
     async def middleware(request: web.Request, handler):
@@ -318,6 +383,8 @@ def build_cloudflare_middleware(config: LensConfig):
             return await handler(request)
         token = _extract_token(request)
         if not token:
+            if guest_enabled:
+                return await _as_anonymous(request, handler, "no-jwt")
             return _http_error(
                 401,
                 "missing Cloudflare Access identity",
@@ -331,6 +398,10 @@ def build_cloudflare_middleware(config: LensConfig):
                 claims, allowed_emails, allowed_tokens, server_name
             )
         except _AuthDenied as denied:
+            if guest_enabled and denied.response.status in _ANONYMOUS_FALLBACK_STATUSES:
+                return await _as_anonymous(
+                    request, handler, f"not-approved-{denied.response.status}"
+                )
             return denied.response
         request["identity"] = identity
         logger.info(
