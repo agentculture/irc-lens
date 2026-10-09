@@ -179,6 +179,7 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
     app.router.add_get("/events", routes.get_events)
     app.router.add_get("/residents", routes.get_residents)
     app.router.add_get("/healthz", routes.get_healthz)
+    app.router.add_get("/owner/metrics", routes.get_owner_metrics)
 
     static_dir = files("irc_lens").joinpath("static")
     app.router.add_static(

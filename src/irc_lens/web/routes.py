@@ -36,6 +36,7 @@ from collections.abc import AsyncIterator
 import aiohttp
 from aiohttp import web
 
+from irc_lens import metrics
 from irc_lens.commands import parse_command
 from irc_lens.session import LensConnectionLost
 from irc_lens.web.events import format_sse
@@ -587,3 +588,27 @@ async def get_healthz(_request: web.Request) -> web.Response:  # NOSONAR S7503
     that constraint; the inline ``# NOSONAR S7503`` silences it.
     """
     return web.json_response({"ok": True})
+
+
+async def get_owner_metrics(request: web.Request) -> web.Response:  # NOSONAR S7503
+    """Owner-only guest-mode counters + sandbox-agent presence (JSON).
+
+    Approved tier only. Deliberately NOT ``allows_anonymous``: the auth
+    middleware already 401s anonymous requests; the tier check here also
+    refuses a ``guest`` identity with the same standard denial.
+    """
+    identity = request.get("identity")
+    if identity is None or not identity.is_approved:
+        return web.json_response(
+            {
+                "error": "approved sign-in required",
+                "hint": "sign in through /login to reach the real mesh",
+            },
+            status=401,
+        )
+    return web.json_response(
+        {
+            "counters": metrics.get_metrics().snapshot(),
+            "agent": metrics.get_presence().state(),
+        }
+    )
