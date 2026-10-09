@@ -60,3 +60,41 @@ async def test_roster_filled_from_server_on_join() -> None:
         for s in (a, b):
             await s.disconnect()
         await server.stop()
+
+
+@pytest.mark.asyncio
+async def test_roster_refresh_requested_mid_flight_is_not_lost(monkeypatch) -> None:
+    """The agent JOINs while the lens's first WHO is in flight: the refresh it
+    triggers must run after, not race the same-key WHO (browser pass: guest
+    B's room showed no agent although sbx-ask was in it)."""
+    import asyncio
+
+    s = Session(host="127.0.0.1", port=1, nick="sbx-gus")
+    s.set_current_channel("#g-gus")
+    monkeypatch.setattr(Session, "connected", property(lambda self: True))
+    replies = [
+        [{"nick": "sbx-gus", "flags": "H", "realname": "sbx-gus"}],
+        [
+            {"nick": "sbx-gus", "flags": "H", "realname": "sbx-gus"},
+            {"nick": "sbx-ask", "flags": "H", "realname": "tool-less Q&A agent"},
+        ],
+    ]
+    inflight = 0
+    peak = 0
+
+    async def who(_target):
+        nonlocal inflight, peak
+        inflight += 1
+        peak = max(peak, inflight)
+        await asyncio.sleep(0.05)
+        inflight -= 1
+        return replies.pop(0) if replies else replies_last
+
+    replies_last = replies[1]
+    s.who = who  # type: ignore[method-assign]
+    first = asyncio.create_task(s.refresh_roster())
+    await asyncio.sleep(0.01)
+    await s.refresh_roster()  # the agent's JOIN arrives mid-flight
+    await first
+    assert peak == 1
+    assert {e.nick for e in s.roster} == {"sbx-gus", "sbx-ask"}

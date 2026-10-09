@@ -561,7 +561,24 @@ class Session:
     async def refresh_roster(self) -> None:
         """Fill the sidebar member list from a live ``WHO`` of the current
         channel, then publish it. Before this the roster was only ever set
-        by the demo seed, so "In this room" stayed empty on a live server."""
+        by the demo seed, so "In this room" stayed empty on a live server.
+
+        One WHO at a time: two in flight for the same channel share one
+        reply key and clobber each other. A request that arrives mid-flight
+        (e.g. the agent JOINs right after us) marks the roster dirty and the
+        running refresh goes round once more."""
+        self._roster_dirty = True
+        lock = getattr(self, "_roster_lock", None)
+        if lock is None:
+            lock = self._roster_lock = asyncio.Lock()
+        if lock.locked():
+            return
+        async with lock:
+            while self._roster_dirty:
+                self._roster_dirty = False
+                await self._refresh_roster_once()
+
+    async def _refresh_roster_once(self) -> None:
         channel = self.current_channel
         if not channel or not self.connected:
             return
@@ -582,10 +599,8 @@ class Session:
         self._publish_roster()
 
     def _request_roster_refresh(self) -> None:
-        """Coalesced roster refresh from the sync read loop."""
-        task = getattr(self, "_roster_task", None)
-        if task is not None and not task.done():
-            return
+        """Roster refresh from the sync read loop (coalesced by the lock in
+        ``refresh_roster``)."""
         try:
             self._roster_task = asyncio.get_running_loop().create_task(self.refresh_roster())
         except RuntimeError:

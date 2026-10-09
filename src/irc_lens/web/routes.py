@@ -792,6 +792,12 @@ async def get_events(request: web.Request) -> web.StreamResponse:
         return gated
     session = await _resolve_session(request)
     sub = session.event_bus.subscribe()
+    # Re-send the member list once this stream is live: a roster update
+    # published before the browser connected (e.g. the agent joining a
+    # fresh guest room) would otherwise be lost until a reload.
+    refresh = getattr(session, "_request_roster_refresh", None)
+    if refresh is not None:
+        refresh()
     # If this session is already in the mesh view (e.g. a page reload while
     # viewing the graph), push the current snapshot straight away so the
     # canvas paints without waiting for the next refresher tick. Gated on
