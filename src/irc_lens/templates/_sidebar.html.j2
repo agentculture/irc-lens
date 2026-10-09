@@ -18,9 +18,11 @@
         hx-vals="{{ {'text': '/switch ' ~ channel}|tojson|forceescape }}"
         {# Keyboard activation: `role="button"` + `tabindex="0"` alone makes
            the row focusable but Enter/Space do nothing on an `<li>`. The
-           explicit `hx-trigger` wires the same htmx POST to keypress events
-           so screen-reader and keyboard-only users can switch channels. #}
-        hx-trigger="click, keyup[key=='Enter'], keyup[key==' ']"
+           delegated keydown handler in chatui.js turns Enter/Space on these
+           rows into a click, so screen-reader and keyboard-only users can
+           switch channels. No hx-trigger event filters here: they need
+           eval, which the CSP forbids. #}
+        hx-trigger="click"
         hx-swap="none"
         {% endif %}
         {% if channel == session.current_channel %}aria-current="true"{% endif %}>

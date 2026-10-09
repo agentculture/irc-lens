@@ -163,3 +163,27 @@ def test_resend_network_error_wrapped(monkeypatch):
     monkeypatch.setattr(urllib.request, "urlopen", fake)
     with pytest.raises(AfiError):
         mail.ResendAdapter("f@x.y", "MY_KEY").send("t@x.y", "s", "b")
+
+
+def test_mail_says_code_not_token_and_states_real_expiry():
+    subject, body = mail.render_token_email("tok-123")
+    assert "code" in subject.lower() and "token" not in subject.lower()
+    assert "token" not in body.lower()
+    assert "after a while" not in body
+    assert "15 minutes" in body
+
+
+def test_mail_expiry_follows_ttl_argument_and_stays_address_independent():
+    _, body = mail.render_token_email("T", ttl_s=1800)
+    assert "30 minutes" in body
+    _, body1 = mail.render_token_email("T", ttl_s=60)
+    assert "1 minute" in body1 and "1 minutes" not in body1
+
+
+def test_mail_default_ttl_matches_store_default():
+    from irc_lens.guest_store import DEFAULT_TOKEN_TTL
+
+    assert DEFAULT_TOKEN_TTL == 900
+    assert mail.render_token_email("T") == mail.render_token_email(
+        "T", ttl_s=DEFAULT_TOKEN_TTL
+    )

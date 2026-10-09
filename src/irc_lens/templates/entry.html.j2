@@ -42,6 +42,9 @@
             <a href="/entry" class="entry-chip-change">Change</a>
           </div>
           <input type="hidden" name="email" value="{{ email }}">
+          <input type="email" name="username" autocomplete="username"
+                 value="{{ email }}" readonly tabindex="-1" aria-hidden="true"
+                 class="entry-username-hidden">
           <label for="entry-password">Password</label>
           <input id="entry-password" name="password" type="password"
                  autocomplete="current-password" autofocus maxlength="1024">

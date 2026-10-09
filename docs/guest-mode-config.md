@@ -77,10 +77,11 @@ With guest mode on, anonymous visitors get the entry card
 | `POST /entry/email` | The password window — identical for every address |
 | `POST /entry/signin` | Approved email + correct password → 303 `/login`; otherwise `Email or password is wrong` |
 | `POST /entry/guest` | Nickname (`sbx-` prefix) + Terms/Privacy consent |
-| `POST /entry/guest/start` | Emails a single-use, 15-minute token (one fixed template) |
-| `POST /entry/verify` | Token check → guest + consent recorded, `lens_guest` cookie, 303 `/` |
+| `POST /entry/guest/start` | Emails a single-use, 15-minute code (one fixed template; the mail says "code", matching the Code field) |
+| `GET /login` | Post-SSO return target (Cloudflare Access forwards the user here): always 303 `/`, `Cache-Control: no-store`, any tier, never 404 and never reveals approval; served even with guest mode off |
+| `POST /entry/verify` | Code check → guest + consent recorded, `lens_guest` cookie, 303 `/` |
 
-All six answer 404 while `guest_mode.enabled` is false. Sign-in failures are
+The `/entry*` routes answer 404 while `guest_mode.enabled` is false. Sign-in failures are
 indistinguishable: an unknown email still pays one (dummy) argon2id verify, and
 every sign-in response is padded to a fixed floor (0.5 s). Sign-in and token
 verification are limited per email and per IP by
