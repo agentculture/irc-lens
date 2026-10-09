@@ -47,23 +47,46 @@ from typing import Iterable
 
 from irc_lens.guest_store import GuestStore
 
-# Possessive quantifiers: no backtracking (linear time on any input).
-_EMAIL = re.compile(r"[\w.+-]++@[\w-]++(?:\.[\w-]++)++")
+# Emails and IPv6 addresses: match maximal runs of one simple character class
+# (linear, no backtracking), then validate each candidate in Python.
+_EMAIL_RUN = re.compile(r"[\w.+@-]+")
+_HEX_RUN = re.compile(r"[0-9A-Fa-f:.]+")
 _IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.]*\w)")
-# IPv6 candidates: a run of hex digits, dots and >= 2 colons, then confirmed
-# by ipaddress (covers ::1, fe80::1, full v6 and v4-mapped). Possessive
-# quantifiers keep the scan linear; validation keeps the pattern simple.
-_IPV6_CANDIDATE = re.compile(r"(?<![\w:])[0-9A-Fa-f.]*+(?::[0-9A-Fa-f.]*+){2,8}+(?![\w:])")
+_TRAIL = ".-"  # sentence punctuation that may cling to a candidate
+
+
+def _is_email(token: str) -> bool:
+    local, at, domain = token.partition("@")
+    labels = domain.split(".")
+    return (
+        bool(at and local)
+        and "@" not in domain
+        and len(labels) >= 2
+        and all(labels)
+    )
+
+
+def _email_sub(m: re.Match[str]) -> str:
+    text = m.group(0)
+    core = text.rstrip(_TRAIL)
+    return "[email]" + text[len(core) :] if _is_email(core) else text
 
 
 def _ipv6_sub(m: re.Match[str]) -> str:
-    text = m.group(0)
+    """``[ip]`` for a real IPv6 address standing alone (not part of a word)."""
+    text, src = m.group(0), m.string
+    before = src[m.start() - 1] if m.start() else ""
+    after = src[m.end()] if m.end() < len(src) else ""
+    if text.count(":") < 2 or before.isalnum() or before == "_" or after.isalnum() or after == "_":
+        return text
     core = text.rstrip(".")  # a sentence-ending dot is not part of the address
     try:
         ipaddress.IPv6Address(core)
     except ValueError:
         return text
     return "[ip]" + text[len(core) :]
+
+
 _PHONE = re.compile(r"(?<![\w])\+?\(?\d[\d\s().-]{5,}\d(?![\w])")
 _NAME = r"[A-Z][\w'’-]+(?:\s+[A-Z][\w'’-]+){0,2}"
 _NAME_CUES = [
@@ -104,9 +127,9 @@ def scrub_text(
     """
     for key in sorted(replacements or {}, key=len, reverse=True):
         text = _escape_ci(key).sub((replacements or {})[key], text)
-    text = _EMAIL.sub("[email]", text)
+    text = _EMAIL_RUN.sub(_email_sub, text)
     text = _ANY_SBX_NICK.sub("[nick]", text)
-    text = _IPV6_CANDIDATE.sub(_ipv6_sub, text)
+    text = _HEX_RUN.sub(_ipv6_sub, text)
     text = _IPV4.sub("[ip]", text)
     text = _PHONE.sub(_phone_sub, text)
     for pat in _NAME_CUES:

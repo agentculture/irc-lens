@@ -404,6 +404,12 @@ def build_cloudflare_middleware(config: LensConfig):
         request["identity"] = _guest_identity(request) or ANONYMOUS_IDENTITY
         return await handler(request)
 
+    async def _fallback(request: web.Request, handler, reason: str, deny):
+        """Guest mode: continue as anonymous; otherwise answer with ``deny()``."""
+        if guest_enabled:
+            return await _as_anonymous(request, handler, reason)
+        return deny()
+
     @web.middleware
     async def middleware(request: web.Request, handler):
         # Static assets never require identity (browser fetches them
@@ -421,12 +427,15 @@ def build_cloudflare_middleware(config: LensConfig):
             return await handler(request)
         token = _extract_token(request)
         if not token:
-            if guest_enabled:
-                return await _as_anonymous(request, handler, "no-jwt")
-            return _http_error(
-                401,
-                "missing Cloudflare Access identity",
-                "ensure this request is reaching the lens through cloudflared",
+            return await _fallback(
+                request,
+                handler,
+                "no-jwt",
+                lambda: _http_error(
+                    401,
+                    "missing Cloudflare Access identity",
+                    "ensure this request is reaching the lens through cloudflared",
+                ),
             )
         try:
             claims = await _decode_and_verify_jwt(
@@ -436,11 +445,14 @@ def build_cloudflare_middleware(config: LensConfig):
                 claims, allowed_emails, allowed_tokens, server_name
             )
         except _AuthDenied as denied:
-            if guest_enabled and denied.response.status in _ANONYMOUS_FALLBACK_STATUSES:
-                return await _as_anonymous(
-                    request, handler, f"not-approved-{denied.response.status}"
-                )
-            return denied.response
+            if denied.response.status not in _ANONYMOUS_FALLBACK_STATUSES:
+                return denied.response
+            return await _fallback(
+                request,
+                handler,
+                f"not-approved-{denied.response.status}",
+                lambda: denied.response,
+            )
         request["identity"] = identity
         logger.info(
             "auth=ok principal=%s nick=%s method=%s path=%s",
