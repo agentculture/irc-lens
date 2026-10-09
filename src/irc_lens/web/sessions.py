@@ -205,7 +205,7 @@ class SessionRegistry:
             if key[1] != BACKEND_SANDBOX:
                 continue
             bus = getattr(session, "event_bus", None)
-            if bus is not None and bus.subscriber_count() > 0:
+            if bus is not None and bus.subscriber_count > 0:
                 self._idle_since.pop(key, None)
                 continue
             since = self._idle_since.setdefault(key, now)

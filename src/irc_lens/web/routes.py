@@ -810,6 +810,10 @@ async def get_media(request: web.Request) -> web.Response:
     )
 
 
+#: Seconds of SSE quiet before a keepalive comment is written.
+SSE_KEEPALIVE_S = 15.0
+
+
 @allows_anonymous
 async def get_events(request: web.Request) -> web.StreamResponse:
     """SSE stream — drains ``Session.event_bus`` until the client leaves."""
@@ -848,9 +852,14 @@ async def get_events(request: web.Request) -> web.StreamResponse:
     )
     await response.prepare(request)
     try:
-        async for event in sub.events():
+        while True:
+            # A quiet stream sends a comment line every SSE_KEEPALIVE_S: a
+            # closed tab is only noticed when a write fails, and without one
+            # its subscription (and its idle sandbox session) lived forever.
+            event = await sub.next_event(SSE_KEEPALIVE_S)
+            payload = format_sse(event) if event is not None else b": keepalive\n\n"
             try:
-                await response.write(format_sse(event))
+                await response.write(payload)
             except ConnectionError:
                 # Client closed the SSE connection. `ConnectionResetError`,
                 # `BrokenPipeError`, and friends are all `ConnectionError`

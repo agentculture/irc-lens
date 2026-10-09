@@ -497,6 +497,8 @@ async def test_idle_sandbox_sessions_are_closed() -> None:
     closed; one with a live stream, and every mesh session, is kept."""
     from unittest.mock import AsyncMock, MagicMock
 
+    from irc_lens.session import SessionEventBus
+
     def mk(nick):
         s = MagicMock()
         s.nick = nick
@@ -506,7 +508,7 @@ async def test_idle_sandbox_sessions_are_closed() -> None:
         s.join = AsyncMock()
         s.list_channels = AsyncMock(return_value=[])
         s.refresh_roster = AsyncMock()
-        s.event_bus.subscriber_count.return_value = 0
+        s.event_bus = SessionEventBus()  # the real API, not a mock
         return s
 
     reg = SessionRegistry(mk, sandbox_factory=mk)
@@ -516,7 +518,7 @@ async def test_idle_sandbox_sessions_are_closed() -> None:
     live = await reg.get_or_open(
         Identity(principal="guest:b@x", nick="sbx-b", raw_jwt_subject="g"), "sandbox"
     )
-    live.event_bus.subscriber_count.return_value = 1
+    live.event_bus.subscribe()  # an open tab
     mesh = await reg.get_or_open(Identity(principal="o@x", nick="srv-o", raw_jwt_subject="s"))
     await reg.reap_idle(now=0.0, idle_s=600)
     await reg.reap_idle(now=599.0, idle_s=600)
@@ -547,3 +549,33 @@ async def test_agent_answers_in_a_guests_room_are_stored_with_the_guest(env: Env
         ("message", "what is culture?"),
         ("answer", "an IRC mesh"),
     ]
+
+
+async def test_sse_keepalive_detects_a_closed_tab(env: Env, monkeypatch) -> None:
+    """d7: a closed tab must not stay subscribed forever (it never writes),
+    or idle sessions are never reaped. A quiet stream sends a keepalive
+    comment; the failed write ends the subscription."""
+    import asyncio
+
+    from irc_lens.web import routes
+
+    monkeypatch.setattr(routes, "SSE_KEEPALIVE_S", 0.1)
+    env.add_guest()
+    h = env.guest_headers()
+    await env.client.get("/", headers=h)
+    sess = next(
+        s for (p, b), s in zip(env.app["registry"].keys(), env.app["registry"].values())
+        if p.startswith("guest:")
+    )
+    resp = await env.client.get("/events", headers=h)
+    chunk = await asyncio.wait_for(resp.content.readuntil(b"\n\n"), 5)
+    while not chunk.startswith(b":"):
+        chunk = await asyncio.wait_for(resp.content.readuntil(b"\n\n"), 5)
+    assert chunk == b": keepalive\n\n"
+    assert sess.event_bus.subscriber_count == 1
+    resp.close()  # the tab goes away
+    for _ in range(50):
+        if sess.event_bus.subscriber_count == 0:
+            break
+        await asyncio.sleep(0.05)
+    assert sess.event_bus.subscriber_count == 0
