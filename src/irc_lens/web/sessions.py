@@ -71,6 +71,11 @@ def sandbox_presence(session: Any, agent_nick: str) -> dict[str, Any]:
     }
 
 
+def _has_open_tab(session: Any) -> bool:
+    bus = getattr(session, "event_bus", None)
+    return bus is not None and bus.subscriber_count > 0
+
+
 async def _maybe_await(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
@@ -201,15 +206,11 @@ class SessionRegistry:
         Mesh sessions are never reaped.
         """
         closed = []
-        for key, session in list(self._sessions.items()):
-            if key[1] != BACKEND_SANDBOX:
-                continue
-            bus = getattr(session, "event_bus", None)
-            if bus is not None and bus.subscriber_count > 0:
+        sandbox = [(k, s) for k, s in self._sessions.items() if k[1] == BACKEND_SANDBOX]
+        for key, session in sandbox:
+            if _has_open_tab(session):
                 self._idle_since.pop(key, None)
-                continue
-            since = self._idle_since.setdefault(key, now)
-            if now - since >= idle_s:
+            elif now - self._idle_since.setdefault(key, now) >= idle_s:
                 self._idle_since.pop(key, None)
                 await self.close(*key)
                 closed.append(key)

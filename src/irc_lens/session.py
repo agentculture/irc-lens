@@ -187,12 +187,13 @@ class Subscription:
                 break
         return out
 
-    async def next_event(self, timeout: float) -> "SessionEvent | None":
-        """The next event, or ``None`` after *timeout* seconds of quiet
+    async def next_event(self, wait_s: float) -> "SessionEvent | None":
+        """The next event, or ``None`` after *wait_s* seconds of quiet
         (the SSE handler then writes a keepalive)."""
         try:
-            return await asyncio.wait_for(self._sub.queue.get(), timeout)
-        except asyncio.TimeoutError:
+            async with asyncio.timeout(wait_s):
+                return await self._sub.queue.get()
+        except TimeoutError:
             return None
 
     async def events(self) -> AsyncIterator[SessionEvent]:

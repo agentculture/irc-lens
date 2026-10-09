@@ -131,7 +131,8 @@ def export_redacted(store: GuestStore, *, fmt: str = "jsonl") -> str:
     guests, inputs = _read(store)
     emails = {g[0] for g in guests} | {i[0] for i in inputs}
     order = sorted(emails)
-    secrets.SystemRandom().shuffle(order)
+    # CSPRNG (secrets.SystemRandom): pseudonym order must not be guessable.
+    secrets.SystemRandom().shuffle(order)  # NOSONAR S2245
     pseudo = {e: f"guest-{n}" for n, e in enumerate(order, 1)}
 
     replacements: dict[str, str] = {}

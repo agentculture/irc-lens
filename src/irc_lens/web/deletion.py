@@ -46,6 +46,19 @@ logger = logging.getLogger(__name__)
 TOKEN_PURPOSE = "delete"
 
 
+def _flag_log_path(configured: str) -> Path | None:
+    """The operator-configured flag log, canonicalised and checked.
+
+    The path comes only from the lens config (``guest_mode.sandbox.flag_log``),
+    never from a request; it is resolved to its real path and must be an
+    existing ``.jsonl`` file, so nothing else can be rewritten here.
+    """
+    path = Path(os.path.realpath(os.path.expanduser(configured)))
+    if path.suffix != ".jsonl" or not path.is_file():
+        return None
+    return path
+
+
 def purge_flag_log(cfg, nicks: set[str]) -> None:
     """Drop a deleted guest's lines from sbx-ask's flag log (d7).
 
@@ -56,20 +69,22 @@ def purge_flag_log(cfg, nicks: set[str]) -> None:
     if not cfg.guest_sandbox_flag_log:
         logger.warning("guest deletion: guest_mode.sandbox.flag_log unset; flag lines kept")
         return
-    path = Path(cfg.guest_sandbox_flag_log)
-    if not path.exists():
+    path = _flag_log_path(cfg.guest_sandbox_flag_log)
+    if path is None:
+        logger.warning("guest deletion: flag_log is not an existing .jsonl file; kept")
         return
     kept = []
-    for line in path.read_text().splitlines(keepends=True):
+    # Operator config path (see _flag_log_path), not request data.
+    for line in path.read_text().splitlines(keepends=True):  # NOSONAR S2083
         try:
             nick = json.loads(line).get("nick")
         except ValueError:
             nick = None
         if nick not in nicks:
             kept.append(line)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text("".join(kept))
-    os.replace(tmp, path)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("".join(kept))  # NOSONAR S2083 - operator config path
+    os.replace(tmp, path)  # NOSONAR S2083 - operator config path
 
 
 def install(app: web.Application) -> None:

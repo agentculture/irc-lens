@@ -62,7 +62,7 @@ def anonymized_pairs(store: Any, email: str) -> list[dict]:
     nicks = {nick for _e, nick, _ip in store.get_guest(email)}
     ips = {ip for _e, _n, ip in store.get_guest(email) if ip}
     tokens = set(_identifier_tokens(email, ""))
-    replacements = {email: "[email]", **{ip: "[ip]" for ip in ips}}
+    replacements = {email: "[email]", **dict.fromkeys(ips, "[ip]")}
     for nick in nicks:
         replacements[nick] = "[nick]"
         bare = nick.split("-", 1)[-1]

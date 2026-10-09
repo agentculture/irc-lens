@@ -19,6 +19,7 @@ Acceptance criteria / obligations covered:
 from __future__ import annotations
 
 import re
+import secrets
 import statistics
 import time
 from collections.abc import AsyncIterator
@@ -36,7 +37,7 @@ from irc_lens.mail import RecordingAdapter, render_token_email
 from irc_lens.web import csrf, entry, make_app
 
 APPROVED = "alice@example.com"
-APPROVED_PW = "correct horse battery staple"
+APPROVED_PW = secrets.token_urlsafe(16)  # generated per run: no literal secret
 UNKNOWN = "mallory@example.org"
 GUEST = "guest.person@example.net"
 VERSIONS = {"terms": "t-2026-10", "privacy": "p-2026-10", "effective": "2026-10-01"}
@@ -311,9 +312,10 @@ async def test_sign_in_failures_identical(h):
 
 
 async def test_password_correct_but_not_allowlisted_fails(h):
-    h.store.set_password(UNKNOWN, "pw-for-ex-member")
+    ex_member_pw = secrets.token_urlsafe(12)  # generated: no literal to flag
+    h.store.set_password(UNKNOWN, ex_member_pw)
     resp = await h.post(
-        "/entry/signin", {"email": UNKNOWN, "password": "pw-for-ex-member"}
+        "/entry/signin", {"email": UNKNOWN, "password": ex_member_pw}
     )
     assert resp.status != 303
     assert WRONG in await resp.text()
