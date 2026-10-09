@@ -1,0 +1,10 @@
+{# Sandbox-agent state line. Always renders the polling element for sandbox
+   sessions (so hx-get keeps ticking); empty for the real mesh and while the
+   agent has never been seen. #}
+{% if presence is not none %}
+<span id="agent-state" data-testid="agent-state" data-state="{{ presence.state }}"
+      class="lens-agent-state lens-agent-state--{{ presence.state }}"
+      hx-get="/presence" hx-trigger="every 15s" hx-swap="outerHTML">
+  {%- if presence.state == "offline" %}agent offline{% elif presence.state == "online" %}agent online{% endif -%}
+</span>
+{% endif %}

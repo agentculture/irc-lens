@@ -36,14 +36,34 @@ from collections.abc import AsyncIterator
 import aiohttp
 from aiohttp import web
 
-from irc_lens.commands import parse_command
+from irc_lens import metrics
+from irc_lens.commands import (
+    SANDBOX_COMMAND,
+    CommandType,
+    ParsedCommand,
+    allowed_in_sandbox,
+    parse_command,
+)
 from irc_lens.session import LensConnectionLost
+from irc_lens.web.auth import allows_anonymous
+from irc_lens.web.entry import client_ip
 from irc_lens.web.events import format_sse
-from irc_lens.web.render import render_chat_log, render_index, render_residents_page
+from irc_lens.web.identity import TIER_ANONYMOUS, TIER_GUEST, Identity
+from irc_lens.web.render import (
+    render_chat_log,
+    render_fragment,
+    render_index,
+    render_residents_page,
+)
 from irc_lens.web.residents import (
     ResidentsResult,
     fetch_residents,
     resolve_residents_url,
+)
+from irc_lens.web.sessions import (
+    BACKEND_MESH,
+    BACKEND_SANDBOX,
+    GUEST_PRINCIPAL_PREFIX,
 )
 from irc_lens.web.store import CONTENT_TYPES, MediaTooLargeError, MediaTypeError
 
@@ -73,11 +93,188 @@ _MEDIA_DISABLED_HINT = (
 )
 
 
+#: Where a guest without a current consent record is sent (the consent step
+#: is built by the entry-card task; this is the redirect target only).
+CONSENT_PATH = "/consent"
+
+#: Sandbox nick prefix for approved users who toggle into the sandbox.
+SANDBOX_NICK_PREFIX = "sbx-"
+
+
+def _json_error(status: int, error: str, hint: str, **extra) -> web.Response:
+    return web.json_response({"error": error, "hint": hint, **extra}, status=status)
+
+
+#: Approved users' sandbox nicks live under ``sbx-op-``; guest nicknames
+#: may not contain ``-``, so a guest can never take one (d7).
+APPROVED_SANDBOX_INFIX = "op-"
+
+
+_HTML = "text/html"
+_ERR_APPROVED_REQUIRED = "approved sign-in required"
+
+
+def sandbox_nick_for(config, identity: Identity) -> str:
+    """``sbx-op-<real nick suffix>`` — distinct from the user's mesh nick and
+    from every possible guest nick."""
+    prefix = f"{config.server_name}-"
+    nick = identity.nick
+    suffix = nick[len(prefix) :] if nick.startswith(prefix) else nick
+    return f"{SANDBOX_NICK_PREFIX}{APPROVED_SANDBOX_INFIX}{suffix}"
+
+
+def _backend_for(request: web.Request) -> tuple[Identity, str]:
+    """Pick (identity-for-registry, backend) from the VERIFIED tier only.
+
+    Nothing from the query string, body, or headers participates: ``approved``
+    -> real mesh (or the sandbox if that principal toggled it server-side),
+    ``guest`` -> sandbox always, anything else -> 401.
+    """
+    identity: Identity = request["identity"]
+    config = request.app["config"]
+    if identity.is_approved:
+        toggled = request.app.get("sandbox_toggle", ())
+        if config.guest_enabled and identity.principal in toggled:
+            sandbox_identity = identity._replace(
+                nick=sandbox_nick_for(config, identity)
+            )
+            return sandbox_identity, BACKEND_SANDBOX
+        return identity, BACKEND_MESH
+    if identity.tier == TIER_GUEST and config.guest_enabled:
+        return (
+            identity._replace(
+                principal=f"{GUEST_PRINCIPAL_PREFIX}{identity.principal}"
+            ),
+            BACKEND_SANDBOX,
+        )
+    raise web.HTTPUnauthorized(
+        text=json.dumps(
+            {
+                "error": _ERR_APPROVED_REQUIRED,
+                "hint": "sign in through /login to reach the real mesh",
+            }
+        ),
+        content_type="application/json",
+    )
+
+
+def _owner_agent_state(registry) -> dict:
+    """Agent state for the owner: online iff it is in any open sandbox
+    session's room (the same room-membership rule as the badge, d7)."""
+    from irc_lens.web.sessions import sandbox_presence
+
+    nick = metrics.get_presence().nick
+    states = [
+        sandbox_presence(session, nick)
+        for (_principal, backend), session in zip(registry.keys(), registry.values())
+        if backend == BACKEND_SANDBOX
+    ]
+    if not states:
+        return {"nick": nick, "state": "unknown", "online": False, "last_seen_age_s": None}
+    return next((st for st in states if st["online"]), states[0])
+
+
+def _sandbox_state(session) -> dict:
+    """Per-room agent state: online iff the agent is in this session's room."""
+    from irc_lens.web.sessions import sandbox_presence
+
+    return sandbox_presence(session, metrics.get_presence().nick)
+
+
 async def _resolve_session(request: web.Request):
-    """Look up (or lazily open) the Session for this request's identity."""
-    identity = request["identity"]
-    registry = request.app["registry"]
-    return await registry.get_or_open(identity)
+    """Look up (or lazily open) the Session for this request's verified tier."""
+    identity, backend = _backend_for(request)
+    session = await request.app["registry"].get_or_open(identity, backend)
+    # UI context for the header / palette, from the verified tier only.
+    session.sandbox_available = (
+        backend == BACKEND_MESH
+        and identity.is_approved
+        and request.app["config"].guest_enabled
+    )
+    return session
+
+
+async def _consent_current(request: web.Request, email: str) -> bool:
+    """True iff *email* has a consent record for the current Terms+Privacy.
+
+    Fails closed: the legal module missing, or the version lookup failing,
+    both mean "not consented".
+    """
+    import inspect
+
+    try:
+        from irc_lens import legal
+
+        versions = await legal.current_legal_versions(request.app["config"])
+        ok = legal.consent_is_current(request.app["guest_store"], email, versions)
+        if inspect.isawaitable(ok):
+            ok = await ok
+        return bool(ok)
+    except Exception:  # noqa: BLE001 — fail closed
+        logger.exception("consent check failed; refusing guest")
+        return False
+
+
+async def _guest_consent_gate(
+    request: web.Request, *, redirect: bool
+) -> web.StreamResponse | None:
+    """Obligation o8: a guest reaches sandbox routes only with current consent.
+
+    Returns a response to send instead of the handler, or None to proceed.
+    """
+    identity: Identity = request["identity"]
+    if identity.tier != TIER_GUEST:
+        return None
+    if await _consent_current(request, identity.principal):
+        return None
+    if redirect:
+        return web.Response(status=302, headers={"Location": CONSENT_PATH})
+    return _json_error(
+        403,
+        "consent required",
+        "accept the current Terms and Privacy Policy first",
+        redirect=CONSENT_PATH,
+    )
+
+
+async def _anonymous_or_gate(
+    request: web.Request, *, redirect: bool
+) -> web.StreamResponse | None:
+    identity: Identity = request["identity"]
+    if identity.tier == TIER_ANONYMOUS:
+        return _json_error(
+            401, _ERR_APPROVED_REQUIRED, "enter through the guest entry card"
+        )
+    return await _guest_consent_gate(request, redirect=redirect)
+
+
+async def post_sandbox_enter(request: web.Request) -> web.Response:  # NOSONAR S7503 - aiohttp handler
+    """Approved users only: switch this principal's view to the sandbox."""
+    return _set_sandbox_toggle(request, on=True)
+
+
+async def post_sandbox_leave(request: web.Request) -> web.Response:  # NOSONAR S7503 - aiohttp handler
+    """Approved users only: switch back to the real mesh (no re-auth)."""
+    return _set_sandbox_toggle(request, on=False)
+
+
+def _set_sandbox_toggle(request: web.Request, *, on: bool) -> web.Response:  # NOSONAR
+    identity: Identity = request["identity"]
+    if not identity.is_approved:
+        return _json_error(
+            401, _ERR_APPROVED_REQUIRED, "sandbox toggle is for approved users"
+        )
+    toggled: set[str] = request.app["sandbox_toggle"]
+    if on:
+        toggled.add(identity.principal)
+    else:
+        toggled.discard(identity.principal)
+    # HX-Refresh: the htmx buttons reload the page into the other view.
+    return web.json_response(
+        {"backend": BACKEND_SANDBOX if on else BACKEND_MESH},
+        status=200,
+        headers={"HX-Refresh": "true"},
+    )
 
 
 def _too_large() -> web.Response:
@@ -246,14 +443,23 @@ async def _iter_field_chunks(field: aiohttp.BodyPartReader) -> AsyncIterator[byt
         yield chunk
 
 
+@allows_anonymous
 async def get_index(request: web.Request) -> web.Response:
-    """Render the three-pane page.
+    """Render the three-pane page (or, for anonymous visitors, the entry card).
 
     When a current channel is set, pull HISTORY RECENT first so the chat
     pane isn't blank on a page reload. The Culture IRCd persists messages
     in SQLite and the query is cheap; on timeout or transport failure we
     degrade to an empty log rather than 500ing the page.
     """
+    if request["identity"].tier == TIER_ANONYMOUS:
+        # Imported lazily: the entry card is its own module (guest mode).
+        from irc_lens.web import entry
+
+        return await entry.get_entry(request)
+    gated = await _guest_consent_gate(request, redirect=True)
+    if gated is not None:
+        return gated
     session = await _resolve_session(request)
     # `chat_log_html=None` lets `render_index` fall back to the
     # `MessageBuffer` — which is the seed-loader path. We only override
@@ -290,9 +496,41 @@ async def get_index(request: web.Request) -> web.Response:
                 entries,
                 media_embed_prefixes=session.media_embed_prefixes,
                 media_remote_embeds=session.media_remote_embeds,
+                hide_system=getattr(session, "ui_tier", None) in ("guest", "sandbox_preview"),
             )
-    body = render_index(session, chat_log_html=chat_log_html)
-    return web.Response(text=body, content_type="text/html")
+    _, backend = _backend_for(request)
+    presence = _sandbox_state(session) if backend == BACKEND_SANDBOX else None
+    body = render_index(session, chat_log_html=chat_log_html, presence=presence)
+    return web.Response(text=body, content_type=_HTML)
+
+
+@allows_anonymous
+async def get_presence(request: web.Request) -> web.Response:
+    """Agent-state fragment for sandbox sessions (polled by htmx).
+
+    Guest and sandbox-preview sessions only; a real-mesh session gets an
+    empty fragment. Guests need it too, so it is not owner/approved gated,
+    but it still requires a verified identity (and consent for guests).
+    """
+    gated = await _anonymous_or_gate(request, redirect=False)
+    if gated is not None:
+        return gated
+    _, backend = _backend_for(request)
+    presence = None
+    if backend == BACKEND_SANDBOX:
+        try:
+            session = await _resolve_session(request)
+            # Re-read the room from the server on every poll: AgentIRC sends
+            # no QUIT for a bot-capability client (sbx-ask) or an abrupt
+            # disconnect, so a stopped agent is only visible via WHO.
+            await session.refresh_roster()
+        except Exception:  # noqa: BLE001 — no session means no agent here
+            session = None
+        presence = _sandbox_state(session)
+    body = render_fragment("_presence.html.j2", presence=presence)
+    return web.Response(
+        text=body, content_type=_HTML, headers={"Cache-Control": "no-store"}
+    )
 
 
 async def _extract_text(request: web.Request) -> tuple[str | None, web.Response | None]:
@@ -335,6 +573,7 @@ async def _extract_text(request: web.Request) -> tuple[str | None, web.Response 
     return str(form.get("text", "")), None
 
 
+@allows_anonymous
 async def post_input(request: web.Request) -> web.Response:
     """Parse one user input line and dispatch it through the session."""
     # Cheap header-only check first; saves a body read when the client
@@ -347,6 +586,10 @@ async def post_input(request: web.Request) -> web.Response:
     # A full CSRF-token scheme is tracked in issue #27.
     if not _origin_ok(request):
         return _origin_denied_response(request)
+
+    gated = await _anonymous_or_gate(request, redirect=False)
+    if gated is not None:
+        return gated
 
     session = await _resolve_session(request)
     # Health gate before parsing: once the AgentIRC pipe is gone, the
@@ -363,11 +606,91 @@ async def post_input(request: web.Request) -> web.Response:
         return web.Response(status=204)
 
     parsed = parse_command(text)
+    refused = _sandbox_policy(request, text, parsed)
+    if refused is not None:
+        return refused
+    if _is_sandbox_enter(request, parsed, text):
+        request.app["sandbox_toggle"].add(request["identity"].principal)
+        return web.Response(status=204, headers={"HX-Refresh": "true"})
     try:
         await session.execute(parsed)
     except LensConnectionLost as exc:
         return _connection_lost(str(exc))
+    identity: Identity = request["identity"]
+    if identity.tier == TIER_GUEST and parsed.type == CommandType.CHAT:
+        # The export task reads these back for the guest's data export.
+        request.app["guest_store"].record_input(
+            identity.principal, kind="message", payload=text
+        )
     return web.Response(status=204)
+
+
+#: Rate-limit bucket / window for guest chat input (config:
+#: ``guest_mode.rate_limits.messages_per_min``).
+_MESSAGE_RATE_KIND = "message"
+_MESSAGE_RATE_WINDOW_S = 60
+
+
+def _is_sandbox_enter(request: web.Request, parsed: ParsedCommand, text: str) -> bool:
+    """``/sandbox`` typed by an approved user on the mesh (guest mode on)."""
+    identity: Identity = request["identity"]
+    return (
+        parsed.type == CommandType.UNKNOWN
+        and text.strip().lower() == SANDBOX_COMMAND
+        and identity.is_approved
+        and request.app["config"].guest_enabled
+        and identity.principal not in request.app["sandbox_toggle"]
+    )
+
+
+def _sandbox_policy(
+    request: web.Request, text: str, parsed: ParsedCommand
+) -> web.Response | None:
+    """Server-side guest policy for ``POST /input`` (approved deviation d4).
+
+    Applies to sessions the VERIFIED tier routed to the sandbox:
+
+    * (b) guests only: per-guest message rate limit
+      (``guest_rate_messages_per_min``) -> 429. Counted per guest email and
+      per IP over a 60 s window; every non-empty input counts, refused
+      commands included, so probing cannot be free.
+    * (a) allowlist: only commands that work in the sandbox
+      (:data:`irc_lens.commands.SANDBOX_ALLOWED`) are run; anything else is
+      refused with 403 before it can reach IRC.
+    """
+    identity: Identity = request["identity"]
+    if _is_sandbox_enter(request, parsed, text):
+        return None
+    _, backend = _backend_for(request)
+    if backend != BACKEND_SANDBOX:
+        return None
+    if identity.tier == TIER_GUEST and _message_rate_limited(request, identity):
+        metrics.get_metrics().rate_limited()
+        return web.json_response(
+            {"error": "Slow down", "hint": "Too many messages"},
+            status=429,
+            headers={"Retry-After": str(_MESSAGE_RATE_WINDOW_S)},
+        )
+    if not allowed_in_sandbox(parsed, preview=identity.tier != TIER_GUEST):
+        return _json_error(403, "Not in guest view", "Try /help")
+    return None
+
+
+def _message_rate_limited(request: web.Request, identity: Identity) -> bool:
+    """Check per-email and per-IP buckets, then count this message."""
+    store = request.app["guest_store"]
+    limit = request.app["config"].guest_rate_messages_per_min
+    keys = (f"e:{identity.principal}", f"i:{client_ip(request)}")
+    limited = any(
+        store.rate_limited(
+            _MESSAGE_RATE_KIND, k, limit=limit, window=_MESSAGE_RATE_WINDOW_S
+        )
+        for k in keys
+    )
+    if not limited:
+        for k in keys:
+            store.record_attempt(_MESSAGE_RATE_KIND, k)
+    return limited
 
 
 async def post_upload(request: web.Request) -> web.Response:
@@ -491,10 +814,24 @@ async def get_media(request: web.Request) -> web.Response:
     )
 
 
+#: Seconds of SSE quiet before a keepalive comment is written.
+SSE_KEEPALIVE_S = 15.0
+
+
+@allows_anonymous
 async def get_events(request: web.Request) -> web.StreamResponse:
     """SSE stream — drains ``Session.event_bus`` until the client leaves."""
+    gated = await _anonymous_or_gate(request, redirect=False)
+    if gated is not None:
+        return gated
     session = await _resolve_session(request)
     sub = session.event_bus.subscribe()
+    # Re-send the member list once this stream is live: a roster update
+    # published before the browser connected (e.g. the agent joining a
+    # fresh guest room) would otherwise be lost until a reload.
+    refresh = getattr(session, "_request_roster_refresh", None)
+    if refresh is not None:
+        refresh()
     # If this session is already in the mesh view (e.g. a page reload while
     # viewing the graph), push the current snapshot straight away so the
     # canvas paints without waiting for the next refresher tick. Gated on
@@ -519,9 +856,14 @@ async def get_events(request: web.Request) -> web.StreamResponse:
     )
     await response.prepare(request)
     try:
-        async for event in sub.events():
+        while True:
+            # A quiet stream sends a comment line every SSE_KEEPALIVE_S: a
+            # closed tab is only noticed when a write fails, and without one
+            # its subscription (and its idle sandbox session) lived forever.
+            event = await sub.next_event(SSE_KEEPALIVE_S)
+            payload = format_sse(event) if event is not None else b": keepalive\n\n"
             try:
-                await response.write(format_sse(event))
+                await response.write(payload)
             except ConnectionError:
                 # Client closed the SSE connection. `ConnectionResetError`,
                 # `BrokenPipeError`, and friends are all `ConnectionError`
@@ -575,7 +917,7 @@ async def get_residents(request: web.Request) -> web.Response:
         # unavailable notice rather than a 500.
         logger.exception("residents render failed; degrading to notice")
         body = render_residents_page("unavailable", None)
-    return web.Response(text=body, content_type="text/html")
+    return web.Response(text=body, content_type=_HTML)
 
 
 async def get_healthz(_request: web.Request) -> web.Response:  # NOSONAR S7503
@@ -587,3 +929,27 @@ async def get_healthz(_request: web.Request) -> web.Response:  # NOSONAR S7503
     that constraint; the inline ``# NOSONAR S7503`` silences it.
     """
     return web.json_response({"ok": True})
+
+
+async def get_owner_metrics(request: web.Request) -> web.Response:  # NOSONAR S7503
+    """Owner-only guest-mode counters + sandbox-agent presence (JSON).
+
+    Approved tier only. Deliberately NOT ``allows_anonymous``: the auth
+    middleware already 401s anonymous requests; the tier check here also
+    refuses a ``guest`` identity with the same standard denial.
+    """
+    identity = request.get("identity")
+    if identity is None or not identity.is_approved:
+        return web.json_response(
+            {
+                "error": _ERR_APPROVED_REQUIRED,
+                "hint": "sign in through /login to reach the real mesh",
+            },
+            status=401,
+        )
+    return web.json_response(
+        {
+            "counters": metrics.get_metrics().snapshot(),
+            "agent": _owner_agent_state(request.app["registry"]),
+        }
+    )

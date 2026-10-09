@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="referrer" content="same-origin">
+    <title>culture</title>
+    <link rel="icon" href="{{ static_url('favicon.ico') }}">
+    <link rel="stylesheet" href="{{ css_url }}">
+      </head>
+  <body class="entry">
+    <main class="entry-layout">
+      <section class="entry-card" aria-label="Delete my data">
+        {% if step == "email" %}
+        <form method="post" action="/delete/request" class="entry-form">
+          <label for="del-email">Email</label>
+          <input id="del-email" name="email" type="email" autocomplete="email"
+                 inputmode="email" required autofocus maxlength="254">
+          <div class="entry-actions">
+            <button type="submit" class="btn btn-primary">Send code</button>
+          </div>
+        </form>
+        {% elif step == "code" %}
+        <form method="post" action="/delete/confirm" class="entry-form">
+          <div class="entry-chip"><span class="entry-chip-email">{{ email }}</span></div>
+          <input type="hidden" name="email" value="{{ email }}">
+          <label for="del-code">Code</label>
+          <input id="del-code" name="code" type="text" autocomplete="one-time-code"
+                 autocapitalize="none" spellcheck="false" required autofocus maxlength="128">
+          {% if error %}
+          <p class="entry-error" role="alert">{{ error }}</p>
+          {% endif %}
+          <div class="entry-actions">
+            <button type="submit" class="btn btn-primary">Delete my data</button>
+          </div>
+        </form>
+        {% else %}
+        <p>Done.</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

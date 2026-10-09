@@ -1,0 +1,265 @@
+/* Entry card (guest mode, Option A "landing"). Dark terminal palette; IBM
+   Plex when installed locally, system fallbacks otherwise (the page CSP is
+   default-src 'self', so no third-party font hosts). */
+
+:root {
+  --entry-bg: #0B0F12;
+  --entry-surface: #11161B;
+  --entry-border: #1A222B;
+  --entry-input-border: #2A3540;
+  --entry-accent: #41D67A;
+  --entry-bright: #7CFF9E;
+  --entry-fg: #F3F5F7;
+  --entry-soft: #C7D0D9;
+  --entry-muted: #8A97A3;
+  --entry-error: #FF7A7A;
+  --entry-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
+    "Liberation Mono", monospace;
+  --entry-sans: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  background: var(--entry-bg);
+  color: var(--entry-fg);
+  font-family: var(--entry-sans);
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+.entry-layout {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 420px);
+  gap: 48px;
+  align-items: center;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 48px 32px;
+}
+
+/* --- left: heading + static transcript ------------------------------- */
+
+.entry-hero h1 {
+  margin: 0 0 24px;
+  font-family: var(--entry-mono);
+  font-weight: 600;
+  font-size: clamp(2rem, 5vw, 3rem);
+  letter-spacing: -0.02em;
+  color: var(--entry-fg);
+}
+
+.entry-transcript {
+  list-style: none;
+  margin: 0;
+  padding: 16px 20px;
+  background: var(--entry-surface);
+  border: 1px solid var(--entry-border);
+  border-radius: 8px;
+  font-family: var(--entry-mono);
+  font-size: 0.875rem;
+}
+
+.entry-transcript li {
+  display: grid;
+  grid-template-columns: 9ch minmax(0, 1fr);
+  gap: 12px;
+  padding: 6px 0;
+}
+
+.entry-transcript .nick { text-align: right; }
+.entry-transcript .nick-guest { color: var(--entry-muted); }
+.entry-transcript .nick-agent { color: var(--entry-accent); }
+.entry-transcript .msg { color: var(--entry-soft); overflow-wrap: anywhere; }
+
+/* --- right: the card --------------------------------------------------- */
+
+.entry-card {
+  background: var(--entry-surface);
+  border: 1px solid var(--entry-border);
+  border-radius: 10px;
+  padding: 28px;
+}
+
+.entry-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.entry-form label {
+  font-size: 0.8125rem;
+  color: var(--entry-muted);
+}
+
+.entry-form input[type="email"],
+.entry-form input[type="password"],
+.entry-form input[type="text"] {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  background: var(--entry-bg);
+  color: var(--entry-fg);
+  border: 1px solid var(--entry-input-border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+.entry-prefixed {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--entry-input-border);
+  border-radius: 6px;
+  background: var(--entry-bg);
+}
+
+.entry-prefixed:focus-within {
+  outline: 2px solid var(--entry-bright);
+  outline-offset: 2px;
+}
+
+.entry-prefix {
+  display: flex;
+  align-items: center;
+  padding: 0 4px 0 12px;
+  font-family: var(--entry-mono);
+  color: var(--entry-accent);
+}
+
+.entry-form .entry-prefixed input[type="text"] {
+  border: 0;
+  padding-left: 0;
+  font-family: var(--entry-mono);
+}
+
+.entry-form .entry-prefixed input[type="text"]:focus-visible { outline: none; }
+
+.entry-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--entry-border);
+  border-radius: 999px;
+  background: var(--entry-bg);
+  font-family: var(--entry-mono);
+  font-size: 0.875rem;
+}
+
+.entry-chip-email {
+  color: var(--entry-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.entry-chip-change,
+.entry-consent a {
+  color: var(--entry-accent);
+}
+
+.entry-chip-change:hover,
+.entry-consent a:hover { color: var(--entry-bright); }
+
+.entry-consent {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  font-size: 0.875rem;
+}
+
+.entry-form .entry-consent { color: var(--entry-soft); }
+
+.entry-consent input {
+  margin: 3px 0 0;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--entry-accent);
+  flex: none;
+}
+
+.entry-error {
+  margin: 0;
+  color: var(--entry-error);
+  font-size: 0.875rem;
+}
+
+.entry-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.entry-actions .btn { flex: 1 1 0; }
+
+.btn {
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 6px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn-primary {
+  background: var(--entry-accent);
+  color: var(--entry-bg);
+  border: 1px solid var(--entry-accent);
+}
+
+.btn-primary:hover { background: var(--entry-bright); border-color: var(--entry-bright); }
+
+.btn-outline {
+  background: transparent;
+  color: var(--entry-fg);
+  border: 1px solid var(--entry-input-border);
+}
+
+.btn-outline:hover { border-color: var(--entry-accent); color: var(--entry-bright); }
+
+/* Visible focus everywhere. */
+.entry a:focus-visible,
+.entry button:focus-visible,
+.entry input:focus-visible {
+  outline: 2px solid var(--entry-bright);
+  outline-offset: 2px;
+}
+
+/* --- phone width ------------------------------------------------------- */
+
+@media (max-width: 760px) {
+  .entry-layout {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 24px;
+    padding: 24px 16px;
+    align-items: start;
+    align-content: start;
+  }
+
+  .entry-card { padding: 20px; }
+
+  .entry-transcript li { grid-template-columns: minmax(0, 1fr); gap: 0; }
+
+  .entry-transcript .nick { text-align: left; }
+}
+
+/* Username field for password managers (Chrome password-form warning); visually hidden. */
+.entry-username-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+}

@@ -31,8 +31,12 @@
     setTimeout(() => el.remove(), 4000);
   }
 
+  // Scroll policy (stick-to-bottom) lives in logfollow.js.
+  const lensLog = () => globalThis.LensLog;
+
   function appendChat(html) {
     if (!log) return;
+    const follow = lensLog()?.atBottom() ?? true;
     const tpl = document.createElement("template");
     tpl.innerHTML = html.trim();
     log.appendChild(tpl.content);
@@ -40,11 +44,14 @@
     // doesn't leak DOM. children is a live HTMLCollection — `length`
     // updates as we remove.
     while (log.children.length > CHAT_LOG_CAP) log.firstElementChild.remove();
-    log.scrollTop = log.scrollHeight;
+    lensLog()?.follow(follow);
   }
 
   function swap(target, html) {
-    if (target) target.innerHTML = html;
+    if (!target) return;
+    target.innerHTML = html;
+    // Wire hx-* attributes in the new HTML (room rows) or they go dead.
+    if (window.htmx) window.htmx.process(target);
   }
 
   const src = new EventSource("/events");
@@ -55,7 +62,7 @@
   src.addEventListener("log",    (e) => {
     if (!log) return;
     log.innerHTML = e.data;
-    log.scrollTop = log.scrollHeight;
+    lensLog()?.pin();
   });
   src.addEventListener("roster", (e) => swap(sidebar, e.data));
   src.addEventListener("info",   (e) => swap(info, e.data));

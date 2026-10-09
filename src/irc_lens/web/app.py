@@ -9,6 +9,7 @@ a ``/healthz`` endpoint.
 
 from __future__ import annotations
 
+import logging
 from importlib.resources import files
 from pathlib import Path
 
@@ -16,10 +17,10 @@ from aiohttp import web
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
-from irc_lens.web import routes
+from irc_lens.web import bans, csrf, deletion, entry, routes
 from irc_lens.web.auth import build_cloudflare_middleware
 from irc_lens.web.front import mount_agent_front
-from irc_lens.web.identity import Identity
+from irc_lens.web.identity import TIER_APPROVED, Identity
 from irc_lens.web.render import precompute_static_hashes
 from irc_lens.web.sessions import SessionFactory, SessionRegistry
 from irc_lens.web.store import MediaStore
@@ -33,10 +34,27 @@ from irc_lens.web.store import MediaStore
 _CLIENT_MAX_SIZE_MEDIA_HEADROOM = 65536
 
 
+def _default_guest_store_path() -> str:
+    from irc_lens.config import _default_guest_store_path as default_path
+
+    return default_path()
+
+
 _SECURITY_HEADERS_CSP = (
     "default-src 'self'; script-src 'self'; img-src 'self' https: http:; "
     "media-src 'self' https: http:; object-src 'none'; base-uri 'none'; "
     "frame-ancestors 'none'"
+)
+
+# Entry-card responses that render the Cloudflare Turnstile widget (and only
+# those -- they set ``entry.CSP_TURNSTILE_MARKER``) may load Turnstile's
+# loader script and iframe from its single origin. Everything else keeps
+# ``script-src 'self'``. See ``irc_lens.web.entry``.
+_TURNSTILE_CSP = _SECURITY_HEADERS_CSP.replace(
+    "script-src 'self';",
+    f"script-src 'self' {entry.TURNSTILE_ORIGIN}; "
+    f"frame-src {entry.TURNSTILE_ORIGIN}; "
+    f"connect-src 'self' {entry.TURNSTILE_ORIGIN};",
 )
 
 
@@ -51,9 +69,17 @@ def _apply_security_headers(response: web.StreamResponse) -> None:
     ("Security headers").
     """
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "no-referrer"
+    marked = response.get if isinstance(response, web.Response) else (lambda _k: None)
+    # Entry-card pages (``entry.ENTRY_PAGE_MARKER``) need the real Origin on
+    # their same-origin form POSTs; ``no-referrer`` would make it ``null``.
+    response.headers["Referrer-Policy"] = (
+        "same-origin" if marked(entry.ENTRY_PAGE_MARKER) else "no-referrer"
+    )
     if (response.content_type or "").lower() == "text/html":
-        response.headers["Content-Security-Policy"] = _SECURITY_HEADERS_CSP
+        turnstile = marked(entry.CSP_TURNSTILE_MARKER)
+        response.headers["Content-Security-Policy"] = (
+            _TURNSTILE_CSP if turnstile else _SECURITY_HEADERS_CSP
+        )
 
 
 @web.middleware
@@ -106,6 +132,8 @@ def _dev_identity_middleware(config: LensConfig):
         principal=config.dev_email,
         nick=config.dev_nick,
         raw_jwt_subject="dev",
+        # Dev mode is the single trusted local operator: the real-mesh tier.
+        tier=TIER_APPROVED,
     )
 
     @web.middleware
@@ -122,7 +150,29 @@ def _dev_identity_middleware(config: LensConfig):
     return middleware
 
 
-def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Application:
+def _default_sandbox_factory(config: LensConfig) -> SessionFactory:
+    """Sessions that connect ONLY to the sandbox IRCd (guest_mode.sandbox).
+
+    No media kwargs: guest sessions never get lens-hosted media embeds.
+    """
+    from irc_lens.session import Session
+
+    def factory(nick: str) -> Session:
+        return Session(
+            host=config.guest_sandbox_host,
+            port=config.guest_sandbox_port,
+            nick=nick,
+        )
+
+    return factory
+
+
+def make_app(
+    config: LensConfig,
+    session_factory: SessionFactory,
+    sandbox_session_factory: SessionFactory | None = None,
+    ban_sweep_interval_s: float = bans.DEFAULT_SWEEP_INTERVAL_S,
+) -> web.Application:
     if config.auth_mode == "dev":
         middleware = _dev_identity_middleware(config)
     elif config.auth_mode == "cloudflare-access":
@@ -143,12 +193,37 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
     # is safe to compute even when media is disabled.
     app = web.Application(
         client_max_size=config.media_max_file_bytes + _CLIENT_MAX_SIZE_MEDIA_HEADROOM,
-        middlewares=[_security_headers_middleware, middleware],
+        middlewares=[_security_headers_middleware, csrf.csrf_middleware, middleware],
     )
 
-    registry = SessionRegistry(factory=session_factory)
+    csrf.install(app)
+
+    sandbox_factory = None
+    if config.guest_enabled:
+        sandbox_factory = sandbox_session_factory or _default_sandbox_factory(config)
+    registry = SessionRegistry(
+        factory=session_factory,
+        sandbox_factory=sandbox_factory,
+        room_prefix=config.guest_room_prefix,
+        guest_store=lambda: app.get("guest_store"),
+    )
     app["registry"] = registry
     app["config"] = config
+    if config.guest_enabled and not config.guest_sandbox_flag_log:
+        logging.getLogger(__name__).warning(
+            "guest_mode on but guest_mode.sandbox.flag_log unset: guest deletion "
+            "will not erase the guest's sbx-ask flag lines"
+        )
+    if config.guest_enabled:
+        from irc_lens.guest_store import GuestStore
+
+        if "guest_store" not in app:
+            app["guest_store"] = GuestStore(
+                config.guest_store_path or _default_guest_store_path()
+            )
+        # Server-side sandbox toggle: principals of approved users currently
+        # viewing the sandbox instead of the real mesh. Never client-set.
+        app["sandbox_toggle"] = set()
 
     if config.media_enabled:
         app["media_store"] = MediaStore(
@@ -173,8 +248,18 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
     app.router.add_post("/upload", routes.post_upload)
     app.router.add_get("/media/{name}", routes.get_media)
     app.router.add_get("/events", routes.get_events)
+    app.router.add_get("/presence", routes.get_presence)
     app.router.add_get("/residents", routes.get_residents)
     app.router.add_get("/healthz", routes.get_healthz)
+    app.router.add_get("/owner/metrics", routes.get_owner_metrics)
+    # Guest-mode entry card (/entry, /entry/*): 404 while guest mode is off.
+    entry.install(app, config)
+    if config.guest_enabled:
+        deletion.install(app)
+        bans.install(app, ban_sweep_interval_s)
+        # Guest-mode off: these paths do not exist (404), exactly as before.
+        app.router.add_post("/sandbox/enter", routes.post_sandbox_enter)
+        app.router.add_post("/sandbox/leave", routes.post_sandbox_leave)
 
     static_dir = files("irc_lens").joinpath("static")
     app.router.add_static(

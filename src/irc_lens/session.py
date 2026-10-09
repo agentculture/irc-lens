@@ -27,7 +27,13 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
-from irc_lens.commands import CommandType, ParsedCommand
+from irc_lens.commands import (
+    CommandType,
+    PaletteEntry,
+    ParsedCommand,
+    help_for,
+    palette_for,
+)
 from irc_lens.irc import IRCTransport, Message, MessageBuffer
 
 logger = logging.getLogger(__name__)
@@ -181,6 +187,15 @@ class Subscription:
                 break
         return out
 
+    async def next_event(self, wait_s: float) -> "SessionEvent | None":
+        """The next event, or ``None`` after *wait_s* seconds of quiet
+        (the SSE handler then writes a keepalive)."""
+        try:
+            async with asyncio.timeout(wait_s):
+                return await self._sub.queue.get()
+        except TimeoutError:
+            return None
+
     async def events(self) -> AsyncIterator[SessionEvent]:
         try:
             async for event in self._sub.iter():
@@ -289,6 +304,15 @@ class Session:
         self.view: ViewName = "chat"
         self.roster: list[EntityItem] = []
 
+        # Guest-mode UI context, set by the session registry / routes from
+        # the VERIFIED tier (never from client input): ``approved`` (real
+        # mesh), ``guest`` (sandbox) or ``sandbox_preview`` (an approved
+        # user viewing the sandbox). Drives the header badge, the command
+        # palette and the help pane. ``sandbox_available`` is True only for
+        # an approved user on the mesh while guest mode is on.
+        self.ui_tier: str = "approved"
+        self.sandbox_available: bool = False
+
         # Cited primitives.
         self.buffer = MessageBuffer()
         self._transport = IRCTransport(
@@ -388,6 +412,7 @@ class Session:
         self._transport.add_listener("PRIVMSG", self.dispatch)
         self._transport.add_listener("JOIN", self.dispatch)
         self._transport.add_listener("PART", self.dispatch)
+        self._transport.add_listener("QUIT", self.dispatch)
         # Per-session live-mesh refresher; cancelled in disconnect().
         self._mesh_refresher = asyncio.create_task(self._mesh_refresh_loop())
 
@@ -443,11 +468,12 @@ class Session:
         """
         tasks = [
             t
-            for t in (self._mesh_refresher, self._mesh_task)
+            for t in (self._mesh_refresher, self._mesh_task, getattr(self, "_roster_task", None))
             if t is not None and not t.done()
         ]
         self._mesh_refresher = None
         self._mesh_task = None
+        self._roster_task = None
         for task in tasks:
             task.cancel()
         if tasks:
@@ -541,6 +567,54 @@ class Session:
     def set_roster(self, entries: list[EntityItem]) -> None:
         self.roster = list(entries)
 
+    async def refresh_roster(self) -> None:
+        """Fill the sidebar member list from a live ``WHO`` of the current
+        channel, then publish it. Before this the roster was only ever set
+        by the demo seed, so "In this room" stayed empty on a live server.
+
+        One WHO at a time: two in flight for the same channel share one
+        reply key and clobber each other. A request that arrives mid-flight
+        (e.g. the agent JOINs right after us) marks the roster dirty and the
+        running refresh goes round once more."""
+        self._roster_dirty = True
+        lock = getattr(self, "_roster_lock", None)
+        if lock is None:
+            lock = self._roster_lock = asyncio.Lock()
+        if lock.locked():
+            return
+        async with lock:
+            while self._roster_dirty:
+                self._roster_dirty = False
+                await self._refresh_roster_once()
+
+    async def _refresh_roster_once(self) -> None:
+        channel = self.current_channel
+        if not channel or not self.connected:
+            return
+        try:
+            rows = await self.who(channel)
+        except Exception:  # noqa: BLE001 — a stale roster beats a crash
+            return
+        if channel != self.current_channel:
+            return  # the user moved on while WHO was in flight
+        entries = []
+        for row in rows:
+            nick = row.get("nick", "")
+            if not nick or nick.startswith("system-"):
+                continue
+            kind = "agent" if "agent" in row.get("realname", "").lower() else "human"
+            entries.append(EntityItem(nick, kind, online="G" not in row.get("flags", "")))
+        self.set_roster(sorted(entries, key=lambda e: (e.type != "agent", e.nick.lower())))
+        self._publish_roster()
+
+    def _request_roster_refresh(self) -> None:
+        """Roster refresh from the sync read loop (coalesced by the lock in
+        ``refresh_roster``)."""
+        try:
+            self._roster_task = asyncio.get_running_loop().create_task(self.refresh_roster())
+        except RuntimeError:
+            pass  # no loop (sync unit tests)
+
     # ------------------------------------------------------------------
     # Command execution + inbound dispatch (Phase 5 SSE wiring)
     # ------------------------------------------------------------------
@@ -559,6 +633,14 @@ class Session:
             self._exec_lock = asyncio.Lock()
             self._exec_lock_loop = loop
         return self._exec_lock
+
+    def palette(self) -> list[PaletteEntry]:
+        """Slash commands to offer in this session's tier (palette)."""
+        return palette_for(self.ui_tier, sandbox_toggle=self.sandbox_available)
+
+    def help_entries(self) -> list[PaletteEntry]:
+        """Palette plus the rarer commands, for the help pane."""
+        return help_for(self.ui_tier, sandbox_toggle=self.sandbox_available)
 
     async def execute(self, parsed: ParsedCommand) -> None:
         """Dispatch a `ParsedCommand` from `POST /input`.
@@ -650,6 +732,7 @@ class Session:
         # pane isn't blank on first join. Mirrors the culture console's
         # `_switch_to_channel` (../culture/culture/console/app.py:677).
         await self._fetch_and_publish_history(channel)
+        await self.refresh_roster()
 
     async def _exec_switch(self, parsed: ParsedCommand) -> None:
         if not parsed.args:
@@ -675,6 +758,7 @@ class Session:
         self._publish_roster()
         self._publish_info()
         await self._fetch_and_publish_history(channel)
+        await self.refresh_roster()
 
     async def _fetch_and_publish_history(
         self, channel: str, limit: int = 50, *, view_channel: str | None = None
@@ -732,6 +816,7 @@ class Session:
                 entries,
                 media_embed_prefixes=self.media_embed_prefixes,
                 media_remote_embeds=self.media_remote_embeds,
+                hide_system=self.ui_tier in ("guest", "sandbox_preview"),
             )
         )
 
@@ -952,7 +1037,13 @@ class Session:
         if msg.command == "PRIVMSG":
             self._dispatch_privmsg(msg)
             return
-        if msg.command in ("JOIN", "PART"):
+        if msg.command in ("JOIN", "PART", "QUIT"):
+            # Someone entered or left: refresh "In this room" when it may
+            # concern the active pane (QUIT carries no channel).
+            if msg.command == "QUIT" or (msg.params and msg.params[0] == self.current_channel):
+                self._request_roster_refresh()
+            if msg.command == "QUIT":
+                return
             # Server-confirmed channel-membership change. The local
             # `joined_channels` set was already updated by our outbound
             # join/part call (or — for other users — needs no local

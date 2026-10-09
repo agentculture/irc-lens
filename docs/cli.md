@@ -361,3 +361,39 @@ media:
     - cdn.example.com
     - images.example.org
 ```
+
+## `irc-lens guests export --redacted`
+
+Emits guest-input transcripts with PII stripped (`--format jsonl|md`,
+`--out FILE`, `--store PATH` or the configured `guest_mode.store_path`).
+`--redacted` is required; an unredacted export is not offered. Guests become
+per-export random pseudonyms (`guest-N`, no mapping kept), timestamps are
+coarsened to the date, and emails, IPs (v4/v6), phone numbers, sbx- nicks
+and self-introduced names are scrubbed from free text. Name detection is
+heuristic (known email-local-part/nick tokens plus "my name is X"/"I'm X"
+style cues) — see `src/irc_lens/export.py` for documented limitations.
+
+## `irc-lens guests` owner admin (passwd, ban, unban, list, flags)
+
+- `guests passwd <email> [--stdin]` sets an approved user's argon2id
+  password. The password is read from a TTY prompt (asked twice) or from
+  stdin with `--stdin`, never from argv. A warning is printed when the
+  email is not in `allowed_emails` (sign-in also requires the allowlist).
+- `guests ban <email|ip> [--reason R]` / `guests unban <email|ip>` write to
+  the guest store. The running lens sweeps its active guest sessions every
+  30 seconds and closes any whose email, or entry IP, is now banned;
+  entry, token verification and the guest tier also refuse banned values.
+- `guests list` shows guests (banned ones marked) and the ban list.
+- `guests flags [--flag-log PATH]` lists store flags (ids `s<n>`) and the
+  sandbox agent's NSFW flag log (ids `j<line>`; default
+  `~/.culture/sandbox/flags.jsonl`). `guests ban --flag <id>` bans the
+  flagged guest, resolving a log nick to the guest's email via the store.
+
+## Guest data deletion (`/delete`)
+
+A guest requests deletion at `/delete`: the lens mails a fresh single-use
+token (purpose `delete`; the page is identical whether or not the email is
+a guest), and on confirmation erases the guest's profile, messages,
+consents, flags, uploads (the lens media directory filed under their
+email) and cookie, and closes their sandbox session. Only the deletion
+record remains. Bans are intentionally kept.

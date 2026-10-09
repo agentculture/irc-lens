@@ -1,11 +1,13 @@
-<section class="lens-sidebar-section">
-  <h2 class="lens-sidebar-heading">Channels</h2>
-  <ul class="lens-channel-list">
+{% set clickable = session.ui_tier != "guest" %}
+<nav class="lens-sidebar-section" aria-label="Rooms" data-current="{{ session.current_channel }}">
+  <h2 class="lens-sidebar-heading">Rooms</h2>
+  <ul class="lens-channel-list" role="group" aria-label="Rooms">
     {% for channel in session.joined_channels|sort %}
       <li
         data-testid="sidebar-channel"
         data-channel="{{ channel }}"
         class="lens-channel{% if channel == session.current_channel %} lens-channel--active{% endif %}"
+        {% if clickable %}
         role="button"
         tabindex="0"
         hx-post="/input"
@@ -16,24 +18,31 @@
         hx-vals="{{ {'text': '/switch ' ~ channel}|tojson|forceescape }}"
         {# Keyboard activation: `role="button"` + `tabindex="0"` alone makes
            the row focusable but Enter/Space do nothing on an `<li>`. The
-           explicit `hx-trigger` wires the same htmx POST to keypress events
-           so screen-reader and keyboard-only users can switch channels. #}
-        hx-trigger="click, keyup[key=='Enter'], keyup[key==' ']"
-        hx-swap="none">
+           delegated keydown handler in chatui.js turns Enter/Space on these
+           rows into a click, so screen-reader and keyboard-only users can
+           switch channels. No hx-trigger event filters here: they need
+           eval, which the CSP forbids. #}
+        hx-trigger="click"
+        hx-swap="none"
+        {% endif %}
+        {% if channel == session.current_channel %}aria-current="true"{% endif %}>
         {{ channel }}
       </li>
     {% endfor %}
   </ul>
-</section>
-<section class="lens-sidebar-section">
-  <h2 class="lens-sidebar-heading">Roster</h2>
+</nav>
+<section class="lens-sidebar-section" aria-label="In this room">
+  <h2 class="lens-sidebar-heading">In this room</h2>
   <ul class="lens-roster">
     {% for entity in session.roster %}
       <li
         data-testid="sidebar-entity"
         data-nick="{{ entity.nick }}"
         class="lens-entity lens-entity--{{ entity.type }}{% if not entity.online %} lens-entity--offline{% endif %}">
-        {{ entity.nick }}
+        <span class="lens-dot{% if entity.online %} lens-dot--on{% endif %}" aria-hidden="true"></span>
+        <span class="lens-entity-nick">{{ entity.nick }}</span>
+        {% if entity.type == "agent" %}<span class="lens-tag">agent</span>{% endif %}
+        <span class="lens-sr">{{ "online" if entity.online else "offline" }}</span>
       </li>
     {% endfor %}
   </ul>

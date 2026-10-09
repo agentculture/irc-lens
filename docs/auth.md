@@ -31,6 +31,45 @@ For each authenticated request the lens:
    `auth.allowed_emails` / `auth.allowed_service_tokens`.
 6. Derives the nick and stashes the `Identity` on `request["identity"]`.
 
+## Tiers
+
+Every `Identity` carries a `tier` (`src/irc_lens/web/identity.py`):
+
+- `approved` — a verified Access JWT (`Cf-Access-Jwt-Assertion` header or
+  `CF_Authorization` cookie) whose `email` is on `auth.allowed_emails`, an
+  allowlisted service-token `common_name`, or the `auth.mode: dev`
+  identity. The only tier that may reach the real mesh.
+- `guest` — reserved for the signed guest-session cookie (not issued by the
+  auth middleware). Sandbox only.
+- `anonymous` — everything else, only when `guest_mode.enabled`. Reaches
+  only routes marked `allows_anonymous`.
+
+Rules:
+
+- `approved` is derived **only** from a verified JWT. Headers such as
+  `Cf-Access-Authenticated-User-Email`, query parameters, and any cookie
+  other than `CF_Authorization` are never read for identity.
+- Allowlisted service tokens are `approved`: they are operator-issued,
+  Access-verified, and listed in the lens config — the same trust basis as
+  an approved email.
+- `Identity.tier` defaults to `anonymous`, so an identity built without an
+  explicit tier fails closed.
+- **Guest mode off** (default): unchanged — missing/invalid JWT → 401,
+  allowlist deny → 403.
+- **Guest mode on**: a missing JWT, an unverifiable JWT (bad signature,
+  wrong `aud`/`iss`, expired), or a verified JWT for a principal not on the
+  allowlist resolves to `anonymous` (the shared `ANONYMOUS_IDENTITY`: empty
+  principal and nick — nothing from a rejected JWT is carried forward).
+  The request reaches its handler only if the route handler is decorated
+  with `irc_lens.web.auth.allows_anonymous`; every other route — console,
+  `/events`, `/input`, `/upload`, `/residents`, `/agent` — answers one
+  uniform 401 (`approved sign-in required`), whatever the reason, so the
+  response leaks no membership signal. Deny by default: a new route stays
+  approved-only unless it opts in, and an opted-in handler must branch on
+  `request["identity"].tier` (`Identity.is_approved`) before touching the
+  real mesh. JWKS-unreachable (502) and nick-derivation (500) failures are
+  server faults and surface unchanged.
+
 ## Dev mode
 
 In `auth.mode: dev`, the same middleware is installed but synthesizes
@@ -41,8 +80,8 @@ request. Handlers see the same contract as in CF mode.
 
 | Status | Cause |
 | --- | --- |
-| 401 | missing or invalid JWT |
-| 403 | allowlist denied / Origin mismatch on POST /input |
+| 401 | missing/invalid JWT; guest mode: anonymous on approved-only route |
+| 403 | allowlist denied (guest mode off) / Origin mismatch on POST /input |
 | 500 | nick derivation produced empty (server-config bug) |
 | 502 | JWKS unreachable on first fetch |
 | 503 | Session unhealthy / cannot reach AgentIRC |

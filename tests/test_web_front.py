@@ -165,9 +165,8 @@ async def test_sitemap_loc_urls_carry_agent_prefix(client: TestClient) -> None:
     locs = [loc.text for loc in root.iter("loc")]
     assert locs, "sitemap contained no <loc> entries"
     for loc in locs:
-        assert loc is not None and loc.startswith("/agent/"), (
-            f"<loc> {loc!r} does not carry the /agent prefix"
-        )
+        assert loc is not None, "<loc> without text"
+        assert loc.startswith("/agent/"), f"<loc> {loc!r} does not carry the /agent prefix"
     # Every registry doc slug must appear under the prefix.
     for slug in _registry_doc_slugs():
         assert f"/agent/{slug}" in locs, f"sitemap missing /agent/{slug}"
@@ -227,7 +226,8 @@ async def test_cf_unauthenticated_llms_txt_returns_401(cf_client: TestClient) ->
     resp = await cf_client.get("/agent/llms.txt")
     assert resp.status == 401
     body = await resp.json()
-    assert "error" in body and "hint" in body
+    assert "error" in body
+    assert "hint" in body
 
 
 @pytest.mark.parametrize(
@@ -282,7 +282,7 @@ def test_exempt_lists_contain_exactly_static_healthz_media() -> None:
 
     expected = {"/static/", "/healthz", "/media/"}
     dev_exempt = _exempt_paths_in(app_module._dev_identity_middleware)
-    cf_exempt = _exempt_paths_in(auth_module.build_cloudflare_middleware)
+    cf_exempt = _exempt_paths_in(auth_module._is_public_path)
 
     assert dev_exempt == expected, f"dev exempt set drifted: {dev_exempt}"
     assert cf_exempt == expected, f"CF exempt set drifted: {cf_exempt}"

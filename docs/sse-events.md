@@ -64,6 +64,12 @@ pinned by `tests/test_render.py`.
 | Selector | Source template | Purpose |
 | --- | --- | --- |
 | `[data-testid="connection-status"]` | `index.html.j2` | Conn-state badge |
+| `[data-testid="tier-badge"]` | `index.html.j2` | Guest / Real mesh / Sandbox preview pill |
+| `[data-testid="identity"]` / `[data-testid="header-room"]` | `index.html.j2` | Nick and active room in the header (never host:port) |
+| `[data-testid="sandbox-banner"]`, `sandbox-enter`, `sandbox-leave` | `index.html.j2` | Amber "Guest view" banner and toggle buttons |
+| `[data-testid="command-palette"]` | `index.html.j2` | Inline slash-command palette (`chatui.js`) |
+| `[data-testid="agent-state"]` | `_presence.html.j2` | Sandbox agent online/offline line |
+| `[data-testid="rooms-toggle"]` | `index.html.j2` | Phone rooms drawer button |
 | `[data-testid="sidebar"]` | `index.html.j2` | Sidebar wrapper |
 | `[data-testid="sidebar-channel"]` | `_sidebar.html.j2` | Channel row + state |
 | `[data-testid="sidebar-entity"]` | `_sidebar.html.j2` | Roster row |

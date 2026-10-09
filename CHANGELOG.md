@@ -7,6 +7,61 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-09
+
+### Added
+
+- **Guest mode for chat.culture.dev** (culture spec `guest-mode-sandbox`;
+  config `guest_mode:`, see `docs/guest-mode-config.md`, off by default).
+  One site for everyone: approved users sign in through a path-scoped
+  Cloudflare Access app on `/login`; anyone else can enter as a guest.
+  - **Entry card** (`/`, `/entry/*`): email, then one identical window for
+    every address (password + "Guest mode"), so membership is never
+    revealed — same body, status and padded timing. Approved email +
+    correct argon2id password -> `303 /login` (Access SSO). Guests choose
+    a nickname, accept the Terms and Privacy Policy (versioned, read from
+    `legal_version_url`), and enter a single-use code emailed to them
+    (15 min). Optional Turnstile bot check; per-IP and per-email rate limits.
+  - **Tiers**: approved (Access JWT + allowlist), guest (signed
+    `lens_guest` cookie, HttpOnly/Secure/SameSite=Strict), anonymous
+    (deny by default). CSRF middleware on state-changing routes.
+  - **Sandbox routing**: guests only ever connect to the isolated sandbox
+    IRCd. Each guest chats with sbx-ask in a private room
+    `#g-<random id>`; guests never see each other. Approved users can open
+    "Guest view" (`/sandbox/enter`, nick `sbx-op-<name>`) to watch and
+    switch between every guest room, and go "Back to mesh".
+  - **Guest data**: the guest store (SQLite) holds consents, the guest's
+    messages and sbx-ask's answers. Self-serve deletion at `/delete`
+    (emailed code) erases everything linked to the guest — profile,
+    inputs, consents, tokens, flags, room id, uploads and their sbx-ask
+    flag-log lines — keeping only an anonymized Q&A corpus (no email, IP,
+    nick or room; PII-scrubbed; day-only date) and the deletion record.
+    `irc-lens guests export` emits a PII-redacted transcript plus the
+    corpus.
+  - **Moderation**: `irc-lens guests {passwd,ban,unban,list,flags,export}`;
+    `ban --flag <id>` blocks a guest from sbx-ask's NSFW flag log; banned
+    sessions drop within the sweep interval. Guests may only run sandbox
+    commands (`/help`, `/who`, `/me`, `/read`) and are rate-limited.
+  - **Owner metrics** at `/owner/metrics` (entries, active guest sessions,
+    429s, failed sign-ins, agent state).
+  - `scripts/cf_access_login_path.py`: narrow (or restore) the existing
+    Access app to `<host>/login`, dry-run by default.
+- **Chat UI uplift (Option A)**: header shows tier badge, nick and room
+  (never host:port); inline command palette on `/`, tier-aware; live
+  "In this room" member list; agent online/offline badge by room
+  membership; phone layout with a rooms drawer; empty state hints.
+
+### Fixed
+
+- `GET /login` no longer 404s after Access SSO; it redirects to `/`.
+- The chat log opens at the newest message and only follows new lines
+  while you are at the bottom.
+- Room rows keep working after a live sidebar update (htmx re-processed).
+- No CSP violations: htmx indicator styles off, `allowEval` off, event
+  filters replaced by a delegated keydown handler.
+- SSE keepalive every 15 s so closed tabs unsubscribe; idle sandbox
+  sessions close after `guest_mode.idle_close_s`.
+
 ## [0.10.0] - 2026-07-07
 
 ### Added

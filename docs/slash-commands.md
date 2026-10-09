@@ -110,3 +110,31 @@ irc-lens join '#general'
 irc-lens send '#ops' 'standup' --json
 irc-lens mesh '#ops' --json
 ```
+
+## Tier-aware palette and guest allowlist
+
+Typing `/` opens an inline command palette above the input (command in
+mono green, 1-3 word description). One table (`irc_lens.commands.PALETTE`)
+drives the palette, the help pane, and the server-side allowlist:
+
+| Tier | Commands offered |
+| --- | --- |
+| Approved (real mesh) | `/help` `/who` `/me` `/read` `/join` `/channels` `/agents` `/mesh` `/residents` and, with guest mode on, `/sandbox` (Guest view) |
+| Guest, Sandbox preview | `/help` `/who` `/me` `/read` and plain chat |
+
+`POST /input` enforces the same list for any session routed to the
+sandbox (`SANDBOX_ALLOWED`): everything else (`/kick /start /stop
+/restart /invite /server /icon /topic /send /part /join /switch /channels
+/agents /mesh /overview /status /quit`, unknown commands) is refused with
+`403 {"error": "Not in guest view"}` and never reaches IRC. Guests are also
+rate limited to `guest_mode.rate_limits.messages_per_min` messages a minute
+(per guest email and per IP, 60 s window): over the limit is
+`429 {"error": "Slow down"}` with `Retry-After: 60`. Refused commands count.
+
+An approved user on the mesh typing `/sandbox` (or using the header's
+"Guest view" button) switches to the sandbox preview; "Back to mesh" in the
+amber banner switches back (`HX-Refresh` reloads the page).
+
+`GET /presence` returns the sandbox agent state fragment (`agent online` /
+`agent offline`, silent while the agent has never been seen) polled by htmx
+every 15 s in guest and sandbox-preview sessions.

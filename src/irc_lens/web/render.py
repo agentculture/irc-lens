@@ -289,6 +289,7 @@ def render_chat_log(
     *,
     media_embed_prefixes: tuple["MediaOrigin", ...] = (),
     media_remote_embeds: str = "click",
+    hide_system: bool = False,
 ) -> str:
     """Render multiple chat lines as a single HTML blob for innerHTML
     replacement of `#chat-log`. Used by the `log` SSE event publish on
@@ -305,13 +306,18 @@ def render_chat_log(
     prefixes — see `media_items`'s docstring for why.
     """
     template = _env.get_template("_chat_line.html.j2")
+    msgs = [_normalize_history_entry(e) for e in entries]
+    if hide_system:
+        # Sandbox views hide `system-*` join/welcome lines (owner decision,
+        # d6); live `system-*` PRIVMSGs are already dropped by dispatch.
+        msgs = [m for m in msgs if not str(m.get("nick", "")).startswith("system-")]
     parts = [
         template.render(
-            msg=_normalize_history_entry(e),
+            msg=m,
             media_embed_prefixes=media_embed_prefixes,
             media_remote_embeds=media_remote_embeds,
         )
-        for e in entries
+        for m in msgs
     ]
     return "".join(parts)
 
@@ -439,7 +445,12 @@ def render_residents_page(kind: str, payload: dict | None) -> str:
     )
 
 
-def render_index(session: "Session", *, chat_log_html: str | None = None) -> str:
+def render_index(
+    session: "Session",
+    *,
+    chat_log_html: str | None = None,
+    presence: dict | None = None,
+) -> str:
     """Render the full three-pane page from current Session state.
 
     `chat_log_html` is the pre-rendered chat-log content for the active
@@ -448,6 +459,10 @@ def render_index(session: "Session", *, chat_log_html: str | None = None) -> str
     `MessageBuffer` entries for `current_channel`. The buffer fallback
     matters for the `--seed` flow and for unit tests that drive Session
     state without a live IRC connection: there is no IRCd to query.
+
+    `presence` is the sandbox agent's ``metrics.AgentPresence.state()``
+    dict, passed only for sandbox-backed sessions (guest / sandbox
+    preview) so the room header can render the agent-offline line.
     """
     if chat_log_html is None:
         if session.current_channel:
@@ -460,5 +475,7 @@ def render_index(session: "Session", *, chat_log_html: str | None = None) -> str
         else:
             chat_log_html = ""
     return _env.get_template("index.html.j2").render(
-        session=session, chat_log_html=chat_log_html
+        session=session,
+        chat_log_html=chat_log_html,
+        presence=presence,
     )

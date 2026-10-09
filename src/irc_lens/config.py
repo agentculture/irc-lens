@@ -5,6 +5,7 @@ The loader returns a frozen :class:`LensConfig` dataclass; missing
 required keys raise :class:`AfiError` with an `error:`/`hint:` shape
 the dispatcher renders without leaking a traceback.
 """
+
 from __future__ import annotations
 
 import os
@@ -42,6 +43,26 @@ class LensConfig:
     media_trusted_hosts: tuple[str, ...]
     culture_residents_url: str | None = None
     culture_overview_name: str | None = None
+    guest_enabled: bool = False
+    guest_sandbox_name: str = "sbx"
+    guest_sandbox_host: str = "127.0.0.1"
+    guest_sandbox_port: int = 6668
+    # Each guest gets a private room <prefix><nick> that the sandbox agent
+    # follows; guests never see each other (d6).
+    guest_room_prefix: str = "#g-"
+    # sbx-ask's flag log; guest deletion drops the guest's lines there (d7).
+    # The sandbox IRCd itself runs memory-only (culture server --no-persist).
+    guest_sandbox_flag_log: str | None = None
+    # Close a sandbox session after this long with no open event stream.
+    guest_idle_close_s: int = 600
+    guest_store_path: str = ""
+    guest_legal_version_url: str = "https://culture.dev/legal/version.json"
+    guest_mail_provider: str = "none"
+    guest_mail_from: str = ""
+    guest_mail_api_key_env: str = "IRC_LENS_MAIL_API_KEY"
+    guest_rate_entry_per_min: int = 10
+    guest_rate_messages_per_min: int = 20
+    guest_rate_password_attempts_per_15min: int = 5
 
 
 def default_config_path() -> Path:
@@ -96,8 +117,16 @@ def _coerce_port(value: object, where: str) -> int:
 def _require(d: dict, key: str, where: str) -> object:
     if key not in d:
         raise _err(
-            f"missing required key {where}.{key}" if where else f"missing required key {key}",
-            f"add `{key}:` under `{where}:` in the config file" if where else f"add `{key}:` to the config file",
+            (
+                f"missing required key {where}.{key}"
+                if where
+                else f"missing required key {key}"
+            ),
+            (
+                f"add `{key}:` under `{where}:` in the config file"
+                if where
+                else f"add `{key}:` to the config file"
+            ),
         )
     return d[key]
 
@@ -121,6 +150,7 @@ def _require_str_list(value: object, where: str, hint: str) -> list[str]:
 # ---------------------------------------------------------------------------
 # Section validators (extracted to keep load_config's cognitive complexity low)
 # ---------------------------------------------------------------------------
+
 
 def _load_dev_fields(auth: dict) -> tuple[str, str]:
     """Return (dev_nick, dev_email) from the auth section in dev mode."""
@@ -270,7 +300,9 @@ def _coerce_int(value: object, where: str) -> int:
     )
 
 
-def _validate_media_section(raw: dict) -> tuple[bool, str, int, int, str, str, tuple[str, ...]]:
+def _validate_media_section(
+    raw: dict,
+) -> tuple[bool, str, int, int, str, str, tuple[str, ...]]:
     """Return (enabled, dir, max_file_bytes, max_store_bytes, public_base_url, remote_embeds, trusted_hosts)."""
     media_raw = raw.get("media")
     if media_raw is None:
@@ -285,8 +317,12 @@ def _validate_media_section(raw: dict) -> tuple[bool, str, int, int, str, str, t
 
     media_enabled = _coerce_bool(media.get("enabled", True), "media.enabled")
     media_dir = str(media.get("dir", _default_media_dir()))
-    media_max_file_bytes = _coerce_int(media.get("max_file_bytes", 10485760), "media.max_file_bytes")
-    media_max_store_bytes = _coerce_int(media.get("max_store_bytes", 268435456), "media.max_store_bytes")
+    media_max_file_bytes = _coerce_int(
+        media.get("max_file_bytes", 10485760), "media.max_file_bytes"
+    )
+    media_max_store_bytes = _coerce_int(
+        media.get("max_store_bytes", 268435456), "media.max_store_bytes"
+    )
     media_public_base_url = str(media.get("public_base_url", ""))
 
     if media_max_file_bytes > media_max_store_bytes:
@@ -326,7 +362,15 @@ def _validate_media_section(raw: dict) -> tuple[bool, str, int, int, str, str, t
     )
     trusted_hosts = tuple(trusted_hosts_raw)
 
-    return media_enabled, media_dir, media_max_file_bytes, media_max_store_bytes, media_public_base_url, remote_embeds, trusted_hosts
+    return (
+        media_enabled,
+        media_dir,
+        media_max_file_bytes,
+        media_max_store_bytes,
+        media_public_base_url,
+        remote_embeds,
+        trusted_hosts,
+    )
 
 
 def _validate_culture_section(raw: dict) -> tuple[str | None, str | None]:
@@ -351,7 +395,10 @@ def _validate_culture_section(raw: dict) -> tuple[str | None, str | None]:
                 "http://127.0.0.1:9000/residents.json",
             )
         parsed_residents = urlsplit(residents_url)
-        if parsed_residents.scheme not in ("http", "https") or not parsed_residents.netloc:
+        if (
+            parsed_residents.scheme not in ("http", "https")
+            or not parsed_residents.netloc
+        ):
             raise _err(
                 "culture.residents_url must start with http:// or https://, "
                 f"got {residents_url!r}",
@@ -375,9 +422,150 @@ def _validate_culture_section(raw: dict) -> tuple[str | None, str | None]:
     return residents_url, overview_name
 
 
+_GUEST_KEYS = frozenset(
+    {
+        "enabled",
+        "sandbox",
+        "store_path",
+        "legal_version_url",
+        "mail",
+        "rate_limits",
+        "idle_close_s",
+    }
+)
+_GUEST_SANDBOX_KEYS = frozenset(
+    {"name", "host", "port", "room_prefix", "flag_log"}
+)
+_GUEST_MAIL_KEYS = frozenset({"provider", "from", "api_key_env"})
+_GUEST_RATE_KEYS = frozenset(
+    {"entry_per_min", "messages_per_min", "password_attempts_per_15min"}
+)
+
+
+def _default_guest_store_path() -> str:
+    """$XDG_DATA_HOME/irc-lens/guests.db or ~/.local/share/irc-lens/guests.db."""
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return str(Path(base) / "irc-lens" / "guests.db")
+
+
+def _optional_mapping(value: object, where: str, allowed: frozenset[str]) -> dict:
+    """An optional sub-mapping: absent -> {}, non-dict or unknown keys -> error."""
+    if value is None:
+        return {}
+    if not isinstance(value, dict):
+        raise _err(f"{where}: must be a mapping", _HINT_CONFIG_INIT)
+    unknown = sorted(set(value) - allowed)
+    if unknown:
+        raise _err(
+            f"{where}: unknown keys {unknown}",
+            f"allowed keys: {sorted(allowed)}",
+        )
+    return value
+
+
+def _coerce_str(value: object, where: str) -> str:
+    if not isinstance(value, str):
+        raise _err(
+            f"{where} must be a string, got {value!r}", f"set `{where}:` to a string"
+        )
+    return value
+
+
+def _positive_int(value: object, where: str) -> int:
+    n = _coerce_int(value, where)
+    if n <= 0:
+        raise _err(f"{where} must be > 0, got {n}", f"set `{where}:` to a positive number")
+    return n
+
+
+def _optional_path(value: object, where: str) -> str | None:
+    if value is None:
+        return None
+    return str(Path(_coerce_str(value, where)).expanduser())
+
+
+def _room_prefix(value: object) -> str:
+    prefix = _coerce_str(value, "guest_mode.sandbox.room_prefix")
+    if not prefix.startswith("#") or len(prefix) < 2 or " " in prefix or "," in prefix:
+        raise _err(
+            f"guest_mode.sandbox.room_prefix must start a channel name like #g-, got {prefix!r}",
+            "set `guest_mode.sandbox.room_prefix:` to the prefix of the private guest rooms "
+            "(must match the sandbox agent's guest_room_prefix)",
+        )
+    return prefix
+
+
+def _validate_guest_mode_section(raw: dict) -> dict:
+    """Return the guest_* LensConfig fields; absent section -> defaults (switch off)."""
+    guest = _optional_mapping(raw.get("guest_mode"), "guest_mode", _GUEST_KEYS)
+    sandbox = _optional_mapping(
+        guest.get("sandbox"), "guest_mode.sandbox", _GUEST_SANDBOX_KEYS
+    )
+    mail = _optional_mapping(guest.get("mail"), "guest_mode.mail", _GUEST_MAIL_KEYS)
+    rates = _optional_mapping(
+        guest.get("rate_limits"), "guest_mode.rate_limits", _GUEST_RATE_KEYS
+    )
+
+    legal_url = _coerce_str(
+        guest.get("legal_version_url", "https://culture.dev/legal/version.json"),
+        "guest_mode.legal_version_url",
+    )
+    parsed = urlsplit(legal_url)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        raise _err(
+            f"guest_mode.legal_version_url must start with http:// or https://, got {legal_url!r}",
+            "set `guest_mode.legal_version_url:` to a full URL, e.g. "
+            "https://culture.dev/legal/version.json",
+        )
+
+    def rate(key: str, default: int) -> int:
+        return _coerce_int(rates.get(key, default), f"guest_mode.rate_limits.{key}")
+
+    return {
+        "guest_enabled": _coerce_bool(
+            guest.get("enabled", False), "guest_mode.enabled"
+        ),
+        "guest_sandbox_name": _coerce_str(
+            sandbox.get("name", "sbx"), "guest_mode.sandbox.name"
+        ),
+        "guest_sandbox_host": _coerce_str(
+            sandbox.get("host", "127.0.0.1"), "guest_mode.sandbox.host"
+        ),
+        "guest_sandbox_port": _coerce_port(
+            sandbox.get("port", 6668), "guest_mode.sandbox.port"
+        ),
+        "guest_room_prefix": _room_prefix(sandbox.get("room_prefix", "#g-")),
+        "guest_sandbox_flag_log": _optional_path(
+            sandbox.get("flag_log"), "guest_mode.sandbox.flag_log"
+        ),
+        "guest_idle_close_s": _positive_int(
+            guest.get("idle_close_s", 600), "guest_mode.idle_close_s"
+        ),
+        "guest_store_path": _coerce_str(
+            guest.get("store_path", _default_guest_store_path()),
+            "guest_mode.store_path",
+        ),
+        "guest_legal_version_url": legal_url,
+        "guest_mail_provider": _coerce_str(
+            mail.get("provider", "none"), "guest_mode.mail.provider"
+        ),
+        "guest_mail_from": _coerce_str(mail.get("from", ""), "guest_mode.mail.from"),
+        "guest_mail_api_key_env": _coerce_str(
+            mail.get("api_key_env", "IRC_LENS_MAIL_API_KEY"),
+            "guest_mode.mail.api_key_env",
+        ),
+        "guest_rate_entry_per_min": rate("entry_per_min", 10),
+        "guest_rate_messages_per_min": rate("messages_per_min", 20),
+        "guest_rate_password_attempts_per_15min": rate(
+            "password_attempts_per_15min", 5
+        ),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Public loader — flat orchestrator, no nested conditionals beyond auth.mode
 # ---------------------------------------------------------------------------
+
 
 def load_config(path: Path) -> LensConfig:
     if not path.exists():
@@ -416,7 +604,9 @@ def load_config(path: Path) -> LensConfig:
     if mode == "dev":
         dev_nick, dev_email = _load_dev_fields(auth)
     else:
-        cf_aud, cf_team_domain, allowed_emails, allowed_service_tokens = _load_cf_fields(auth)
+        cf_aud, cf_team_domain, allowed_emails, allowed_service_tokens = (
+            _load_cf_fields(auth)
+        )
 
     server_name, server_host, server_port = _validate_server_section(raw)
     web_bind, web_port = _validate_web_section(raw)
@@ -430,6 +620,7 @@ def load_config(path: Path) -> LensConfig:
         media_trusted_hosts,
     ) = _validate_media_section(raw)
     culture_residents_url, culture_overview_name = _validate_culture_section(raw)
+    guest_fields = _validate_guest_mode_section(raw)
 
     return LensConfig(
         auth_mode=mode,
@@ -453,6 +644,7 @@ def load_config(path: Path) -> LensConfig:
         media_trusted_hosts=media_trusted_hosts,
         culture_residents_url=culture_residents_url,
         culture_overview_name=culture_overview_name,
+        **guest_fields,
     )
 
 

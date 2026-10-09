@@ -156,3 +156,21 @@ async def test_sse_stream_headers_unmodified(client: TestClient) -> None:
         assert resp.headers["X-Accel-Buffering"] == "no"
     finally:
         resp.close()
+
+
+def test_templates_use_no_eval_dependent_htmx_features():
+    """CSP has no 'unsafe-eval': hx-trigger filters / hx-on / js: need eval."""
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).parent.parent / "src" / "irc_lens" / "templates"
+    for path in root.glob("*.j2"):
+        text = path.read_text()
+        for m in re.finditer(r'hx-trigger="([^"]*)"', text):
+            assert "[" not in m.group(1), f"{path.name}: filter in {m.group(1)!r}"
+        assert "hx-on" not in text, path.name
+        assert "javascript:" not in text, path.name
+        if "htmx.min.js" in text:
+            assert 'name="htmx-config"' in text, path.name
+            assert '"includeIndicatorStyles":false' in text, path.name
+            assert '"allowEval":false' in text, path.name

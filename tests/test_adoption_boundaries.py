@@ -50,7 +50,7 @@ def test_media_capability_urls_stay_auth_exempt() -> None:
     from irc_lens.web import auth as auth_module
 
     dev_exempt = _exempt_paths_in(app_module._dev_identity_middleware)
-    cf_exempt = _exempt_paths_in(auth_module.build_cloudflare_middleware)
+    cf_exempt = _exempt_paths_in(auth_module._is_public_path)
 
     assert "/media/" in dev_exempt, f"media capability URLs must stay auth-exempt (dev): {dev_exempt}"
     assert "/media/" in cf_exempt, f"media capability URLs must stay auth-exempt (cf): {cf_exempt}"
