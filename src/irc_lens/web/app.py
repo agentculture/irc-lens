@@ -19,7 +19,7 @@ from irc_lens.config import LensConfig
 from irc_lens.web import csrf, routes
 from irc_lens.web.auth import build_cloudflare_middleware
 from irc_lens.web.front import mount_agent_front
-from irc_lens.web.identity import Identity
+from irc_lens.web.identity import TIER_APPROVED, Identity
 from irc_lens.web.render import precompute_static_hashes
 from irc_lens.web.sessions import SessionFactory, SessionRegistry
 from irc_lens.web.store import MediaStore
@@ -106,6 +106,8 @@ def _dev_identity_middleware(config: LensConfig):
         principal=config.dev_email,
         nick=config.dev_nick,
         raw_jwt_subject="dev",
+        # Dev mode is the single trusted local operator: the real-mesh tier.
+        tier=TIER_APPROVED,
     )
 
     @web.middleware
