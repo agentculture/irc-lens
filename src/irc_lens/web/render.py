@@ -439,7 +439,12 @@ def render_residents_page(kind: str, payload: dict | None) -> str:
     )
 
 
-def render_index(session: "Session", *, chat_log_html: str | None = None) -> str:
+def render_index(
+    session: "Session",
+    *,
+    chat_log_html: str | None = None,
+    presence: dict | None = None,
+) -> str:
     """Render the full three-pane page from current Session state.
 
     `chat_log_html` is the pre-rendered chat-log content for the active
@@ -448,6 +453,10 @@ def render_index(session: "Session", *, chat_log_html: str | None = None) -> str
     `MessageBuffer` entries for `current_channel`. The buffer fallback
     matters for the `--seed` flow and for unit tests that drive Session
     state without a live IRC connection: there is no IRCd to query.
+
+    `presence` is the sandbox agent's ``metrics.AgentPresence.state()``
+    dict, passed only for sandbox-backed sessions (guest / sandbox
+    preview) so the room header can render the agent-offline line.
     """
     if chat_log_html is None:
         if session.current_channel:
@@ -460,5 +469,7 @@ def render_index(session: "Session", *, chat_log_html: str | None = None) -> str
         else:
             chat_log_html = ""
     return _env.get_template("index.html.j2").render(
-        session=session, chat_log_html=chat_log_html
+        session=session,
+        chat_log_html=chat_log_html,
+        presence=presence,
     )

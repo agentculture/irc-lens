@@ -237,6 +237,7 @@ def make_app(
     app.router.add_post("/upload", routes.post_upload)
     app.router.add_get("/media/{name}", routes.get_media)
     app.router.add_get("/events", routes.get_events)
+    app.router.add_get("/presence", routes.get_presence)
     app.router.add_get("/residents", routes.get_residents)
     app.router.add_get("/healthz", routes.get_healthz)
     app.router.add_get("/owner/metrics", routes.get_owner_metrics)
