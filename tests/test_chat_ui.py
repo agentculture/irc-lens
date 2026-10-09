@@ -331,8 +331,24 @@ async def test_sandbox_preview_also_enforces_allowlist(env: Env) -> None:
     await env.client.post("/sandbox/enter", headers=h)
     r = await env.client.post("/input", json={"text": "/join #x"}, headers=h)
     assert r.status == 403
-    # The automatic sandbox-room JOIN (#general) is expected; /join #x is not.
+    # The automatic private-room JOINs are expected; /join #x is not.
     assert not any(l.command == "JOIN" and l.params[:1] == ["#x"] for l in env.sandbox.received)
+
+
+async def test_guest_view_may_switch_between_guest_rooms(env: Env) -> None:
+    """The owner watches every guest room from Guest view (d6), so /switch is
+    allowed there; guests have one room and still may not /switch."""
+    env.add_guest()
+    await env.client.get("/", headers=env.guest_headers())  # opens #g-gus
+    h = env.approved_headers()
+    await env.client.post("/sandbox/enter", headers=h)
+    await env.client.get("/", headers=h)  # opens #g-alice + joins #g-gus
+    r = await env.client.post("/input", json={"text": "/switch #g-gus"}, headers=h)
+    assert r.status == 204
+    r = await env.client.post(
+        "/input", json={"text": "/switch #g-alice"}, headers=env.guest_headers()
+    )
+    assert r.status == 403
 
 
 async def test_approved_on_mesh_keeps_full_command_set(env: Env) -> None:

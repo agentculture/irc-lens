@@ -190,6 +190,13 @@ def help_for(tier: str, *, sandbox_toggle: bool = False) -> list[PaletteEntry]:
     return rows + list(_HELP_EXTRA) if tier == "approved" else rows
 
 
-def allowed_in_sandbox(parsed: ParsedCommand) -> bool:
-    """True iff *parsed* may run in a sandbox session."""
+def allowed_in_sandbox(parsed: ParsedCommand, *, preview: bool = False) -> bool:
+    """True iff *parsed* may run in a sandbox session.
+
+    The approved user's Guest view (*preview*) may also /switch between the
+    guest rooms it joined, to watch each one (d6). /switch never joins: it
+    refuses a room the session is not already in.
+    """
+    if preview and parsed.type == CommandType.SWITCH:
+        return True
     return parsed.type in SANDBOX_ALLOWED

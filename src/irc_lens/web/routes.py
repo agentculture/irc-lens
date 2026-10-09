@@ -641,7 +641,7 @@ def _sandbox_policy(
             status=429,
             headers={"Retry-After": str(_MESSAGE_RATE_WINDOW_S)},
         )
-    if not allowed_in_sandbox(parsed):
+    if not allowed_in_sandbox(parsed, preview=identity.tier != TIER_GUEST):
         return _json_error(403, "Not in guest view", "Try /help")
     return None
 
