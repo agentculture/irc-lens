@@ -494,6 +494,10 @@ async def get_presence(request: web.Request) -> web.Response:
     if backend == BACKEND_SANDBOX:
         try:
             session = await _resolve_session(request)
+            # Re-read the room from the server on every poll: AgentIRC sends
+            # no QUIT for a bot-capability client (sbx-ask) or an abrupt
+            # disconnect, so a stopped agent is only visible via WHO.
+            await session.refresh_roster()
         except Exception:  # noqa: BLE001 — no session means no agent here
             session = None
         presence = _sandbox_state(session)

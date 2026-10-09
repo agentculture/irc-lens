@@ -244,20 +244,18 @@ def _guest_session(env: Env):
 
 
 async def test_agent_state_follows_room_membership(env: Env) -> None:
-    """Online iff the agent is in this guest's room (d6): an idle agent is
-    online; one that left the room (stopped -> PART/QUIT) is offline."""
-    from irc_lens.session import EntityItem
-
+    """Online iff the agent is in this guest's room (d6), re-read from the
+    server on every poll: AgentIRC sends no QUIT for a bot-capability client
+    or an abrupt disconnect, so a stopped agent is only seen via WHO."""
     env.add_guest()
     h = env.guest_headers()
     html = await (await env.client.get("/", headers=h)).text()
     assert 'data-testid="agent-state" data-state="offline"' in html
-    sess = _guest_session(env)
-    sess.set_roster([EntityItem("sbx-gus", "human"), EntityItem("sbx-ask", "agent")])
+    env.sandbox.channel_members["#g-gus"].add("sbx-ask")  # the agent follows in
     frag = await (await env.client.get("/presence", headers=h)).text()
     assert 'data-state="online"' in frag and "agent online" in frag
     assert 'hx-get="/presence"' in frag
-    sess.set_roster([EntityItem("sbx-gus", "human")])
+    env.sandbox.channel_members["#g-gus"].discard("sbx-ask")  # stopped, no QUIT
     frag = await (await env.client.get("/presence", headers=h)).text()
     assert 'data-state="offline"' in frag and "agent offline" in frag
 

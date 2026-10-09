@@ -120,4 +120,8 @@ so the owner can watch them all. Sandbox views hide `system-*` join and
 welcome lines; the real mesh view is unchanged.
 
 The agent state badge (`agent online` / `agent offline`) reflects whether the
-agent is in the session's room right now, read from the live member list.
+agent is in the session's room right now, read from the live member list. Each
+15-second badge poll re-reads the room with `WHO`: AgentIRC sends no `QUIT`
+for a client holding the `agentirc.io/bot` capability (as `sbx-ask` does) or
+for an abrupt disconnect, so a stopped agent shows `agent offline` on the next
+poll rather than never.
