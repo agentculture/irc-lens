@@ -11,6 +11,7 @@ doesn't poison the cache for that principal.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from collections import defaultdict
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -48,6 +49,14 @@ def _presence_listener(msg: Any) -> None:
         presence.gone(nick)
 
 
+async def _join_room(session: Any, room: str) -> None:
+    """Join *room* and make it current (tolerates test doubles without async join)."""
+    joined = session.join(room)
+    if inspect.isawaitable(joined):
+        await joined
+    session.set_current_channel(room)
+
+
 class SessionRegistry:
     """Maps principal → Session, lazy-opening as needed."""
 
@@ -55,8 +64,12 @@ class SessionRegistry:
         self,
         factory: SessionFactory,
         sandbox_factory: SessionFactory | None = None,
+        sandbox_room: str = "#general",
     ) -> None:
         self._factories: dict[str, SessionFactory] = {BACKEND_MESH: factory}
+        # Room every sandbox session joins on open: guests may not /join
+        # (command allowlist), so this is how they reach the sandbox agent.
+        self._sandbox_room = sandbox_room
         if sandbox_factory is not None:
             self._factories[BACKEND_SANDBOX] = sandbox_factory
         self._sessions: dict[tuple[str, str], Any] = {}
@@ -163,6 +176,7 @@ class SessionRegistry:
                 )
                 for command in ("PRIVMSG", "JOIN", "PART", "QUIT"):
                     session._transport.add_listener(command, _presence_listener)
+                await _join_room(session, self._sandbox_room)
             self._sessions[key] = session
             if self._counts_as_guest(*key):
                 metrics.get_metrics().session_opened()

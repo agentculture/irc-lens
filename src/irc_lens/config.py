@@ -47,6 +47,7 @@ class LensConfig:
     guest_sandbox_name: str = "sbx"
     guest_sandbox_host: str = "127.0.0.1"
     guest_sandbox_port: int = 6668
+    guest_sandbox_room: str = "#general"
     guest_store_path: str = ""
     guest_legal_version_url: str = "https://culture.dev/legal/version.json"
     guest_mail_provider: str = "none"
@@ -417,7 +418,7 @@ def _validate_culture_section(raw: dict) -> tuple[str | None, str | None]:
 _GUEST_KEYS = frozenset(
     {"enabled", "sandbox", "store_path", "legal_version_url", "mail", "rate_limits"}
 )
-_GUEST_SANDBOX_KEYS = frozenset({"name", "host", "port"})
+_GUEST_SANDBOX_KEYS = frozenset({"name", "host", "port", "room"})
 _GUEST_MAIL_KEYS = frozenset({"provider", "from", "api_key_env"})
 _GUEST_RATE_KEYS = frozenset(
     {"entry_per_min", "messages_per_min", "password_attempts_per_15min"}
@@ -451,6 +452,16 @@ def _coerce_str(value: object, where: str) -> str:
             f"{where} must be a string, got {value!r}", f"set `{where}:` to a string"
         )
     return value
+
+
+def _sandbox_room(value: object) -> str:
+    room = _coerce_str(value, "guest_mode.sandbox.room")
+    if not room.startswith("#") or len(room) < 2 or " " in room:
+        raise _err(
+            f"guest_mode.sandbox.room must be a channel like #general, got {room!r}",
+            "set `guest_mode.sandbox.room:` to the channel the sandbox agent joins",
+        )
+    return room
 
 
 def _validate_guest_mode_section(raw: dict) -> dict:
@@ -492,6 +503,7 @@ def _validate_guest_mode_section(raw: dict) -> dict:
         "guest_sandbox_port": _coerce_port(
             sandbox.get("port", 6668), "guest_mode.sandbox.port"
         ),
+        "guest_sandbox_room": _sandbox_room(sandbox.get("room", "#general")),
         "guest_store_path": _coerce_str(
             guest.get("store_path", _default_guest_store_path()),
             "guest_mode.store_path",

@@ -12,6 +12,7 @@ guest_mode:
     name: sbx
     host: 127.0.0.1
     port: 6668
+    room: "#general"        # every sandbox session joins it (guests cannot /join)
   store_path: ~/.local/share/irc-lens/guests.db   # default: $XDG_DATA_HOME/irc-lens/guests.db
   legal_version_url: https://culture.dev/legal/version.json
   mail:                     # sender for guest token emails
@@ -30,6 +31,7 @@ guest_mode:
 | `sandbox.name` | `guest_sandbox_name` | `sbx` |
 | `sandbox.host` | `guest_sandbox_host` | `127.0.0.1` |
 | `sandbox.port` | `guest_sandbox_port` | `6668` |
+| `sandbox.room` | `guest_sandbox_room` | `#general` |
 | `store_path` | `guest_store_path` | `$XDG_DATA_HOME/irc-lens/guests.db` |
 | `legal_version_url` | `guest_legal_version_url` | `https://culture.dev/legal/version.json` |
 | `mail.provider` | `guest_mail_provider` | `none` |

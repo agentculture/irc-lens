@@ -200,7 +200,11 @@ def make_app(
     sandbox_factory = None
     if config.guest_enabled:
         sandbox_factory = sandbox_session_factory or _default_sandbox_factory(config)
-    registry = SessionRegistry(factory=session_factory, sandbox_factory=sandbox_factory)
+    registry = SessionRegistry(
+        factory=session_factory,
+        sandbox_factory=sandbox_factory,
+        sandbox_room=config.guest_sandbox_room,
+    )
     app["registry"] = registry
     app["config"] = config
     if config.guest_enabled:

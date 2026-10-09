@@ -440,3 +440,27 @@ async def test_registry_keys_by_principal_and_backend() -> None:
     assert made == [("mesh", "srv-a"), ("sandbox", "sbx-a")]
     with pytest.raises(ValueError):
         await SessionRegistry(mk("mesh")).get_or_open(ident, "sandbox")
+
+
+async def test_guest_session_joins_sandbox_room(env: Env) -> None:
+    """A guest lands in the sandbox room where the agent lives (staging E2E gap).
+
+    Guests may not /join (allowlist), so without an automatic join they would
+    have no room to talk to the agent in.
+    """
+    env.add_guest()
+    r = await env.client.get("/", headers=env.guest_headers())
+    assert r.status == 200
+    joins = [ln.params[0] for ln in env.sandbox.received if ln.command == "JOIN"]
+    assert joins == ["#general"]
+    assert env.mesh.received == []
+
+
+async def test_approved_toggle_also_joins_sandbox_room(env: Env) -> None:
+    r = await env.client.post("/sandbox/enter", headers=env.approved_headers())
+    assert r.status in (200, 204)
+    # The toggle is server-side state; the sandbox session opens on next load.
+    r = await env.client.get("/", headers=env.approved_headers())
+    assert r.status == 200
+    joins = [ln.params[0] for ln in env.sandbox.received if ln.command == "JOIN"]
+    assert joins == ["#general"]

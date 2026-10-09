@@ -144,6 +144,8 @@ class FakeSandboxSession:
         self.connect = AsyncMock()
         self.wait_for_welcome = AsyncMock()
         self.disconnect = AsyncMock()
+        self.join = AsyncMock()
+        self.set_current_channel = MagicMock()
         self._transport = MagicMock()
 
 

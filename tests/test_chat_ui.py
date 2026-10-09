@@ -336,7 +336,8 @@ async def test_sandbox_preview_also_enforces_allowlist(env: Env) -> None:
     await env.client.post("/sandbox/enter", headers=h)
     r = await env.client.post("/input", json={"text": "/join #x"}, headers=h)
     assert r.status == 403
-    assert not any(l.command == "JOIN" for l in env.sandbox.received)
+    # The automatic sandbox-room JOIN (#general) is expected; /join #x is not.
+    assert not any(l.command == "JOIN" and l.params[:1] == ["#x"] for l in env.sandbox.received)
 
 
 async def test_approved_on_mesh_keeps_full_command_set(env: Env) -> None:
