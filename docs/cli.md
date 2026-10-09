@@ -361,3 +361,14 @@ media:
     - cdn.example.com
     - images.example.org
 ```
+
+## `irc-lens guests export --redacted`
+
+Emits guest-input transcripts with PII stripped (`--format jsonl|md`,
+`--out FILE`, `--store PATH` or the configured `guest_mode.store_path`).
+`--redacted` is required; an unredacted export is not offered. Guests become
+per-export random pseudonyms (`guest-N`, no mapping kept), timestamps are
+coarsened to the date, and emails, IPs (v4/v6), phone numbers, sbx- nicks
+and self-introduced names are scrubbed from free text. Name detection is
+heuristic (known email-local-part/nick tokens plus "my name is X"/"I'm X"
+style cues) — see `src/irc_lens/export.py` for documented limitations.
