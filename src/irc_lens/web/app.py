@@ -209,12 +209,10 @@ def make_app(
     )
     app["registry"] = registry
     app["config"] = config
-    if config.guest_enabled and not (
-        config.guest_sandbox_history_db and config.guest_sandbox_flag_log
-    ):
+    if config.guest_enabled and not config.guest_sandbox_flag_log:
         logging.getLogger(__name__).warning(
-            "guest_mode on but guest_mode.sandbox.history_db/flag_log unset: guest "
-            "deletion will not erase the chat itself (Privacy Policy deletion right)"
+            "guest_mode on but guest_mode.sandbox.flag_log unset: guest deletion "
+            "will not erase the guest's sbx-ask flag lines"
         )
     if config.guest_enabled:
         from irc_lens.guest_store import GuestStore

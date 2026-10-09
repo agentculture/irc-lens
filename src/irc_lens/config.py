@@ -50,10 +50,8 @@ class LensConfig:
     # Each guest gets a private room <prefix><nick> that the sandbox agent
     # follows; guests never see each other (d6).
     guest_room_prefix: str = "#g-"
-    # Where the sandbox IRCd keeps channel history and sbx-ask its flag log;
-    # guest deletion purges the guest's room/lines there (d7). Required for
-    # the Privacy Policy's deletion right to cover the chat itself.
-    guest_sandbox_history_db: str | None = None
+    # sbx-ask's flag log; guest deletion drops the guest's lines there (d7).
+    # The sandbox IRCd itself runs memory-only (culture server --no-persist).
     guest_sandbox_flag_log: str | None = None
     # Close a sandbox session after this long with no open event stream.
     guest_idle_close_s: int = 600
@@ -436,7 +434,7 @@ _GUEST_KEYS = frozenset(
     }
 )
 _GUEST_SANDBOX_KEYS = frozenset(
-    {"name", "host", "port", "room_prefix", "history_db", "flag_log"}
+    {"name", "host", "port", "room_prefix", "flag_log"}
 )
 _GUEST_MAIL_KEYS = frozenset({"provider", "from", "api_key_env"})
 _GUEST_RATE_KEYS = frozenset(
@@ -537,9 +535,6 @@ def _validate_guest_mode_section(raw: dict) -> dict:
             sandbox.get("port", 6668), "guest_mode.sandbox.port"
         ),
         "guest_room_prefix": _room_prefix(sandbox.get("room_prefix", "#g-")),
-        "guest_sandbox_history_db": _optional_path(
-            sandbox.get("history_db"), "guest_mode.sandbox.history_db"
-        ),
         "guest_sandbox_flag_log": _optional_path(
             sandbox.get("flag_log"), "guest_mode.sandbox.flag_log"
         ),

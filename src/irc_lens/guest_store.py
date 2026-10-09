@@ -29,6 +29,9 @@ from argon2.exceptions import InvalidHashError, VerificationError
 DEFAULT_TOKEN_TTL = 900
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS corpus (
+    id TEXT PRIMARY KEY, day TEXT NOT NULL, question TEXT NOT NULL,
+    answer TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS rooms (
     email TEXT PRIMARY KEY, room_id TEXT NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS guests (
@@ -249,6 +252,41 @@ class GuestStore:
             "INSERT INTO inputs (email, kind, payload, ts) VALUES (?,?,?,?)",
             (email, kind, payload, self._now()),
         )
+
+    def inputs_for(self, email: str) -> list[tuple[str, str, int]]:
+        """``(kind, payload, ts)`` for one guest, oldest first."""
+        return self._all(
+            "SELECT kind, payload, ts FROM inputs WHERE email=? ORDER BY ts, rowid",
+            (email,),
+        )
+
+    # -- anonymized corpus (d8) -----------------------------------------------
+
+    def keep_corpus(self, pairs: list[dict]) -> int:
+        """Keep anonymized Q&A pairs (``question``/``answer``/``date``).
+
+        No email, IP, nick or room is stored, the date is day-only and each
+        row gets a random id (rowid order is not exposed), so a row cannot
+        reasonably be linked back to the guest. Deletion never touches it.
+        """
+        rows = [
+            (secrets.token_hex(12), p["date"], p["question"], p["answer"])
+            for p in pairs
+            if p.get("question")
+        ]
+        with closing(self._connect()) as con, con:
+            con.executemany(
+                "INSERT INTO corpus (id, day, question, answer) VALUES (?,?,?,?)", rows
+            )
+        return len(rows)
+
+    def list_corpus(self) -> list[dict]:
+        return [
+            {"id": i, "date": d, "question": q, "answer": a}
+            for i, d, q, a in self._all(
+                "SELECT id, day, question, answer FROM corpus ORDER BY day, id"
+            )
+        ]
 
     def delete_guest_inputs(self, email: str) -> int:
         """Erase the guest's profile, inputs, consents, tokens, flags and

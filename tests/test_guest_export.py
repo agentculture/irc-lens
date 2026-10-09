@@ -148,3 +148,22 @@ def test_cli_export_stdout_and_file(store: GuestStore, tmp_path: Path, capsys) -
     assert rc == 0
     _no_pii(dest.read_text())
     assert sorted(p.name for p in dest.parent.iterdir()) == ["t.md"]
+
+
+def test_export_includes_the_anonymized_corpus(tmp_path) -> None:
+    """d8: corpus rows (kept after a guest's deletion) are part of the owner's
+    export, with no guest pseudonym."""
+    from irc_lens.guest_store import GuestStore
+    from irc_lens.export import export_redacted
+
+    s = GuestStore(tmp_path / "g.db")
+    s.keep_corpus([{"question": "what is culture?", "answer": "an IRC mesh", "date": "2026-10-09"}])
+    rows = [json.loads(l) for l in export_redacted(s).splitlines()]
+    assert rows == [
+        {
+            "guest": "anonymous",
+            "kind": "qa",
+            "date": "2026-10-09",
+            "text": "Q: what is culture?\nA: an IRC mesh",
+        }
+    ]

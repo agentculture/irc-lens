@@ -13,7 +13,6 @@ guest_mode:
     host: 127.0.0.1
     port: 6668
     room_prefix: "#g-"      # private room per guest; must match sbx-ask
-    history_db: ~/.culture/sbx/history.db     # deletion purges it
     flag_log: ~/.culture/sandbox/flags.jsonl  # deletion purges it
   idle_close_s: 600         # close a session with no open tab
   store_path: ~/.local/share/irc-lens/guests.db   # default: $XDG_DATA_HOME/irc-lens/guests.db
@@ -35,7 +34,6 @@ guest_mode:
 | `sandbox.host` | `guest_sandbox_host` | `127.0.0.1` |
 | `sandbox.port` | `guest_sandbox_port` | `6668` |
 | `sandbox.room_prefix` | `guest_room_prefix` | `#g-` |
-| `sandbox.history_db` | `guest_sandbox_history_db` | unset (required for full deletion) |
 | `sandbox.flag_log` | `guest_sandbox_flag_log` | unset (required for full deletion) |
 | `idle_close_s` | `guest_idle_close_s` | `600` |
 | `store_path` | `guest_store_path` | `$XDG_DATA_HOME/irc-lens/guests.db` |
@@ -132,16 +130,25 @@ use `[a-z0-9_]`, so a guest can never take an approved user's nick or room.
 
 A sandbox session with no open browser tab is closed after `idle_close_s`.
 
-### Deletion
+### Guest chat records and deletion
 
-A confirmed deletion erases the guest's profile, inputs, consents, tokens,
-flags and room id from the guest store, their uploads, every line of their
-room in the sandbox IRCd history (`sandbox.history_db`) and their lines in
-sbx-ask's flag log (`sandbox.flag_log`). Bans are kept. The IRCd keeps an
-in-memory copy of recent room history until it restarts, but the room id is
-forgotten, so neither the guest nor the Guest view can reach that room again.
-Without `history_db` and `flag_log` the chat itself is **not** erased and the
-lens logs a warning at startup.
+The sandbox IRCd runs memory-only (`culture server start --no-persist`): it
+writes no channel history to disk. The guest store is the one durable record
+of guest chat: each guest's messages (`kind="message"`) and the answers
+sbx-ask posts in their room (`kind="answer"`).
+
+A confirmed deletion first keeps the guest's question-and-answer pairs in an
+anonymized `corpus` table — email, IP, nickname and room dropped, PII scrubbed
+(the same heuristic as the export), day-only date, a random row id, and
+NSFW-declined pairs left out — then erases the guest's profile, inputs,
+consents, tokens, flags and room id from the guest store, their uploads, and
+their lines in sbx-ask's flag log (`sandbox.flag_log`). Bans are kept. The
+corpus is not deleted; `irc-lens guests export` includes it as `anonymous`
+`qa` rows. Without `flag_log` the lens logs a warning at startup.
+
+The scrub is heuristic (see the export section): a corpus row can still carry
+an identifying detail the scrub misses, such as a third party's name in plain
+prose. Review the corpus before publishing it.
 
 The agent state badge (`agent online` / `agent offline`) reflects whether the
 agent is in the session's room right now, read from the live member list. Each

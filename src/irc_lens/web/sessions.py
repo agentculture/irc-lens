@@ -259,6 +259,21 @@ class SessionRegistry:
                 for command in ("PRIVMSG", "JOIN", "PART", "QUIT"):
                     session._transport.add_listener(command, _presence_listener)
                 own, others = self._rooms_for(identity, is_guest)
+                if is_guest:
+                    # d8: the guest store keeps the guest's Q&A (the sandbox
+                    # IRCd is memory-only), so record the agent's answers.
+                    from irc_lens.corpus import answer_recorder
+
+                    session._transport.add_listener(
+                        "PRIVMSG",
+                        answer_recorder(
+                            self._guest_store,
+                            identity.principal[len(GUEST_PRINCIPAL_PREFIX) :],
+                            room=own,
+                            own_nick=identity.nick,
+                            agent_nick=metrics.get_presence().nick,
+                        ),
+                    )
                 await _open_sandbox_rooms(session, own, others)
             self._sessions[key] = session
             if self._counts_as_guest(*key):

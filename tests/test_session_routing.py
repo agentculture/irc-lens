@@ -526,3 +526,24 @@ async def test_idle_sandbox_sessions_are_closed() -> None:
     idle.disconnect.assert_awaited()
     assert reg.has("guest:b@x", "sandbox") and "o@x" in reg
     mesh.disconnect.assert_not_awaited()
+
+
+async def test_agent_answers_in_a_guests_room_are_stored_with_the_guest(env: Env) -> None:
+    """d8: the guest store, not the (memory-only) sandbox IRCd, keeps the
+    guest's Q&A, so deletion covers it."""
+    from irc_lens.irc.message import Message
+
+    env.add_guest()
+    await env.client.post("/input", json={"text": "what is culture?"}, headers=env.guest_headers())
+    sess = next(
+        s for (p, b), s in zip(env.app["registry"].keys(), env.app["registry"].values())
+        if p.startswith("guest:")
+    )
+    room = "#g-" + env.store.room_id(_GUEST)
+    await sess._transport._handle(
+        Message(prefix="sbx-ask!a@h", command="PRIVMSG", params=[room, "sbx-gus: an IRC mesh"])
+    )
+    assert [(k, p) for k, p, _ts in env.store.inputs_for(_GUEST)] == [
+        ("message", "what is culture?"),
+        ("answer", "an IRC mesh"),
+    ]

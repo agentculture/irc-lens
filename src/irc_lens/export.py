@@ -161,11 +161,25 @@ def export_redacted(store: GuestStore, *, fmt: str = "jsonl") -> str:
                 ),
             }
         )
+    # d8: anonymized Q&A kept after guests' deletions (no pseudonym).
+    rows += [
+        {
+            "guest": "anonymous",
+            "kind": "qa",
+            "date": c["date"],
+            "text": f"Q: {c['question']}\nA: {c['answer']}",
+        }
+        for c in store.list_corpus()
+    ]
     if fmt == "jsonl":
         return "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
     out = ["# Guest transcripts (redacted)\n"]
     current = None
-    for r in sorted(rows, key=lambda r: int(r["guest"].split("-")[1])):
+    def _order(r: dict) -> tuple[bool, int]:
+        anon = r["guest"] == "anonymous"
+        return anon, 0 if anon else int(r["guest"].split("-")[1])
+
+    for r in sorted(rows, key=_order):
         if r["guest"] != current:
             current = r["guest"]
             out.append(f"\n## {current}\n")

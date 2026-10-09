@@ -18,13 +18,12 @@ import asyncio
 import json
 import logging
 import os
-import sqlite3
-from contextlib import closing
 from pathlib import Path
 
 from aiohttp import web
 
 from irc_lens import metrics
+from irc_lens.corpus import anonymized_pairs
 from irc_lens.mail import render_token_email
 from irc_lens.web import csrf
 from irc_lens.web.auth import allows_anonymous
@@ -47,45 +46,30 @@ logger = logging.getLogger(__name__)
 TOKEN_PURPOSE = "delete"
 
 
-def purge_sandbox_traces(cfg, *, room: str | None, nicks: set[str]) -> None:
-    """Erase a deleted guest's chat outside the guest store (d7).
+def purge_flag_log(cfg, nicks: set[str]) -> None:
+    """Drop a deleted guest's lines from sbx-ask's flag log (d7).
 
-    * The sandbox IRCd's channel history (SQLite): every line in the
-      guest's private room, plus any line the guest's nick wrote elsewhere.
-      The IRCd's in-memory replay buffer keeps the room until it restarts,
-      but the room id is forgotten, so neither the guest nor the owner's
-      Guest view can reach it again.
-    * sbx-ask's flag log: lines naming the guest's nick.
-
-    Unset paths are skipped with a warning (see guest-mode-config.md: both
-    are required for the deletion right to cover the chat).
+    The sandbox IRCd itself keeps no history on disk (culture server
+    ``--no-persist``, d8); the guest store is the durable record and is
+    erased by :meth:`GuestStore.delete_guest_inputs`.
     """
-    if cfg.guest_sandbox_history_db:
-        path = Path(cfg.guest_sandbox_history_db)
-        if path.exists():
-            with closing(sqlite3.connect(path, timeout=10)) as con, con:
-                if room:
-                    con.execute("DELETE FROM history WHERE channel = ?", (room,))
-                for nick in nicks:
-                    con.execute("DELETE FROM history WHERE nick = ?", (nick,))
-    else:
-        logger.warning("guest deletion: guest_mode.sandbox.history_db unset; chat history kept")
-    if cfg.guest_sandbox_flag_log:
-        path = Path(cfg.guest_sandbox_flag_log)
-        if path.exists():
-            kept = []
-            for line in path.read_text().splitlines(keepends=True):
-                try:
-                    nick = json.loads(line).get("nick")
-                except ValueError:
-                    nick = None
-                if nick not in nicks:
-                    kept.append(line)
-            tmp = path.with_suffix(path.suffix + ".tmp")
-            tmp.write_text("".join(kept))
-            os.replace(tmp, path)
-    else:
+    if not cfg.guest_sandbox_flag_log:
         logger.warning("guest deletion: guest_mode.sandbox.flag_log unset; flag lines kept")
+        return
+    path = Path(cfg.guest_sandbox_flag_log)
+    if not path.exists():
+        return
+    kept = []
+    for line in path.read_text().splitlines(keepends=True):
+        try:
+            nick = json.loads(line).get("nick")
+        except ValueError:
+            nick = None
+        if nick not in nicks:
+            kept.append(line)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text("".join(kept))
+    os.replace(tmp, path)
 
 
 def install(app: web.Application) -> None:
@@ -170,14 +154,11 @@ async def post_confirm(request: web.Request) -> web.Response:
     media = request.app.get("media_store")
     if media is not None:
         await asyncio.to_thread(media.delete_principal, email)
-    room_id = store.peek_room(email)
     nicks = {nick for _e, nick, _ip in store.get_guest(email)}
-    await asyncio.to_thread(
-        purge_sandbox_traces,
-        cfg,
-        room=f"{cfg.guest_room_prefix}{room_id}" if room_id else None,
-        nicks=nicks,
-    )
+    # d8: keep only Q&A that cannot reasonably identify the guest, then erase.
+    pairs = await asyncio.to_thread(anonymized_pairs, store, email)
+    await asyncio.to_thread(store.keep_corpus, pairs)
+    await asyncio.to_thread(purge_flag_log, cfg, nicks)
     await asyncio.to_thread(store.delete_guest_inputs, email)
     resp = _page("done")
     resp.del_cookie(csrf.GUEST_COOKIE_NAME, path="/")
