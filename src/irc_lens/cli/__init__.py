@@ -68,12 +68,14 @@ def _iter_command_modules() -> tuple[object, ...]:
         mcp_cmd,
         tui_cmd,
         config_cmd,
+        guests,
         serve,
     )
 
     return (
         serve,
         config_cmd,
+        guests,
         cli_noun,
         mcp_cmd,
         tui_cmd,
