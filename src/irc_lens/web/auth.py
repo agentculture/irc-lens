@@ -36,6 +36,7 @@ from irc_lens.config import LensConfig
 from irc_lens.web.identity import (
     ANONYMOUS_IDENTITY,
     TIER_APPROVED,
+    TIER_GUEST,
     Identity,
     derive_nick,
 )
@@ -92,6 +93,34 @@ def _route_allows_anonymous(request: web.Request) -> bool:
     route = getattr(request.match_info, "route", None)
     route_handler = getattr(route, "handler", None)
     return bool(getattr(route_handler, _ALLOWS_ANONYMOUS_ATTR, False))
+
+
+def client_ip(request: web.Request) -> str:
+    """Best-effort client address (Cloudflare header first, then the peer)."""
+    return request.headers.get("CF-Connecting-IP") or request.remote or ""
+
+
+def _guest_identity(request: web.Request) -> Identity | None:
+    """Guest tier from a valid ``lens_guest`` cookie, or None.
+
+    The cookie is HMAC-signed (``csrf.read_guest_cookie``); beyond that the
+    guest must still exist in the store and not be banned (by email or IP).
+    Nothing but that verified cookie + store row can produce this tier.
+    """
+    from irc_lens.web import csrf
+
+    store = request.app.get("guest_store")
+    if store is None:
+        return None
+    email = csrf.read_guest_cookie(request)
+    if not email:
+        return None
+    rows = store.get_guest(email)
+    if not rows or store.is_banned(email, client_ip(request)):
+        return None
+    return Identity(
+        principal=email, nick=rows[-1][1], raw_jwt_subject="guest", tier=TIER_GUEST
+    )
 
 
 def _build_jwks_url(team_domain: str) -> str:
@@ -359,7 +388,7 @@ def build_cloudflare_middleware(config: LensConfig):
         )
         if not _route_allows_anonymous(request):
             return _http_error(401, _ERR_APPROVED_REQUIRED, _HINT_APPROVED_REQUIRED)
-        request["identity"] = ANONYMOUS_IDENTITY
+        request["identity"] = _guest_identity(request) or ANONYMOUS_IDENTITY
         return await handler(request)
 
     @web.middleware

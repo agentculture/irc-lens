@@ -18,6 +18,7 @@ import socket
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+import pytest
 import pytest_asyncio
 from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
@@ -240,3 +241,14 @@ async def jwks() -> AsyncIterator["FakeJWKS"]:
         yield j
     finally:
         await j.stop()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_xdg_data_home(tmp_path_factory, monkeypatch):
+    """Keep default data paths (guest store, media) out of the real $HOME.
+
+    Guest mode falls back to $XDG_DATA_HOME/irc-lens/guests.db when a test
+    config leaves guest_store_path empty; without this every such test would
+    write to ~/.local/share/irc-lens/ on the developer's machine.
+    """
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path_factory.mktemp("xdg-data")))

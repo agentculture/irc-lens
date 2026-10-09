@@ -204,8 +204,17 @@ class EntryState:
 
 def install(app: web.Application, config: LensConfig) -> None:
     """Register state and the entry routes on *app*."""
-    app[ENTRY_STATE] = EntryState(config=config, verifier=make_bot_verifier())
+    # Share the app-wide store (created by make_app in guest mode) so the
+    # entry routes, the guest tier in auth and the routing consent gate all
+    # read and write one store.
+    app[ENTRY_STATE] = EntryState(
+        config=config, store=app.get("guest_store"), verifier=make_bot_verifier()
+    )
     app.router.add_get("/entry", get_entry)
+    # Consent gate target (routes.CONSENT_PATH): a guest whose consent is
+    # outdated re-runs the entry flow, which records consent for the
+    # current Terms/Privacy versions on verification.
+    app.router.add_get("/consent", get_entry)
     app.router.add_post("/entry/email", post_email)
     app.router.add_post("/entry/signin", post_signin)
     app.router.add_post("/entry/guest", post_guest)
