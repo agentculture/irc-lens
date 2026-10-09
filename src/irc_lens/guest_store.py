@@ -183,6 +183,16 @@ class GuestStore:
     def list_bans(self) -> list[tuple[str | None, str | None, str | None, int]]:
         return self._all("SELECT email, ip, reason, ts FROM bans ORDER BY rowid")
 
+    def unban(self, *, email: str | None = None, ip: str | None = None) -> int:
+        """Lift bans matching *email* and/or *ip*; returns rows removed."""
+        if email is None and ip is None:
+            raise ValueError("unban requires an email or an ip")
+        return self._run(
+            "DELETE FROM bans WHERE (email IS NOT NULL AND email=?) "
+            "OR (ip IS NOT NULL AND ip=?)",
+            (email, ip),
+        )
+
     def record_flag(
         self, email: str, *, kind: str = "nsfw", detail: str | None = None
     ) -> None:
@@ -199,6 +209,14 @@ class GuestStore:
             return self._all(sql + " ORDER BY rowid")
         return self._all(sql + " WHERE email=? ORDER BY rowid", (email,))
 
+    def list_flags_with_id(
+        self,
+    ) -> list[tuple[int, str, str, str | None, int]]:
+        """Flags as ``(id, email, kind, detail, ts)``; ids are stable rowids."""
+        return self._all(
+            "SELECT rowid, email, kind, detail, ts FROM flags ORDER BY rowid"
+        )
+
     # -- guest inputs & deletion -----------------------------------------
     def record_input(self, email: str, *, kind: str, payload: str) -> None:
         self._run(
@@ -207,12 +225,22 @@ class GuestStore:
         )
 
     def delete_guest_inputs(self, email: str) -> int:
-        """Erase the guest row and all recorded inputs; log the deletion."""
+        """Erase the guest's profile, inputs, consents, tokens, flags and
+        rate-limit counters; log the deletion.
+
+        Only the ``deletions`` record keeps the email. Bans are kept on
+        purpose: erasing them would let a banned guest evade the ban by
+        requesting deletion. The return value counts guest rows and inputs.
+        """
         with closing(self._connect()) as con, con:
             removed = con.execute("DELETE FROM guests WHERE email=?", (email,)).rowcount
             removed += con.execute(
                 "DELETE FROM inputs WHERE email=?", (email,)
             ).rowcount
+            con.execute("DELETE FROM consents WHERE email=?", (email,))
+            con.execute("DELETE FROM tokens WHERE email=?", (email,))
+            con.execute("DELETE FROM flags WHERE email=?", (email,))
+            con.execute("DELETE FROM attempts WHERE key = ?", (f"e:{email}",))
             con.execute(
                 "INSERT INTO deletions (email, ts, removed) VALUES (?,?,?)",
                 (email, self._now(), removed),
