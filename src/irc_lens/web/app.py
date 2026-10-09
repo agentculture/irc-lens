@@ -33,6 +33,12 @@ from irc_lens.web.store import MediaStore
 _CLIENT_MAX_SIZE_MEDIA_HEADROOM = 65536
 
 
+def _default_guest_store_path() -> str:
+    from irc_lens.config import _default_guest_store_path as default_path
+
+    return default_path()
+
+
 _SECURITY_HEADERS_CSP = (
     "default-src 'self'; script-src 'self'; img-src 'self' https: http:; "
     "media-src 'self' https: http:; object-src 'none'; base-uri 'none'; "
@@ -124,7 +130,28 @@ def _dev_identity_middleware(config: LensConfig):
     return middleware
 
 
-def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Application:
+def _default_sandbox_factory(config: LensConfig) -> SessionFactory:
+    """Sessions that connect ONLY to the sandbox IRCd (guest_mode.sandbox).
+
+    No media kwargs: guest sessions never get lens-hosted media embeds.
+    """
+    from irc_lens.session import Session
+
+    def factory(nick: str) -> Session:
+        return Session(
+            host=config.guest_sandbox_host,
+            port=config.guest_sandbox_port,
+            nick=nick,
+        )
+
+    return factory
+
+
+def make_app(
+    config: LensConfig,
+    session_factory: SessionFactory,
+    sandbox_session_factory: SessionFactory | None = None,
+) -> web.Application:
     if config.auth_mode == "dev":
         middleware = _dev_identity_middleware(config)
     elif config.auth_mode == "cloudflare-access":
@@ -150,9 +177,22 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
 
     csrf.install(app)
 
-    registry = SessionRegistry(factory=session_factory)
+    sandbox_factory = None
+    if config.guest_enabled:
+        sandbox_factory = sandbox_session_factory or _default_sandbox_factory(config)
+    registry = SessionRegistry(factory=session_factory, sandbox_factory=sandbox_factory)
     app["registry"] = registry
     app["config"] = config
+    if config.guest_enabled:
+        from irc_lens.guest_store import GuestStore
+
+        if "guest_store" not in app:
+            app["guest_store"] = GuestStore(
+                config.guest_store_path or _default_guest_store_path()
+            )
+        # Server-side sandbox toggle: principals of approved users currently
+        # viewing the sandbox instead of the real mesh. Never client-set.
+        app["sandbox_toggle"] = set()
 
     if config.media_enabled:
         app["media_store"] = MediaStore(
@@ -180,6 +220,10 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
     app.router.add_get("/residents", routes.get_residents)
     app.router.add_get("/healthz", routes.get_healthz)
     app.router.add_get("/owner/metrics", routes.get_owner_metrics)
+    if config.guest_enabled:
+        # Guest-mode off: these paths do not exist (404), exactly as before.
+        app.router.add_post("/sandbox/enter", routes.post_sandbox_enter)
+        app.router.add_post("/sandbox/leave", routes.post_sandbox_leave)
 
     static_dir = files("irc_lens").joinpath("static")
     app.router.add_static(

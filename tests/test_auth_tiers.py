@@ -356,9 +356,9 @@ async def test_header_jwt_still_preferred_over_cookie(
 @pytest.mark.parametrize(
     "method,path",
     [
-        ("GET", "/"),
-        ("GET", "/events"),
-        ("POST", "/input"),
+        # "/", "/events", "/input" are allows_anonymous since t10 (entry card
+        # / guest chat); their anonymous behavior is covered in
+        # test_session_routing.py.
         ("POST", "/upload"),
         ("GET", "/residents"),
         ("GET", "/agent"),
