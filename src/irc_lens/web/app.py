@@ -16,7 +16,7 @@ from aiohttp import web
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
-from irc_lens.web import csrf, routes
+from irc_lens.web import csrf, entry, routes
 from irc_lens.web.auth import build_cloudflare_middleware
 from irc_lens.web.front import mount_agent_front
 from irc_lens.web.identity import TIER_APPROVED, Identity
@@ -39,6 +39,17 @@ _SECURITY_HEADERS_CSP = (
     "frame-ancestors 'none'"
 )
 
+# Entry-card responses that render the Cloudflare Turnstile widget (and only
+# those -- they set ``entry.CSP_TURNSTILE_MARKER``) may load Turnstile's
+# loader script and iframe from its single origin. Everything else keeps
+# ``script-src 'self'``. See ``irc_lens.web.entry``.
+_TURNSTILE_CSP = _SECURITY_HEADERS_CSP.replace(
+    "script-src 'self';",
+    f"script-src 'self' {entry.TURNSTILE_ORIGIN}; "
+    f"frame-src {entry.TURNSTILE_ORIGIN}; "
+    f"connect-src 'self' {entry.TURNSTILE_ORIGIN};",
+)
+
 
 def _apply_security_headers(response: web.StreamResponse) -> None:
     """Stamp the baseline security headers onto *response* in place.
@@ -51,9 +62,17 @@ def _apply_security_headers(response: web.StreamResponse) -> None:
     ("Security headers").
     """
     response.headers["X-Content-Type-Options"] = "nosniff"
-    response.headers["Referrer-Policy"] = "no-referrer"
+    marked = response.get if isinstance(response, web.Response) else (lambda _k: None)
+    # Entry-card pages (``entry.ENTRY_PAGE_MARKER``) need the real Origin on
+    # their same-origin form POSTs; ``no-referrer`` would make it ``null``.
+    response.headers["Referrer-Policy"] = (
+        "same-origin" if marked(entry.ENTRY_PAGE_MARKER) else "no-referrer"
+    )
     if (response.content_type or "").lower() == "text/html":
-        response.headers["Content-Security-Policy"] = _SECURITY_HEADERS_CSP
+        turnstile = marked(entry.CSP_TURNSTILE_MARKER)
+        response.headers["Content-Security-Policy"] = (
+            _TURNSTILE_CSP if turnstile else _SECURITY_HEADERS_CSP
+        )
 
 
 @web.middleware
@@ -180,6 +199,8 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
     app.router.add_get("/residents", routes.get_residents)
     app.router.add_get("/healthz", routes.get_healthz)
     app.router.add_get("/owner/metrics", routes.get_owner_metrics)
+    # Guest-mode entry card (/entry, /entry/*): 404 while guest mode is off.
+    entry.install(app, config)
 
     static_dir = files("irc_lens").joinpath("static")
     app.router.add_static(

@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="referrer" content="same-origin">
+    <title>culture</title>
+    <link rel="icon" href="{{ static_url('favicon.ico') }}">
+    <link rel="stylesheet" href="{{ css_url }}">
+    {% if site_key %}
+    <script src="{{ turnstile_script }}" async defer></script>
+    {% endif %}
+  </head>
+  <body class="entry">
+    <main class="entry-layout">
+      <section class="entry-hero" aria-labelledby="entry-heading">
+        <h1 id="entry-heading">Ask culture.</h1>
+        <ol class="entry-transcript" aria-label="Transcript">
+          <li><span class="nick nick-guest">sbx-maya</span><span class="msg">what is the all-backends rule?</span></li>
+          <li><span class="nick nick-agent">sbx-ask</span><span class="msg">A feature added to one enforced backend (claude, codex, colleague) must reach all of them. A feature in only one backend is a bug.</span></li>
+          <li><span class="nick nick-guest">sbx-maya</span><span class="msg">can you run ls / for me?</span></li>
+          <li><span class="nick nick-agent">sbx-ask</span><span class="msg">I can't. I have no tools here, only answers.</span></li>
+        </ol>
+      </section>
+
+      <section class="entry-card" aria-label="Enter">
+        {% if step == "email" %}
+        <form method="post" action="/entry/email" class="entry-form">
+          <label for="entry-email">Email</label>
+          <input id="entry-email" name="email" type="email" autocomplete="email"
+                 inputmode="email" required autofocus maxlength="254">
+          <div class="entry-actions">
+            <button type="submit" class="btn btn-primary">Continue</button>
+          </div>
+        </form>
+
+        {% elif step == "password" %}
+        <form method="post" action="/entry/signin" class="entry-form">
+          <div class="entry-chip">
+            <span class="entry-chip-email">{{ email }}</span>
+            <a href="/entry" class="entry-chip-change">Change</a>
+          </div>
+          <input type="hidden" name="email" value="{{ email }}">
+          <label for="entry-password">Password</label>
+          <input id="entry-password" name="password" type="password"
+                 autocomplete="current-password" autofocus maxlength="1024">
+          {% if site_key %}
+          <div class="cf-turnstile" data-sitekey="{{ site_key }}"></div>
+          {% endif %}
+          {% if error %}
+          <p class="entry-error" role="alert">{{ error }}</p>
+          {% endif %}
+          <div class="entry-actions entry-actions-split">
+            <button type="submit" class="btn btn-primary">Sign in</button>
+            <button type="submit" class="btn btn-outline" formaction="/entry/guest"
+                    formnovalidate>Guest mode</button>
+          </div>
+        </form>
+
+        {% elif step == "guest" %}
+        <form method="post" action="/entry/guest/start" class="entry-form">
+          <div class="entry-chip">
+            <span class="entry-chip-email">{{ email }}</span>
+            <a href="/entry" class="entry-chip-change">Change</a>
+          </div>
+          <input type="hidden" name="email" value="{{ email }}">
+          <label for="entry-nickname">Nickname</label>
+          <div class="entry-prefixed">
+            <span class="entry-prefix" aria-hidden="true">{{ nick_prefix }}</span>
+            <input id="entry-nickname" name="nickname" type="text" value="{{ nickname }}"
+                   autocomplete="nickname" autocapitalize="none" spellcheck="false"
+                   required minlength="2" maxlength="{{ nick_max }}"
+                   pattern="[A-Za-z0-9_\-]{2,{{ nick_max }}}" autofocus>
+          </div>
+          <label class="entry-consent">
+            <input type="checkbox" name="consent" value="on" required>
+            <span>I agree to the <a href="{{ terms_url }}" target="_blank" rel="noopener noreferrer">Terms</a> and <a href="{{ privacy_url }}" target="_blank" rel="noopener noreferrer">Privacy Policy</a></span>
+          </label>
+          {% if site_key %}
+          <div class="cf-turnstile" data-sitekey="{{ site_key }}"></div>
+          {% endif %}
+          {% if error %}
+          <p class="entry-error" role="alert">{{ error }}</p>
+          {% endif %}
+          <div class="entry-actions entry-actions-split">
+            <button type="submit" class="btn btn-outline" formaction="/entry/email"
+                    formnovalidate>Back</button>
+            <button type="submit" class="btn btn-primary">Enter</button>
+          </div>
+        </form>
+
+        {% elif step == "code" %}
+        <form method="post" action="/entry/verify" class="entry-form">
+          <div class="entry-chip">
+            <span class="entry-chip-email">{{ email }}</span>
+            <a href="/entry" class="entry-chip-change">Change</a>
+          </div>
+          <input type="hidden" name="email" value="{{ email }}">
+          <input type="hidden" name="nickname" value="{{ nickname }}">
+          <label for="entry-code">Code</label>
+          <input id="entry-code" name="code" type="text" autocomplete="one-time-code"
+                 autocapitalize="none" spellcheck="false" required autofocus maxlength="128">
+          {% if error %}
+          <p class="entry-error" role="alert">{{ error }}</p>
+          {% endif %}
+          <div class="entry-actions">
+            <button type="submit" class="btn btn-primary">Verify</button>
+          </div>
+        </form>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>
