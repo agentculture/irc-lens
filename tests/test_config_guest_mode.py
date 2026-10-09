@@ -241,13 +241,21 @@ def test_guest_mode_rate_limits_non_mapping_errors(tmp_path: Path) -> None:
     assert "mapping" in exc.value.message
 
 
-def test_guest_mode_sandbox_room_default_and_override(tmp_path: Path) -> None:
-    assert load_config(_write(tmp_path, _base())).guest_sandbox_room == "#general"
-    cfg = load_config(_write(tmp_path, _base("guest_mode:\n  sandbox:\n    room: \"#ask\"\n")))
-    assert cfg.guest_sandbox_room == "#ask"
+def test_guest_mode_room_prefix_default_and_override(tmp_path: Path) -> None:
+    assert load_config(_write(tmp_path, _base())).guest_room_prefix == "#g-"
+    cfg = load_config(
+        _write(tmp_path, _base("guest_mode:\n  sandbox:\n    room_prefix: \"#guest-\"\n"))
+    )
+    assert cfg.guest_room_prefix == "#guest-"
 
 
-def test_guest_mode_sandbox_room_must_be_a_channel(tmp_path: Path) -> None:
+def test_guest_mode_room_prefix_must_start_a_channel(tmp_path: Path) -> None:
     with pytest.raises(AfiError) as exc:
-        load_config(_write(tmp_path, _base("guest_mode:\n  sandbox:\n    room: general\n")))
-    assert "guest_mode.sandbox.room" in exc.value.message
+        load_config(_write(tmp_path, _base("guest_mode:\n  sandbox:\n    room_prefix: g-\n")))
+    assert "guest_mode.sandbox.room_prefix" in exc.value.message
+
+
+def test_guest_mode_shared_room_key_is_rejected(tmp_path: Path) -> None:
+    """The shared `room` key is gone: a stale config fails loudly, not silently."""
+    with pytest.raises(AfiError):
+        load_config(_write(tmp_path, _base("guest_mode:\n  sandbox:\n    room: \"#general\"\n")))

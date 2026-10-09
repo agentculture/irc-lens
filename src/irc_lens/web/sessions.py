@@ -49,12 +49,59 @@ def _presence_listener(msg: Any) -> None:
         presence.gone(nick)
 
 
+def guest_room(nick: str, prefix: str) -> str:
+    """The private room for a sandbox nick: ``sbx-vis1`` -> ``#g-vis1``."""
+    return prefix + nick.split("-", 1)[-1]
+
+
+def sandbox_presence(session: Any, agent_nick: str) -> dict[str, Any]:
+    """Agent state for one sandbox session: is the agent in this room now?
+
+    Room membership (from the live roster) rather than "spoke in the last
+    60 s": an idle agent is online, and a stopped one drops out of the
+    roster on PART/QUIT.
+    """
+    roster = getattr(session, "roster", None) or []
+    online = any(e.nick.lower() == agent_nick.lower() for e in roster)
+    return {
+        "nick": agent_nick,
+        "state": "online" if online else "offline",
+        "online": online,
+        "last_seen_age_s": None,
+    }
+
+
+async def _maybe_await(value: Any) -> Any:
+    return await value if inspect.isawaitable(value) else value
+
+
 async def _join_room(session: Any, room: str) -> None:
-    """Join *room* and make it current (tolerates test doubles without async join)."""
-    joined = session.join(room)
-    if inspect.isawaitable(joined):
-        await joined
-    session.set_current_channel(room)
+    """Join *room* (tolerates test doubles without async join)."""
+    await _maybe_await(session.join(room))
+
+
+async def _open_sandbox_rooms(session: Any, prefix: str, preview: bool) -> None:
+    """Put a fresh sandbox session in its private room (d6).
+
+    A guest joins only its own room. The approved user's Guest view also
+    joins every existing guest room so the owner can watch them all; its
+    own room stays current.
+    """
+    own = guest_room(session.nick, prefix)
+    await _join_room(session, own)
+    if preview and hasattr(session, "list_channels"):
+        try:
+            rows = await session.list_channels()
+        except Exception:  # noqa: BLE001 — the owner's own room still works
+            rows = []
+        for row in rows:
+            name = row.get("channel") if isinstance(row, dict) else str(row)
+            if name and name.startswith(prefix) and name != own:
+                await _join_room(session, name)
+    session.set_current_channel(own)
+    refresh = getattr(session, "refresh_roster", None)
+    if refresh is not None:
+        await _maybe_await(refresh())
 
 
 class SessionRegistry:
@@ -64,12 +111,13 @@ class SessionRegistry:
         self,
         factory: SessionFactory,
         sandbox_factory: SessionFactory | None = None,
-        sandbox_room: str = "#general",
+        room_prefix: str = "#g-",
     ) -> None:
         self._factories: dict[str, SessionFactory] = {BACKEND_MESH: factory}
-        # Room every sandbox session joins on open: guests may not /join
-        # (command allowlist), so this is how they reach the sandbox agent.
-        self._sandbox_room = sandbox_room
+        # Prefix of the private room every sandbox session joins on open:
+        # guests may not /join (command allowlist), so this is how they
+        # reach the sandbox agent, which follows them in.
+        self._room_prefix = room_prefix
         if sandbox_factory is not None:
             self._factories[BACKEND_SANDBOX] = sandbox_factory
         self._sessions: dict[tuple[str, str], Any] = {}
@@ -169,14 +217,11 @@ class SessionRegistry:
             if backend == BACKEND_SANDBOX:
                 # UI context only (badge / palette); enforcement lives in
                 # the routes and never reads this attribute.
-                session.ui_tier = (
-                    "guest"
-                    if identity.principal.startswith(GUEST_PRINCIPAL_PREFIX)
-                    else "sandbox_preview"
-                )
+                is_guest = identity.principal.startswith(GUEST_PRINCIPAL_PREFIX)
+                session.ui_tier = "guest" if is_guest else "sandbox_preview"
                 for command in ("PRIVMSG", "JOIN", "PART", "QUIT"):
                     session._transport.add_listener(command, _presence_listener)
-                await _join_room(session, self._sandbox_room)
+                await _open_sandbox_rooms(session, self._room_prefix, preview=not is_guest)
             self._sessions[key] = session
             if self._counts_as_guest(*key):
                 metrics.get_metrics().session_opened()

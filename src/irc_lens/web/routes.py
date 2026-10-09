@@ -148,6 +148,13 @@ def _backend_for(request: web.Request) -> tuple[Identity, str]:
     )
 
 
+def _sandbox_state(session) -> dict:
+    """Per-room agent state: online iff the agent is in this session's room."""
+    from irc_lens.web.sessions import sandbox_presence
+
+    return sandbox_presence(session, metrics.get_presence().nick)
+
+
 async def _resolve_session(request: web.Request):
     """Look up (or lazily open) the Session for this request's verified tier."""
     identity, backend = _backend_for(request)
@@ -463,9 +470,10 @@ async def get_index(request: web.Request) -> web.Response:
                 entries,
                 media_embed_prefixes=session.media_embed_prefixes,
                 media_remote_embeds=session.media_remote_embeds,
+                hide_system=getattr(session, "ui_tier", None) in ("guest", "sandbox_preview"),
             )
     _, backend = _backend_for(request)
-    presence = metrics.get_presence().state() if backend == BACKEND_SANDBOX else None
+    presence = _sandbox_state(session) if backend == BACKEND_SANDBOX else None
     body = render_index(session, chat_log_html=chat_log_html, presence=presence)
     return web.Response(text=body, content_type="text/html")
 
@@ -482,7 +490,13 @@ async def get_presence(request: web.Request) -> web.Response:
     if gated is not None:
         return gated
     _, backend = _backend_for(request)
-    presence = metrics.get_presence().state() if backend == BACKEND_SANDBOX else None
+    presence = None
+    if backend == BACKEND_SANDBOX:
+        try:
+            session = await _resolve_session(request)
+        except Exception:  # noqa: BLE001 — no session means no agent here
+            session = None
+        presence = _sandbox_state(session)
     body = render_fragment("_presence.html.j2", presence=presence)
     return web.Response(
         text=body, content_type="text/html", headers={"Cache-Control": "no-store"}

@@ -12,7 +12,7 @@ guest_mode:
     name: sbx
     host: 127.0.0.1
     port: 6668
-    room: "#general"        # every sandbox session joins it (guests cannot /join)
+    room_prefix: "#g-"      # each guest gets a private room #g-<nick>; must match sbx-ask
   store_path: ~/.local/share/irc-lens/guests.db   # default: $XDG_DATA_HOME/irc-lens/guests.db
   legal_version_url: https://culture.dev/legal/version.json
   mail:                     # sender for guest token emails
@@ -31,7 +31,7 @@ guest_mode:
 | `sandbox.name` | `guest_sandbox_name` | `sbx` |
 | `sandbox.host` | `guest_sandbox_host` | `127.0.0.1` |
 | `sandbox.port` | `guest_sandbox_port` | `6668` |
-| `sandbox.room` | `guest_sandbox_room` | `#general` |
+| `sandbox.room_prefix` | `guest_room_prefix` | `#g-` |
 | `store_path` | `guest_store_path` | `$XDG_DATA_HOME/irc-lens/guests.db` |
 | `legal_version_url` | `guest_legal_version_url` | `https://culture.dev/legal/version.json` |
 | `mail.provider` | `guest_mail_provider` | `none` |
@@ -107,3 +107,16 @@ widget get a CSP widened to `https://challenges.cloudflare.com`
 `script-src 'self'`. Entry pages send `Referrer-Policy: same-origin` (not
 `no-referrer`) so browsers put the real `Origin` on their same-origin form
 POSTs instead of `null`, which the CSRF floor would refuse.
+
+## Private guest rooms
+
+Each guest session joins its own room, `<room_prefix><nick>` (for example
+`#g-vis1` for `sbx-vis1`). Guests never share a room, so they never see each
+other's messages or history. The sandbox agent follows each guest into its
+room (`guest_room_prefix` in the agent config, same default `#g-`). The
+approved user's Guest view joins its own room plus every existing guest room,
+so the owner can watch them all. Sandbox views hide `system-*` join and
+welcome lines; the real mesh view is unchanged.
+
+The agent state badge (`agent online` / `agent offline`) reflects whether the
+agent is in the session's room right now, read from the live member list.

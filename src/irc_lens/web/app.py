@@ -203,7 +203,7 @@ def make_app(
     registry = SessionRegistry(
         factory=session_factory,
         sandbox_factory=sandbox_factory,
-        sandbox_room=config.guest_sandbox_room,
+        room_prefix=config.guest_room_prefix,
     )
     app["registry"] = registry
     app["config"] = config

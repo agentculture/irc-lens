@@ -289,6 +289,7 @@ def render_chat_log(
     *,
     media_embed_prefixes: tuple["MediaOrigin", ...] = (),
     media_remote_embeds: str = "click",
+    hide_system: bool = False,
 ) -> str:
     """Render multiple chat lines as a single HTML blob for innerHTML
     replacement of `#chat-log`. Used by the `log` SSE event publish on
@@ -305,13 +306,18 @@ def render_chat_log(
     prefixes — see `media_items`'s docstring for why.
     """
     template = _env.get_template("_chat_line.html.j2")
+    msgs = [_normalize_history_entry(e) for e in entries]
+    if hide_system:
+        # Sandbox views hide `system-*` join/welcome lines (owner decision,
+        # d6); live `system-*` PRIVMSGs are already dropped by dispatch.
+        msgs = [m for m in msgs if not str(m.get("nick", "")).startswith("system-")]
     parts = [
         template.render(
-            msg=_normalize_history_entry(e),
+            msg=m,
             media_embed_prefixes=media_embed_prefixes,
             media_remote_embeds=media_remote_embeds,
         )
-        for e in entries
+        for m in msgs
     ]
     return "".join(parts)
 

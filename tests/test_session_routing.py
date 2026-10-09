@@ -442,25 +442,44 @@ async def test_registry_keys_by_principal_and_backend() -> None:
         await SessionRegistry(mk("mesh")).get_or_open(ident, "sandbox")
 
 
-async def test_guest_session_joins_sandbox_room(env: Env) -> None:
-    """A guest lands in the sandbox room where the agent lives (staging E2E gap).
+async def test_guest_session_joins_its_private_room(env: Env) -> None:
+    """Each guest lands in a private #g-<nick> room the agent follows (d6).
 
-    Guests may not /join (allowlist), so without an automatic join they would
-    have no room to talk to the agent in.
+    Guests may not /join (allowlist) and must never see each other, so the
+    room is per guest and joined automatically.
     """
     env.add_guest()
     r = await env.client.get("/", headers=env.guest_headers())
     assert r.status == 200
     joins = [ln.params[0] for ln in env.sandbox.received if ln.command == "JOIN"]
-    assert joins == ["#general"]
+    assert joins == ["#g-gus"]
     assert env.mesh.received == []
 
 
-async def test_approved_toggle_also_joins_sandbox_room(env: Env) -> None:
+async def test_two_guests_never_share_a_room(env: Env) -> None:
+    env.add_guest()
+    env.add_guest(email="other@example.org", nick="sbx-ola")
+    assert (await env.client.get("/", headers=env.guest_headers())).status == 200
+    other = env.guest_headers(email="other@example.org")
+    assert (await env.client.get("/", headers=other)).status == 200
+    rooms = {
+        s.nick: s.joined_channels
+        for (p, b), s in zip(env.app["registry"].keys(), env.app["registry"].values())
+        if b == "sandbox"
+    }
+    assert rooms == {"sbx-gus": {"#g-gus"}, "sbx-ola": {"#g-ola"}}
+
+
+async def test_approved_guest_view_sees_every_guest_room(env: Env) -> None:
+    """Guest view joins the owner's own room plus every existing guest room."""
+    env.add_guest()
+    assert (await env.client.get("/", headers=env.guest_headers())).status == 200
     r = await env.client.post("/sandbox/enter", headers=env.approved_headers())
     assert r.status in (200, 204)
-    # The toggle is server-side state; the sandbox session opens on next load.
-    r = await env.client.get("/", headers=env.approved_headers())
-    assert r.status == 200
-    joins = [ln.params[0] for ln in env.sandbox.received if ln.command == "JOIN"]
-    assert joins == ["#general"]
+    assert (await env.client.get("/", headers=env.approved_headers())).status == 200
+    preview = [
+        s for (p, b), s in zip(env.app["registry"].keys(), env.app["registry"].values())
+        if b == "sandbox" and not p.startswith("guest:")
+    ][0]
+    assert preview.joined_channels >= {"#g-alice", "#g-gus"}
+    assert preview.current_channel == "#g-alice"

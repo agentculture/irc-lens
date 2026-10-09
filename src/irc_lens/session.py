@@ -403,6 +403,7 @@ class Session:
         self._transport.add_listener("PRIVMSG", self.dispatch)
         self._transport.add_listener("JOIN", self.dispatch)
         self._transport.add_listener("PART", self.dispatch)
+        self._transport.add_listener("QUIT", self.dispatch)
         # Per-session live-mesh refresher; cancelled in disconnect().
         self._mesh_refresher = asyncio.create_task(self._mesh_refresh_loop())
 
@@ -458,11 +459,12 @@ class Session:
         """
         tasks = [
             t
-            for t in (self._mesh_refresher, self._mesh_task)
+            for t in (self._mesh_refresher, self._mesh_task, getattr(self, "_roster_task", None))
             if t is not None and not t.done()
         ]
         self._mesh_refresher = None
         self._mesh_task = None
+        self._roster_task = None
         for task in tasks:
             task.cancel()
         if tasks:
@@ -555,6 +557,39 @@ class Session:
 
     def set_roster(self, entries: list[EntityItem]) -> None:
         self.roster = list(entries)
+
+    async def refresh_roster(self) -> None:
+        """Fill the sidebar member list from a live ``WHO`` of the current
+        channel, then publish it. Before this the roster was only ever set
+        by the demo seed, so "In this room" stayed empty on a live server."""
+        channel = self.current_channel
+        if not channel or not self.connected:
+            return
+        try:
+            rows = await self.who(channel)
+        except Exception:  # noqa: BLE001 — a stale roster beats a crash
+            return
+        if channel != self.current_channel:
+            return  # the user moved on while WHO was in flight
+        entries = []
+        for row in rows:
+            nick = row.get("nick", "")
+            if not nick or nick.startswith("system-"):
+                continue
+            kind = "agent" if "agent" in row.get("realname", "").lower() else "human"
+            entries.append(EntityItem(nick, kind, online="G" not in row.get("flags", "")))
+        self.set_roster(sorted(entries, key=lambda e: (e.type != "agent", e.nick.lower())))
+        self._publish_roster()
+
+    def _request_roster_refresh(self) -> None:
+        """Coalesced roster refresh from the sync read loop."""
+        task = getattr(self, "_roster_task", None)
+        if task is not None and not task.done():
+            return
+        try:
+            self._roster_task = asyncio.get_running_loop().create_task(self.refresh_roster())
+        except RuntimeError:
+            pass  # no loop (sync unit tests)
 
     # ------------------------------------------------------------------
     # Command execution + inbound dispatch (Phase 5 SSE wiring)
@@ -673,6 +708,7 @@ class Session:
         # pane isn't blank on first join. Mirrors the culture console's
         # `_switch_to_channel` (../culture/culture/console/app.py:677).
         await self._fetch_and_publish_history(channel)
+        await self.refresh_roster()
 
     async def _exec_switch(self, parsed: ParsedCommand) -> None:
         if not parsed.args:
@@ -698,6 +734,7 @@ class Session:
         self._publish_roster()
         self._publish_info()
         await self._fetch_and_publish_history(channel)
+        await self.refresh_roster()
 
     async def _fetch_and_publish_history(
         self, channel: str, limit: int = 50, *, view_channel: str | None = None
@@ -755,6 +792,7 @@ class Session:
                 entries,
                 media_embed_prefixes=self.media_embed_prefixes,
                 media_remote_embeds=self.media_remote_embeds,
+                hide_system=self.ui_tier in ("guest", "sandbox_preview"),
             )
         )
 
@@ -975,7 +1013,13 @@ class Session:
         if msg.command == "PRIVMSG":
             self._dispatch_privmsg(msg)
             return
-        if msg.command in ("JOIN", "PART"):
+        if msg.command in ("JOIN", "PART", "QUIT"):
+            # Someone entered or left: refresh "In this room" when it may
+            # concern the active pane (QUIT carries no channel).
+            if msg.command == "QUIT" or (msg.params and msg.params[0] == self.current_channel):
+                self._request_roster_refresh()
+            if msg.command == "QUIT":
+                return
             # Server-confirmed channel-membership change. The local
             # `joined_channels` set was already updated by our outbound
             # join/part call (or — for other users — needs no local

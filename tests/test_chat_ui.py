@@ -103,15 +103,6 @@ def _page_text(html: str) -> list[str]:
     return p.nodes
 
 
-@pytest.fixture
-def presence(monkeypatch):
-    """Swap the process-wide presence tracker for one with a fake clock."""
-    now = {"t": 1000.0}
-    p = metrics.AgentPresence(clock=lambda: now["t"])
-    monkeypatch.setattr(metrics, "_PRESENCE", p)
-    return p, now
-
-
 # -- criterion 1: tier-aware palette ------------------------------------------
 
 
@@ -242,32 +233,36 @@ async def test_sandbox_preview_has_amber_rule_banner_and_back(env: Env) -> None:
     assert r.headers["HX-Refresh"] == "true"
 
 
-async def test_agent_offline_state_rendered(env: Env, presence) -> None:
-    p, now = presence
-    env.add_guest()
-    h = env.guest_headers()
-    p.seen("sbx-ask")
-    html = await (await env.client.get("/", headers=h)).text()
-    assert 'data-state="online"' in html and "agent online" in html
-    now["t"] += 120  # not seen for > 60s
-    html = await (await env.client.get("/", headers=h)).text()
-    assert 'data-testid="agent-state" data-state="offline"' in html
-    assert "agent offline" in html
-    frag = await (await env.client.get("/presence", headers=h)).text()
-    assert "agent offline" in frag and 'hx-get="/presence"' in frag
-    p.gone("sbx-ask")
-    p.seen("someone-else")
-    assert (
-        "agent offline" in await (await env.client.get("/presence", headers=h)).text()
+def _guest_session(env: Env):
+    return next(
+        sess
+        for (principal, backend), sess in zip(
+            env.app["registry"].keys(), env.app["registry"].values()
+        )
+        if backend == "sandbox" and principal.startswith("guest:")
     )
 
 
-async def test_agent_state_unknown_is_silent_and_mesh_has_none(
-    env: Env, presence
-) -> None:
+async def test_agent_state_follows_room_membership(env: Env) -> None:
+    """Online iff the agent is in this guest's room (d6): an idle agent is
+    online; one that left the room (stopped -> PART/QUIT) is offline."""
+    from irc_lens.session import EntityItem
+
     env.add_guest()
-    frag = await (await env.client.get("/presence", headers=env.guest_headers())).text()
-    assert 'data-state="unknown"' in frag and "agent o" not in frag
+    h = env.guest_headers()
+    html = await (await env.client.get("/", headers=h)).text()
+    assert 'data-testid="agent-state" data-state="offline"' in html
+    sess = _guest_session(env)
+    sess.set_roster([EntityItem("sbx-gus", "human"), EntityItem("sbx-ask", "agent")])
+    frag = await (await env.client.get("/presence", headers=h)).text()
+    assert 'data-state="online"' in frag and "agent online" in frag
+    assert 'hx-get="/presence"' in frag
+    sess.set_roster([EntityItem("sbx-gus", "human")])
+    frag = await (await env.client.get("/presence", headers=h)).text()
+    assert 'data-state="offline"' in frag and "agent offline" in frag
+
+
+async def test_mesh_view_has_no_agent_state(env: Env) -> None:
     mesh_html = await (await env.client.get("/", headers=env.approved_headers())).text()
     assert "agent-state" not in mesh_html
     assert (
