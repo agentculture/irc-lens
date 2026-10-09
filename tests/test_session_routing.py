@@ -161,11 +161,12 @@ async def test_guest_connects_only_to_sandbox(env: Env) -> None:
 async def test_guest_input_and_events_stay_in_sandbox(env: Env) -> None:
     env.add_guest()
     h = env.guest_headers()
-    r = await env.client.post("/input", json={"text": "/join #sbx"}, headers=h)
+    # (/join is refused for guests since t13's allowlist; plain chat still flows.)
+    r = await env.client.post("/input", json={"text": "/me waves"}, headers=h)
     assert r.status == 204
     r = await env.client.post("/input", json={"text": "hello"}, headers=h)
     assert r.status == 204
-    assert any(l.command == "JOIN" for l in env.sandbox.received)
+    assert _nicks(env.sandbox) == ["sbx-gus"]
     assert env.mesh.received == []
 
 

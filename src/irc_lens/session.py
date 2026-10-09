@@ -27,7 +27,13 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
-from irc_lens.commands import CommandType, ParsedCommand
+from irc_lens.commands import (
+    CommandType,
+    PaletteEntry,
+    ParsedCommand,
+    help_for,
+    palette_for,
+)
 from irc_lens.irc import IRCTransport, Message, MessageBuffer
 
 logger = logging.getLogger(__name__)
@@ -288,6 +294,15 @@ class Session:
         self.joined_channels: set[str] = set()
         self.view: ViewName = "chat"
         self.roster: list[EntityItem] = []
+
+        # Guest-mode UI context, set by the session registry / routes from
+        # the VERIFIED tier (never from client input): ``approved`` (real
+        # mesh), ``guest`` (sandbox) or ``sandbox_preview`` (an approved
+        # user viewing the sandbox). Drives the header badge, the command
+        # palette and the help pane. ``sandbox_available`` is True only for
+        # an approved user on the mesh while guest mode is on.
+        self.ui_tier: str = "approved"
+        self.sandbox_available: bool = False
 
         # Cited primitives.
         self.buffer = MessageBuffer()
@@ -559,6 +574,14 @@ class Session:
             self._exec_lock = asyncio.Lock()
             self._exec_lock_loop = loop
         return self._exec_lock
+
+    def palette(self) -> list[PaletteEntry]:
+        """Slash commands to offer in this session's tier (palette)."""
+        return palette_for(self.ui_tier, sandbox_toggle=self.sandbox_available)
+
+    def help_entries(self) -> list[PaletteEntry]:
+        """Palette plus the rarer commands, for the help pane."""
+        return help_for(self.ui_tier, sandbox_toggle=self.sandbox_available)
 
     async def execute(self, parsed: ParsedCommand) -> None:
         """Dispatch a `ParsedCommand` from `POST /input`.

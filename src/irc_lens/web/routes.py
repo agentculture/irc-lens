@@ -37,12 +37,24 @@ import aiohttp
 from aiohttp import web
 
 from irc_lens import metrics
-from irc_lens.commands import CommandType, parse_command
+from irc_lens.commands import (
+    SANDBOX_COMMAND,
+    CommandType,
+    ParsedCommand,
+    allowed_in_sandbox,
+    parse_command,
+)
 from irc_lens.session import LensConnectionLost
 from irc_lens.web.auth import allows_anonymous
+from irc_lens.web.entry import client_ip
 from irc_lens.web.events import format_sse
 from irc_lens.web.identity import TIER_ANONYMOUS, TIER_GUEST, Identity
-from irc_lens.web.render import render_chat_log, render_index, render_residents_page
+from irc_lens.web.render import (
+    render_chat_log,
+    render_fragment,
+    render_index,
+    render_residents_page,
+)
 from irc_lens.web.residents import (
     ResidentsResult,
     fetch_residents,
@@ -139,7 +151,14 @@ def _backend_for(request: web.Request) -> tuple[Identity, str]:
 async def _resolve_session(request: web.Request):
     """Look up (or lazily open) the Session for this request's verified tier."""
     identity, backend = _backend_for(request)
-    return await request.app["registry"].get_or_open(identity, backend)
+    session = await request.app["registry"].get_or_open(identity, backend)
+    # UI context for the header / palette, from the verified tier only.
+    session.sandbox_available = (
+        backend == BACKEND_MESH
+        and identity.is_approved
+        and request.app["config"].guest_enabled
+    )
+    return session
 
 
 async def _consent_current(request: web.Request, email: str) -> bool:
@@ -217,8 +236,11 @@ def _set_sandbox_toggle(request: web.Request, *, on: bool) -> web.Response:  # N
         toggled.add(identity.principal)
     else:
         toggled.discard(identity.principal)
+    # HX-Refresh: the htmx buttons reload the page into the other view.
     return web.json_response(
-        {"backend": BACKEND_SANDBOX if on else BACKEND_MESH}, status=200
+        {"backend": BACKEND_SANDBOX if on else BACKEND_MESH},
+        status=200,
+        headers={"HX-Refresh": "true"},
     )
 
 
@@ -442,8 +464,29 @@ async def get_index(request: web.Request) -> web.Response:
                 media_embed_prefixes=session.media_embed_prefixes,
                 media_remote_embeds=session.media_remote_embeds,
             )
-    body = render_index(session, chat_log_html=chat_log_html)
+    _, backend = _backend_for(request)
+    presence = metrics.get_presence().state() if backend == BACKEND_SANDBOX else None
+    body = render_index(session, chat_log_html=chat_log_html, presence=presence)
     return web.Response(text=body, content_type="text/html")
+
+
+@allows_anonymous
+async def get_presence(request: web.Request) -> web.Response:
+    """Agent-state fragment for sandbox sessions (polled by htmx).
+
+    Guest and sandbox-preview sessions only; a real-mesh session gets an
+    empty fragment. Guests need it too, so it is not owner/approved gated,
+    but it still requires a verified identity (and consent for guests).
+    """
+    gated = await _anonymous_or_gate(request, redirect=False)
+    if gated is not None:
+        return gated
+    _, backend = _backend_for(request)
+    presence = metrics.get_presence().state() if backend == BACKEND_SANDBOX else None
+    body = render_fragment("_presence.html.j2", presence=presence)
+    return web.Response(
+        text=body, content_type="text/html", headers={"Cache-Control": "no-store"}
+    )
 
 
 async def _extract_text(request: web.Request) -> tuple[str | None, web.Response | None]:
@@ -519,6 +562,12 @@ async def post_input(request: web.Request) -> web.Response:
         return web.Response(status=204)
 
     parsed = parse_command(text)
+    refused = _sandbox_policy(request, text, parsed)
+    if refused is not None:
+        return refused
+    if _is_sandbox_enter(request, parsed, text):
+        request.app["sandbox_toggle"].add(request["identity"].principal)
+        return web.Response(status=204, headers={"HX-Refresh": "true"})
     try:
         await session.execute(parsed)
     except LensConnectionLost as exc:
@@ -530,6 +579,74 @@ async def post_input(request: web.Request) -> web.Response:
             identity.principal, kind="message", payload=text
         )
     return web.Response(status=204)
+
+
+#: Rate-limit bucket / window for guest chat input (config:
+#: ``guest_mode.rate_limits.messages_per_min``).
+_MESSAGE_RATE_KIND = "message"
+_MESSAGE_RATE_WINDOW_S = 60
+
+
+def _is_sandbox_enter(request: web.Request, parsed: ParsedCommand, text: str) -> bool:
+    """``/sandbox`` typed by an approved user on the mesh (guest mode on)."""
+    identity: Identity = request["identity"]
+    return (
+        parsed.type == CommandType.UNKNOWN
+        and text.strip().lower() == SANDBOX_COMMAND
+        and identity.is_approved
+        and request.app["config"].guest_enabled
+        and identity.principal not in request.app["sandbox_toggle"]
+    )
+
+
+def _sandbox_policy(
+    request: web.Request, text: str, parsed: ParsedCommand
+) -> web.Response | None:
+    """Server-side guest policy for ``POST /input`` (approved deviation d4).
+
+    Applies to sessions the VERIFIED tier routed to the sandbox:
+
+    * (b) guests only: per-guest message rate limit
+      (``guest_rate_messages_per_min``) -> 429. Counted per guest email and
+      per IP over a 60 s window; every non-empty input counts, refused
+      commands included, so probing cannot be free.
+    * (a) allowlist: only commands that work in the sandbox
+      (:data:`irc_lens.commands.SANDBOX_ALLOWED`) are run; anything else is
+      refused with 403 before it can reach IRC.
+    """
+    identity: Identity = request["identity"]
+    if _is_sandbox_enter(request, parsed, text):
+        return None
+    _, backend = _backend_for(request)
+    if backend != BACKEND_SANDBOX:
+        return None
+    if identity.tier == TIER_GUEST and _message_rate_limited(request, identity):
+        metrics.get_metrics().rate_limited()
+        return web.json_response(
+            {"error": "Slow down", "hint": "Too many messages"},
+            status=429,
+            headers={"Retry-After": str(_MESSAGE_RATE_WINDOW_S)},
+        )
+    if not allowed_in_sandbox(parsed):
+        return _json_error(403, "Not in guest view", "Try /help")
+    return None
+
+
+def _message_rate_limited(request: web.Request, identity: Identity) -> bool:
+    """Check per-email and per-IP buckets, then count this message."""
+    store = request.app["guest_store"]
+    limit = request.app["config"].guest_rate_messages_per_min
+    keys = (f"e:{identity.principal}", f"i:{client_ip(request)}")
+    limited = any(
+        store.rate_limited(
+            _MESSAGE_RATE_KIND, k, limit=limit, window=_MESSAGE_RATE_WINDOW_S
+        )
+        for k in keys
+    )
+    if not limited:
+        for k in keys:
+            store.record_attempt(_MESSAGE_RATE_KIND, k)
+    return limited
 
 
 async def post_upload(request: web.Request) -> web.Response:

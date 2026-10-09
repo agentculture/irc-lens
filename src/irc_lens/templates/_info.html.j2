@@ -5,24 +5,11 @@
   {% if session.view == "help" %}
     <section class="lens-info-help">
       <h2>Slash commands</h2>
-      <dl>
-        <dt><code>/join #channel</code></dt><dd>Join a channel and switch the chat pane to it.</dd>
-        <dt><code>/part #channel</code></dt><dd>Leave a channel.</dd>
-        <dt><code>/send target text…</code></dt><dd>Send a message to a specific channel or nick.</dd>
-        <dt><code>/switch #channel</code></dt><dd>Switch the active channel without rejoining (also: click the sidebar).</dd>
-        <dt><code>/me action…</code></dt><dd>Send a CTCP ACTION (rendered as <code>* nick action</code>).</dd>
-        <dt><code>/read [#channel] [-n N]</code></dt><dd>Fetch HISTORY RECENT (default 50) and replace the chat log.</dd>
-        <dt><code>/channels</code></dt><dd>List public channels on the server (rendered in this pane).</dd>
-        <dt><code>/who [target]</code></dt><dd>List members of a channel or details of a nick.</dd>
-        <dt><code>/agents</code></dt><dd>Union of nicks across every joined channel.</dd>
-        <dt><code>/topic #channel [text…]</code></dt><dd>Read or set the channel topic.</dd>
-        <dt><code>/icon emoji</code></dt><dd>Set your icon (AgentIRC extension).</dd>
-        <dt><code>/mesh</code></dt><dd>Show the live agent-mesh graph of joined channels and their members.</dd>
-        <dt><code>/help</code></dt><dd>Show this help pane.</dd>
-        <dt><code>/overview</code></dt><dd>Show the joined-channels overview.</dd>
-        <dt><code>/status</code></dt><dd>Show the connection / session status pane.</dd>
-        <dt><a href="/residents">/residents</a></dt><dd>Open the mesh resident presence &amp; budgets page (a standalone page, not a slash command).</dd>
-        <dt><em>(plain text)</em></dt><dd>Sends a message to the active channel.</dd>
+      <dl data-testid="help-commands">
+        {% for entry in session.help_entries() %}
+          <dt>{% if entry.href %}<a href="{{ entry.href }}">{{ entry.command }}</a>{% else %}<code>{{ entry.command }}</code>{% endif %}</dt><dd>{{ entry.label }}</dd>
+        {% endfor %}
+        <dt><em>text</em></dt><dd>Send message</dd>
       </dl>
     </section>
   {% elif session.view == "overview" %}
@@ -38,24 +25,18 @@
           {% endfor %}
         </ul>
       {% else %}
-        <p class="lens-info-empty">No channels joined. Try <code>/join #general</code>.</p>
+        <p class="lens-info-empty">No channels joined</p>
       {% endif %}
     </section>
   {% elif session.view == "mesh" %}
     <section class="lens-info-mesh">
       <h2>Mesh graph</h2>
-      <p class="lens-info-mesh-hint">
-        Joined channels and their members, live. Updates as agents join and leave.
-      </p>
       <ul data-testid="mesh-legend" class="lens-mesh-legend">
         <li><span class="lens-mesh-dot lens-mesh-dot--room"></span> room (channel)</li>
         <li><span class="lens-mesh-dot lens-mesh-dot--agent"></span> agent</li>
         <li><span class="lens-mesh-dot lens-mesh-dot--human"></span> human</li>
       </ul>
-      <p class="lens-info-empty">
-        {{ session.joined_channels|length }} channel(s) in view —
-        <code>/switch #x</code> or click a channel to return to chat.
-      </p>
+      <p class="lens-info-empty">{{ session.joined_channels|length }} rooms</p>
     </section>
   {% elif session.view == "status" %}
     <section class="lens-info-status">
@@ -73,9 +54,8 @@
     <section class="lens-info-chat">
       {% if session.current_channel %}
         <p class="lens-info-channel">channel: <code>{{ session.current_channel }}</code></p>
-        <p class="lens-info-topic">Topic: <em>not set</em></p>
       {% else %}
-        <p class="lens-info-empty">No active channel. <code>/join #general</code> to start.</p>
+        <p class="lens-info-empty">No active channel</p>
       {% endif %}
       {% if channels is defined %}
         <h3 data-testid="info-channels-heading">Server channels ({{ channels|length }})</h3>
@@ -86,7 +66,7 @@
             {% endfor %}
           </ul>
         {% else %}
-          <p class="lens-info-empty">No public channels listed.</p>
+          <p class="lens-info-empty">No public channels</p>
         {% endif %}
       {% endif %}
       {% if who_target is defined %}
@@ -117,7 +97,7 @@
             {% endfor %}
           </ul>
         {% else %}
-          <p class="lens-info-empty">No agents found across joined channels.</p>
+          <p class="lens-info-empty">No agents found</p>
         {% endif %}
       {% endif %}
     </section>

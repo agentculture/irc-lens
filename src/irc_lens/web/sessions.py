@@ -151,6 +151,13 @@ class SessionRegistry:
                     pass
                 raise
             if backend == BACKEND_SANDBOX:
+                # UI context only (badge / palette); enforcement lives in
+                # the routes and never reads this attribute.
+                session.ui_tier = (
+                    "guest"
+                    if identity.principal.startswith(GUEST_PRINCIPAL_PREFIX)
+                    else "sandbox_preview"
+                )
                 for command in ("PRIVMSG", "JOIN", "PART", "QUIT"):
                     session._transport.add_listener(command, _presence_listener)
             self._sessions[key] = session
