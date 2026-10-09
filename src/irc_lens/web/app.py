@@ -16,7 +16,7 @@ from aiohttp import web
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
-from irc_lens.web import routes
+from irc_lens.web import csrf, routes
 from irc_lens.web.auth import build_cloudflare_middleware
 from irc_lens.web.front import mount_agent_front
 from irc_lens.web.identity import Identity
@@ -143,8 +143,10 @@ def make_app(config: LensConfig, session_factory: SessionFactory) -> web.Applica
     # is safe to compute even when media is disabled.
     app = web.Application(
         client_max_size=config.media_max_file_bytes + _CLIENT_MAX_SIZE_MEDIA_HEADROOM,
-        middlewares=[_security_headers_middleware, middleware],
+        middlewares=[_security_headers_middleware, csrf.csrf_middleware, middleware],
     )
+
+    csrf.install(app)
 
     registry = SessionRegistry(factory=session_factory)
     app["registry"] = registry

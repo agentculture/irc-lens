@@ -43,3 +43,23 @@ Validation: every sub-section must be a mapping; unknown keys anywhere in the
 section are rejected (typo guard); `enabled` must be a boolean, ports go
 through the shared port check, `legal_version_url` must be an `http(s)` URL
 with a host, and rate limits must be integers.
+
+## Guest session cookie and CSRF
+
+Guests are identified by a signed cookie, `lens_guest`
+(`HttpOnly; Secure; SameSite=Strict`, 1 hour expiry). Value:
+`<b64url(json {"g": guest_id, "exp": unix_ts})>.<b64url(HMAC-SHA256)>`.
+Code: `src/irc_lens/web/csrf.py` (`issue_guest_cookie(response, guest_id)`,
+`read_guest_cookie(request) -> guest_id | None`).
+
+The HMAC secret is supplied via the **`IRC_LENS_GUEST_COOKIE_SECRET`**
+environment variable (for example a systemd `EnvironmentFile` mode 0600; use
+at least 32 random bytes, e.g. `openssl rand -hex 32`). It is never read from
+the config file or hard-coded. If unset, a random per-process secret is used
+and all guest cookies are invalidated on restart. Rotate by changing the value.
+
+Every non-GET/HEAD/OPTIONS request (`/input`, `/upload`, and future consent
+and deletion routes) passes `csrf_middleware` first: a mismatching `Origin`
+is 403 (the existing same-host floor); a request carrying a guest cookie must
+additionally prove same-origin (matching `Origin`, or `Sec-Fetch-Site:
+same-origin`/`none`), otherwise 403 before any handler or IRC send.
