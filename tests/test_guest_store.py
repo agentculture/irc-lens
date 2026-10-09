@@ -128,7 +128,8 @@ def test_issue_token_returns_plaintext_once_and_stores_hash_only(
 ) -> None:
     store = GuestStore(tmp_path / "guests.db")
     token = store.issue_token("a@example.com", purpose="entry")
-    assert isinstance(token, str) and len(token) >= 16
+    assert isinstance(token, str)
+    assert len(token) >= 16
     digest = hashlib.sha256(token.encode()).hexdigest()
     con = sqlite3.connect(store.path)
     try:
@@ -344,7 +345,8 @@ def test_room_id_is_random_stable_and_forgotten_on_deletion(tmp_path) -> None:
     a = s.room_id("a@example.org")
     assert a == s.room_id("a@example.org")
     assert a != s.room_id("b@example.org")
-    assert len(a) >= 8 and a.isalnum()
+    assert len(a) >= 8
+    assert a.isalnum()
     assert sorted(s.list_rooms()) == sorted(
         [("a@example.org", a), ("b@example.org", s.room_id("b@example.org"))]
     )

@@ -234,7 +234,8 @@ async def test_email_step_identical_for_approved_and_unknown(h):
     assert a_body == u_body
     assert 'name="password"' in a_body
     assert 'formaction="/entry/guest"' in a_body
-    assert "Sign in" in a_body and "Guest mode" in a_body
+    assert "Sign in" in a_body
+    assert "Guest mode" in a_body
 
 
 async def test_email_step_always_password_window_even_for_junk(h):
@@ -291,7 +292,8 @@ async def test_password_step_has_hidden_username_and_current_password(h):
     tag = m.group(0)
     assert 'autocomplete="username"' in tag
     assert f'value="{APPROVED}"' in tag
-    assert "readonly" in tag and 'tabindex="-1"' in tag
+    assert "readonly" in tag
+    assert 'tabindex="-1"' in tag
     assert re.search(r'<input[^>]*type="password"[^>]*autocomplete="current-password"', html)
 
 
@@ -404,8 +406,10 @@ async def test_full_guest_flow_sets_cookie_and_records(h):
     resp = await _request_token(h)
     assert resp.status == 200
     html = await resp.text()
-    assert 'name="code"' in html and 'action="/entry/verify"' in html
-    assert len(h.mail.sent) == 1 and h.mail.sent[0][0] == GUEST
+    assert 'name="code"' in html
+    assert 'action="/entry/verify"' in html
+    assert len(h.mail.sent) == 1
+    assert h.mail.sent[0][0] == GUEST
     token = _token_from_mail(h)
     before = metrics.get_metrics().snapshot()["entries"]
     resp = await h.post(
@@ -513,9 +517,10 @@ async def test_same_email_template_for_every_address(h):
     t1, t2 = re.search(r"^ {4}(\S+)$", b1, re.M).group(1), re.search(
         r"^ {4}(\S+)$", b2, re.M
     ).group(1)
-    assert (s1, b1) == render_token_email(t1)
-    assert (s2, b2) == render_token_email(t2)
-    assert "code" in b1.lower() and "token" not in b1.lower()
+    assert render_token_email(t1) == (s1, b1)
+    assert render_token_email(t2) == (s2, b2)
+    assert "code" in b1.lower()
+    assert "token" not in b1.lower()
     assert "15 minutes" in b1
     assert b1.replace(t1, "T") == b2.replace(t2, "T")
 

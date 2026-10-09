@@ -60,12 +60,11 @@ def _parse(doc: object) -> dict[str, str]:
 
 async def _fetch(url: str) -> dict[str, str]:
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                url, timeout=aiohttp.ClientTimeout(total=FETCH_TIMEOUT_S)
-            ) as resp:
-                resp.raise_for_status()
-                doc = await resp.json(content_type=None)
+        async with aiohttp.ClientSession() as session, session.get(
+            url, timeout=aiohttp.ClientTimeout(total=FETCH_TIMEOUT_S)
+        ) as resp:
+            resp.raise_for_status()
+            doc = await resp.json(content_type=None)
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
         raise LegalVersionsUnavailable(
             f"could not fetch legal versions ({type(exc).__name__})"

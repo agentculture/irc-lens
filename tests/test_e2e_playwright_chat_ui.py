@@ -97,7 +97,8 @@ async def test_phone_375_no_horizontal_scroll_and_touch_targets(
             await page.locator("#chat-input").fill("")
             toggle = page.locator('[data-testid="rooms-toggle"]')
             tb = await toggle.bounding_box()
-            assert tb["width"] >= 44 and tb["height"] >= 44
+            assert tb["width"] >= 44
+            assert tb["height"] >= 44
             sidebar = page.locator("#sidebar")
             await expect(sidebar).to_be_hidden()
             await toggle.click()
@@ -127,7 +128,8 @@ async def test_focus_rings_visible(seeded_lens_client: TestClient) -> None:
                 if style is None:
                     continue
                 checked += 1
-                assert style[0] != "none" and style[1] >= 2, style
+                assert style[0] != "none"
+                assert style[1] >= 2, style
             assert checked >= 5
         finally:
             await browser.close()

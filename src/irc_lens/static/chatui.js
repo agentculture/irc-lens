@@ -12,9 +12,9 @@
   // Keep the header + room title in step with the active room: the roster
   // fragment carries it as data-current on its first section.
   function syncRoom() {
-    const cur = sidebar && sidebar.querySelector("[data-current]");
+    const cur = sidebar?.querySelector("[data-current]");
     if (!cur) return;
-    const room = cur.getAttribute("data-current") || "";
+    const room = cur.dataset.current || "";
     const head = $("header-room");
     const title = $("room-name");
     if (head) head.textContent = room;
@@ -90,7 +90,7 @@
       else if (e.key === "ArrowUp") { e.preventDefault(); setActive(active <= 0 ? vis.length - 1 : active - 1); }
       else if (e.key === "Tab" && !e.shiftKey) {
         e.preventDefault();
-        choose(vis[active >= 0 ? active : 0]);
+        choose(vis[Math.max(active, 0)]);
       }
       else if (e.key === "Enter" && active >= 0) { e.preventDefault(); choose(vis[active]); }
       else if (e.key === "Escape") { e.preventDefault(); closePalette(); }

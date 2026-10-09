@@ -216,6 +216,32 @@ class SessionRegistry:
                 closed.append(key)
         return closed
 
+    async def _init_sandbox(self, session: Any, identity: Identity) -> None:
+        """UI tier, presence + answer listeners, and the private room(s)."""
+        # UI context only (badge / palette); enforcement lives in
+        # the routes and never reads this attribute.
+        is_guest = identity.principal.startswith(GUEST_PRINCIPAL_PREFIX)
+        session.ui_tier = "guest" if is_guest else "sandbox_preview"
+        for command in ("PRIVMSG", "JOIN", "PART", "QUIT"):
+            session._transport.add_listener(command, _presence_listener)
+        own, others = self._rooms_for(identity, is_guest)
+        if is_guest:
+            # d8: the guest store keeps the guest's Q&A (the sandbox
+            # IRCd is memory-only), so record the agent's answers.
+            from irc_lens.corpus import answer_recorder
+
+            session._transport.add_listener(
+                "PRIVMSG",
+                answer_recorder(
+                    self._guest_store,
+                    identity.principal[len(GUEST_PRINCIPAL_PREFIX) :],
+                    room=own,
+                    own_nick=identity.nick,
+                    agent_nick=metrics.get_presence().nick,
+                ),
+            )
+        await _open_sandbox_rooms(session, own, others)
+
     async def get_or_open(self, identity: Identity, backend: str = BACKEND_MESH) -> Any:
         """Return the Session for (``identity.principal``, *backend*).
 
@@ -253,29 +279,7 @@ class SessionRegistry:
                     pass
                 raise
             if backend == BACKEND_SANDBOX:
-                # UI context only (badge / palette); enforcement lives in
-                # the routes and never reads this attribute.
-                is_guest = identity.principal.startswith(GUEST_PRINCIPAL_PREFIX)
-                session.ui_tier = "guest" if is_guest else "sandbox_preview"
-                for command in ("PRIVMSG", "JOIN", "PART", "QUIT"):
-                    session._transport.add_listener(command, _presence_listener)
-                own, others = self._rooms_for(identity, is_guest)
-                if is_guest:
-                    # d8: the guest store keeps the guest's Q&A (the sandbox
-                    # IRCd is memory-only), so record the agent's answers.
-                    from irc_lens.corpus import answer_recorder
-
-                    session._transport.add_listener(
-                        "PRIVMSG",
-                        answer_recorder(
-                            self._guest_store,
-                            identity.principal[len(GUEST_PRINCIPAL_PREFIX) :],
-                            room=own,
-                            own_nick=identity.nick,
-                            agent_nick=metrics.get_presence().nick,
-                        ),
-                    )
-                await _open_sandbox_rooms(session, own, others)
+                await self._init_sandbox(session, identity)
             self._sessions[key] = session
             if self._counts_as_guest(*key):
                 metrics.get_metrics().session_opened()

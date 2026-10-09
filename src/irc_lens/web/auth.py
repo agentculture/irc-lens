@@ -149,12 +149,11 @@ class _JWKSCache:
         self._refresh_lock: asyncio.Lock = asyncio.Lock()
 
     async def _refresh(self) -> None:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(
-                self._url, timeout=aiohttp.ClientTimeout(total=5)
-            ) as r:
-                r.raise_for_status()
-                payload = await r.json()
+        async with aiohttp.ClientSession() as session, session.get(
+            self._url, timeout=aiohttp.ClientTimeout(total=5)
+        ) as r:
+            r.raise_for_status()
+            payload = await r.json()
         self._keys = {k["kid"]: k for k in payload.get("keys", [])}
         self._last_fetch = time.monotonic()
 
@@ -339,13 +338,8 @@ def _authorize_principal(
     )
 
 
-def build_cloudflare_middleware(config: LensConfig):
-    """Build the @web.middleware coroutine for cloudflare-access mode.
-
-    Pins audience to ``config.cf_aud`` and issuer to
-    ``<scheme>://<config.cf_team_domain>``.  Identity is stashed on
-    ``request['identity']`` so downstream handlers stay mode-agnostic.
-    """
+def _require_cf_config(config: LensConfig) -> None:
+    """Refuse to build the CF middleware without a complete CF config."""
     if config.auth_mode != "cloudflare-access":
         # AfiError (not ValueError) so the dispatcher renders an
         # `error:`/`hint:` pair and exits with code 1 instead of
@@ -369,6 +363,25 @@ def build_cloudflare_middleware(config: LensConfig):
                 "`auth.cloudflare.team_domain` in the lens config"
             ),
         )
+
+
+def _is_public_path(request: web.Request) -> bool:
+    """Static assets, ``/healthz`` and capability ``/media/`` URLs need no identity."""
+    return (
+        request.path.startswith("/static/")
+        or request.path == "/healthz"
+        or request.path.startswith("/media/")
+    )
+
+
+def build_cloudflare_middleware(config: LensConfig):
+    """Build the @web.middleware coroutine for cloudflare-access mode.
+
+    Pins audience to ``config.cf_aud`` and issuer to
+    ``<scheme>://<config.cf_team_domain>``.  Identity is stashed on
+    ``request['identity']`` so downstream handlers stay mode-agnostic.
+    """
+    _require_cf_config(config)
     cache = _JWKSCache(config.cf_team_domain)
     issuer = _build_issuer(config.cf_team_domain)
     aud = config.cf_aud
@@ -404,11 +417,7 @@ def build_cloudflare_middleware(config: LensConfig):
         # (other agents on the mesh have no Cloudflare identity to
         # present). See docs/superpowers/specs/
         # 2026-07-02-media-support-design.md ("Upload path").
-        if (
-            request.path.startswith("/static/")
-            or request.path == "/healthz"
-            or request.path.startswith("/media/")
-        ):
+        if _is_public_path(request):
             return await handler(request)
         token = _extract_token(request)
         if not token:

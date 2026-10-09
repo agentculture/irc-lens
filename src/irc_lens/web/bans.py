@@ -66,7 +66,7 @@ async def _loop(app: web.Application, interval: float) -> None:
 def install(app: web.Application, interval: float = DEFAULT_SWEEP_INTERVAL_S) -> None:
     """Run the sweeper for the app's lifetime (guest mode only)."""
 
-    async def start(app: web.Application) -> None:
+    async def start(app: web.Application) -> None:  # NOSONAR S7503 - aiohttp on_startup
         app[SWEEP_TASK] = asyncio.create_task(_loop(app, interval))
 
     async def stop(app: web.Application) -> None:

@@ -26,7 +26,8 @@ def test_sandbox_presence_follows_room_membership() -> None:
     assert sandbox_presence(s, "sbx-ask")["state"] == "offline"
     s.set_roster([EntityItem("sbx-gus", "human"), EntityItem("sbx-ask", "agent")])
     state = sandbox_presence(s, "sbx-ask")
-    assert state["state"] == "online" and state["online"] is True
+    assert state["state"] == "online"
+    assert state["online"] is True
 
 
 def test_history_hides_system_lines_only_when_asked() -> None:
@@ -36,9 +37,12 @@ def test_history_hides_system_lines_only_when_asked() -> None:
         {"nick": "sbx-ask", "text": "hello there", "timestamp": "3"},
     ]
     shown = render_chat_log(entries, hide_system=True)
-    assert "hello there" in shown and "joined" not in shown and "Welcome" not in shown
+    assert "hello there" in shown
+    assert "joined" not in shown
+    assert "Welcome" not in shown
     full = render_chat_log(entries)
-    assert "joined" in full and "Welcome" in full
+    assert "joined" in full
+    assert "Welcome" in full
 
 
 @pytest.mark.asyncio

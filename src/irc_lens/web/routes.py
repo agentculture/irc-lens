@@ -110,6 +110,10 @@ def _json_error(status: int, error: str, hint: str, **extra) -> web.Response:
 APPROVED_SANDBOX_INFIX = "op-"
 
 
+_HTML = "text/html"
+_ERR_APPROVED_REQUIRED = "approved sign-in required"
+
+
 def sandbox_nick_for(config, identity: Identity) -> str:
     """``sbx-op-<real nick suffix>`` — distinct from the user's mesh nick and
     from every possible guest nick."""
@@ -146,7 +150,7 @@ def _backend_for(request: web.Request) -> tuple[Identity, str]:
     raise web.HTTPUnauthorized(
         text=json.dumps(
             {
-                "error": "approved sign-in required",
+                "error": _ERR_APPROVED_REQUIRED,
                 "hint": "sign in through /login to reach the real mesh",
             }
         ),
@@ -239,17 +243,17 @@ async def _anonymous_or_gate(
     identity: Identity = request["identity"]
     if identity.tier == TIER_ANONYMOUS:
         return _json_error(
-            401, "approved sign-in required", "enter through the guest entry card"
+            401, _ERR_APPROVED_REQUIRED, "enter through the guest entry card"
         )
     return await _guest_consent_gate(request, redirect=redirect)
 
 
-async def post_sandbox_enter(request: web.Request) -> web.Response:
+async def post_sandbox_enter(request: web.Request) -> web.Response:  # NOSONAR S7503 - aiohttp handler
     """Approved users only: switch this principal's view to the sandbox."""
     return _set_sandbox_toggle(request, on=True)
 
 
-async def post_sandbox_leave(request: web.Request) -> web.Response:
+async def post_sandbox_leave(request: web.Request) -> web.Response:  # NOSONAR S7503 - aiohttp handler
     """Approved users only: switch back to the real mesh (no re-auth)."""
     return _set_sandbox_toggle(request, on=False)
 
@@ -258,7 +262,7 @@ def _set_sandbox_toggle(request: web.Request, *, on: bool) -> web.Response:  # N
     identity: Identity = request["identity"]
     if not identity.is_approved:
         return _json_error(
-            401, "approved sign-in required", "sandbox toggle is for approved users"
+            401, _ERR_APPROVED_REQUIRED, "sandbox toggle is for approved users"
         )
     toggled: set[str] = request.app["sandbox_toggle"]
     if on:
@@ -497,7 +501,7 @@ async def get_index(request: web.Request) -> web.Response:
     _, backend = _backend_for(request)
     presence = _sandbox_state(session) if backend == BACKEND_SANDBOX else None
     body = render_index(session, chat_log_html=chat_log_html, presence=presence)
-    return web.Response(text=body, content_type="text/html")
+    return web.Response(text=body, content_type=_HTML)
 
 
 @allows_anonymous
@@ -525,7 +529,7 @@ async def get_presence(request: web.Request) -> web.Response:
         presence = _sandbox_state(session)
     body = render_fragment("_presence.html.j2", presence=presence)
     return web.Response(
-        text=body, content_type="text/html", headers={"Cache-Control": "no-store"}
+        text=body, content_type=_HTML, headers={"Cache-Control": "no-store"}
     )
 
 
@@ -913,7 +917,7 @@ async def get_residents(request: web.Request) -> web.Response:
         # unavailable notice rather than a 500.
         logger.exception("residents render failed; degrading to notice")
         body = render_residents_page("unavailable", None)
-    return web.Response(text=body, content_type="text/html")
+    return web.Response(text=body, content_type=_HTML)
 
 
 async def get_healthz(_request: web.Request) -> web.Response:  # NOSONAR S7503
@@ -938,7 +942,7 @@ async def get_owner_metrics(request: web.Request) -> web.Response:  # NOSONAR S7
     if identity is None or not identity.is_approved:
         return web.json_response(
             {
-                "error": "approved sign-in required",
+                "error": _ERR_APPROVED_REQUIRED,
                 "hint": "sign in through /login to reach the real mesh",
             },
             status=401,

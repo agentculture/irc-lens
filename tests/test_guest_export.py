@@ -115,7 +115,9 @@ def test_scrub_text_unit() -> None:
     )
     for bad in ["x@y.io", "192.168.1.1", "972", "4567", "Sam", "Smith", "Lee"]:
         assert bad not in t
-    assert "[email]" in t and "[ip]" in t and "[phone]" in t
+    assert "[email]" in t
+    assert "[ip]" in t
+    assert "[phone]" in t
 
 
 def test_plain_text_untouched() -> None:
@@ -167,3 +169,13 @@ def test_export_includes_the_anonymized_corpus(tmp_path) -> None:
             "text": "Q: what is culture?\nA: an IRC mesh",
         }
     ]
+
+
+def test_scrub_ipv6_forms_and_not_times() -> None:
+    from irc_lens.export import scrub_text
+
+    assert scrub_text("ping ::1 now") == "ping [ip] now"
+    assert scrub_text("from fe80::1 ok") == "from [ip] ok"
+    assert scrub_text("addr 2001:db8::ff00:42:8329.") == "addr [ip]."
+    assert scrub_text("mapped ::ffff:192.0.2.1 x") == "mapped [ip] x"
+    assert scrub_text("at 10:30:45 today") == "at 10:30:45 today"

@@ -197,7 +197,8 @@ async def test_guest_header_nick_badge_room_no_host_port(env: Env) -> None:
     assert f"{env.sandbox.host}:{env.sandbox.port}" not in html
     assert "@" + env.sandbox.host not in html
     assert not re.search(r"sbx-gus@\S+:\d+", html)
-    assert 'data-tier="guest"' in html and "lens-sandbox" in html  # amber rule
+    assert 'data-tier="guest"' in html
+    assert "lens-sandbox" in html  # amber rule
     assert 'data-testid="sandbox-banner"' not in html  # banner is approved-only
 
 
@@ -206,21 +207,24 @@ async def test_approved_header_real_mesh_and_way_into_sandbox(env: Env) -> None:
     assert 'data-testid="tier-badge">Real mesh<' in html
     assert 'data-testid="identity">testsrv-alice<' in html
     assert "lens-sandbox" not in html
-    assert 'hx-post="/sandbox/enter"' in html and ">Guest view<" in html
+    assert 'hx-post="/sandbox/enter"' in html
+    assert ">Guest view<" in html
     assert not re.search(r"testsrv-alice@\S+:\d+", html)
 
 
 async def test_sandbox_preview_has_amber_rule_banner_and_back(env: Env) -> None:
     h = env.approved_headers()
     r = await env.client.post("/sandbox/enter", headers=h)
-    assert r.status == 200 and r.headers["HX-Refresh"] == "true"
+    assert r.status == 200
+    assert r.headers["HX-Refresh"] == "true"
     html = await (await env.client.get("/", headers=h)).text()
     assert 'data-testid="tier-badge">Sandbox preview<' in html
     assert 'data-testid="identity">sbx-op-alice<' in html
     assert "lens-sandbox" in html
     assert 'data-testid="sandbox-banner"' in html
     assert "<strong>Guest view</strong>" in html
-    assert 'hx-post="/sandbox/leave"' in html and ">Back to mesh<" in html
+    assert 'hx-post="/sandbox/leave"' in html
+    assert ">Back to mesh<" in html
     assert 'hx-post="/sandbox/enter"' not in html
     # sandbox preview offers the sandbox palette only
     assert re.findall(r'data-cmd="(/[a-z]+)"', html) == [
@@ -254,11 +258,13 @@ async def test_agent_state_follows_room_membership(env: Env) -> None:
     room = "#g-" + env.store.room_id("gus@example.org")
     env.sandbox.channel_members[room].add("sbx-ask")  # the agent follows in
     frag = await (await env.client.get("/presence", headers=h)).text()
-    assert 'data-state="online"' in frag and "agent online" in frag
+    assert 'data-state="online"' in frag
+    assert "agent online" in frag
     assert 'hx-get="/presence"' in frag
     env.sandbox.channel_members[room].discard("sbx-ask")  # stopped, no QUIT
     frag = await (await env.client.get("/presence", headers=h)).text()
-    assert 'data-state="offline"' in frag and "agent offline" in frag
+    assert 'data-state="offline"' in frag
+    assert "agent offline" in frag
 
 
 async def test_mesh_view_has_no_agent_state(env: Env) -> None:
@@ -360,7 +366,8 @@ async def test_approved_on_mesh_keeps_full_command_set(env: Env) -> None:
 async def test_sandbox_command_enters_guest_view(env: Env) -> None:
     h = env.approved_headers()
     r = await env.client.post("/input", json={"text": "/sandbox"}, headers=h)
-    assert r.status == 204 and r.headers["HX-Refresh"] == "true"
+    assert r.status == 204
+    assert r.headers["HX-Refresh"] == "true"
     assert env.app["sandbox_toggle"] == {_APPROVED}
     html = await (await env.client.get("/", headers=h)).text()
     assert "Sandbox preview" in html
@@ -453,7 +460,8 @@ async def test_rate_limited_message_never_reaches_irc(env: Env, limit3) -> None:
 async def test_mesh_empty_state_has_a_next_step(env: Env) -> None:
     """h58: an approved user on the real mesh with no room gets a hint."""
     html = await (await env.client.get("/", headers=env.approved_headers())).text()
-    assert 'data-testid="empty-hint"' in html and "/join" in html
+    assert 'data-testid="empty-hint"' in html
+    assert "/join" in html
 
 
 async def test_owner_metrics_agent_state_uses_room_membership(env: Env) -> None:

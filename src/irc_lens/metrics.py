@@ -37,7 +37,7 @@ class Metrics:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._counts = {name: 0 for name in _COUNTERS}
+        self._counts = dict.fromkeys(_COUNTERS, 0)
         self._active = 0
 
     def _bump(self, name: str) -> None:

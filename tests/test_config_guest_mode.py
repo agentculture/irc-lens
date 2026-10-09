@@ -110,8 +110,9 @@ guest_mode:
 
 def test_guest_mode_invalid_mapping_errors(tmp_path: Path) -> None:
     """guest_mode: with a non-mapping value raises error."""
+    cfg_path = _write(tmp_path, _base('guest_mode: "invalid"'))
     with pytest.raises(AfiError) as exc:
-        load_config(_write(tmp_path, _base('guest_mode: "invalid"')))
+        load_config(cfg_path)
     assert exc.value.code == EXIT_USER_ERROR
     assert "guest_mode" in exc.value.message
     assert "mapping" in exc.value.message
@@ -136,8 +137,9 @@ def test_guest_mode_unknown_keys_rejected(
     tmp_path: Path, block: str, where: str
 ) -> None:
     """Unknown keys inside guest_mode (and its subsections) raise — typo guard."""
+    cfg_path = _write(tmp_path, _base(block))
     with pytest.raises(AfiError) as exc:
-        load_config(_write(tmp_path, _base(block)))
+        load_config(cfg_path)
     assert exc.value.code == EXIT_USER_ERROR
     assert "unknown" in exc.value.message.lower()
     assert where in exc.value.message
@@ -145,18 +147,18 @@ def test_guest_mode_unknown_keys_rejected(
 
 def test_guest_mode_enabled_bad_type_errors(tmp_path: Path) -> None:
     """enabled must be a boolean."""
+    cfg_path = _write(tmp_path, _base('guest_mode:\n  enabled: "yes"\n'))
     with pytest.raises(AfiError) as exc:
-        load_config(_write(tmp_path, _base('guest_mode:\n  enabled: "yes"\n')))
+        load_config(cfg_path)
     assert exc.value.code == EXIT_USER_ERROR
     assert "guest_mode.enabled" in exc.value.message
 
 
 def test_guest_mode_sandbox_port_bad_value_errors(tmp_path: Path) -> None:
     """sandbox.port goes through the shared port coercion."""
+    cfg_path = _write(tmp_path, _base("guest_mode:\n  sandbox:\n    port: nope\n"))
     with pytest.raises(AfiError) as exc:
-        load_config(
-            _write(tmp_path, _base("guest_mode:\n  sandbox:\n    port: nope\n"))
-        )
+        load_config(cfg_path)
     assert exc.value.code == EXIT_USER_ERROR
     assert "guest_mode.sandbox.port" in exc.value.message
     assert "between 1 and 65535" in exc.value.message
@@ -164,8 +166,9 @@ def test_guest_mode_sandbox_port_bad_value_errors(tmp_path: Path) -> None:
 
 def test_guest_mode_sandbox_non_mapping_errors(tmp_path: Path) -> None:
     """sandbox: with a non-mapping value raises error."""
+    cfg_path = _write(tmp_path, _base("guest_mode:\n  sandbox: []\n"))
     with pytest.raises(AfiError) as exc:
-        load_config(_write(tmp_path, _base("guest_mode:\n  sandbox: []\n")))
+        load_config(cfg_path)
     assert exc.value.code == EXIT_USER_ERROR
     assert "guest_mode.sandbox" in exc.value.message
     assert "mapping" in exc.value.message
@@ -173,18 +176,18 @@ def test_guest_mode_sandbox_non_mapping_errors(tmp_path: Path) -> None:
 
 def test_guest_mode_store_path_not_a_string_errors(tmp_path: Path) -> None:
     """store_path must be a string."""
+    cfg_path = _write(tmp_path, _base("guest_mode:\n  store_path: 42\n"))
     with pytest.raises(AfiError) as exc:
-        load_config(_write(tmp_path, _base("guest_mode:\n  store_path: 42\n")))
+        load_config(cfg_path)
     assert exc.value.code == EXIT_USER_ERROR
     assert "guest_mode.store_path" in exc.value.message
 
 
 def test_guest_mode_legal_version_url_bad_scheme_errors(tmp_path: Path) -> None:
     """legal_version_url must be an http(s) URL when set."""
+    cfg_path = _write(tmp_path, _base("guest_mode:\n  legal_version_url: not-a-url\n"))
     with pytest.raises(AfiError) as exc:
-        load_config(
-            _write(tmp_path, _base("guest_mode:\n  legal_version_url: not-a-url\n"))
-        )
+        load_config(cfg_path)
     assert exc.value.code == EXIT_USER_ERROR
     assert "guest_mode.legal_version_url" in exc.value.message
     assert "http" in exc.value.remediation
@@ -192,18 +195,18 @@ def test_guest_mode_legal_version_url_bad_scheme_errors(tmp_path: Path) -> None:
 
 def test_guest_mode_legal_version_url_missing_host_errors(tmp_path: Path) -> None:
     """A bare scheme (no netloc) is rejected too."""
+    cfg_path = _write(tmp_path, _base('guest_mode:\n  legal_version_url: "https://"\n'))
     with pytest.raises(AfiError) as exc:
-        load_config(
-            _write(tmp_path, _base('guest_mode:\n  legal_version_url: "https://"\n'))
-        )
+        load_config(cfg_path)
     assert exc.value.code == EXIT_USER_ERROR
     assert "guest_mode.legal_version_url" in exc.value.message
 
 
 def test_guest_mode_mail_non_mapping_errors(tmp_path: Path) -> None:
     """mail: with a non-mapping value raises error."""
+    cfg_path = _write(tmp_path, _base('guest_mode:\n  mail: "x"\n'))
     with pytest.raises(AfiError) as exc:
-        load_config(_write(tmp_path, _base('guest_mode:\n  mail: "x"\n')))
+        load_config(cfg_path)
     assert exc.value.code == EXIT_USER_ERROR
     assert "guest_mode.mail" in exc.value.message
     assert "mapping" in exc.value.message
@@ -211,31 +214,30 @@ def test_guest_mode_mail_non_mapping_errors(tmp_path: Path) -> None:
 
 def test_guest_mode_mail_from_not_a_string_errors(tmp_path: Path) -> None:
     """mail.from must be a string."""
+    cfg_path = _write(tmp_path, _base("guest_mode:\n  mail:\n    from: 42\n"))
     with pytest.raises(AfiError) as exc:
-        load_config(_write(tmp_path, _base("guest_mode:\n  mail:\n    from: 42\n")))
+        load_config(cfg_path)
     assert exc.value.code == EXIT_USER_ERROR
     assert "guest_mode.mail.from" in exc.value.message
 
 
 def test_guest_mode_rate_limits_bad_int_errors(tmp_path: Path) -> None:
     """rate_limits entries must be integers."""
+    cfg_path = _write(
+        tmp_path,
+        _base("guest_mode:\n  rate_limits:\n    messages_per_min: not-a-number\n"),
+    )
     with pytest.raises(AfiError) as exc:
-        load_config(
-            _write(
-                tmp_path,
-                _base(
-                    "guest_mode:\n  rate_limits:\n    messages_per_min: not-a-number\n"
-                ),
-            )
-        )
+        load_config(cfg_path)
     assert exc.value.code == EXIT_USER_ERROR
     assert "guest_mode.rate_limits.messages_per_min" in exc.value.message
 
 
 def test_guest_mode_rate_limits_non_mapping_errors(tmp_path: Path) -> None:
     """rate_limits: with a non-mapping value raises error."""
+    cfg_path = _write(tmp_path, _base("guest_mode:\n  rate_limits: []\n"))
     with pytest.raises(AfiError) as exc:
-        load_config(_write(tmp_path, _base("guest_mode:\n  rate_limits: []\n")))
+        load_config(cfg_path)
     assert exc.value.code == EXIT_USER_ERROR
     assert "guest_mode.rate_limits" in exc.value.message
     assert "mapping" in exc.value.message
@@ -244,18 +246,22 @@ def test_guest_mode_rate_limits_non_mapping_errors(tmp_path: Path) -> None:
 def test_guest_mode_room_prefix_default_and_override(tmp_path: Path) -> None:
     assert load_config(_write(tmp_path, _base())).guest_room_prefix == "#g-"
     cfg = load_config(
-        _write(tmp_path, _base("guest_mode:\n  sandbox:\n    room_prefix: \"#guest-\"\n"))
+        _write(tmp_path, _base('guest_mode:\n  sandbox:\n    room_prefix: "#guest-"\n'))
     )
     assert cfg.guest_room_prefix == "#guest-"
 
 
 def test_guest_mode_room_prefix_must_start_a_channel(tmp_path: Path) -> None:
+    cfg_path = _write(tmp_path, _base("guest_mode:\n  sandbox:\n    room_prefix: g-\n"))
     with pytest.raises(AfiError) as exc:
-        load_config(_write(tmp_path, _base("guest_mode:\n  sandbox:\n    room_prefix: g-\n")))
+        load_config(cfg_path)
     assert "guest_mode.sandbox.room_prefix" in exc.value.message
 
 
 def test_guest_mode_shared_room_key_is_rejected(tmp_path: Path) -> None:
     """The shared `room` key is gone: a stale config fails loudly, not silently."""
+    cfg_path = _write(
+        tmp_path, _base('guest_mode:\n  sandbox:\n    room: "#general"\n')
+    )
     with pytest.raises(AfiError):
-        load_config(_write(tmp_path, _base("guest_mode:\n  sandbox:\n    room: \"#general\"\n")))
+        load_config(cfg_path)

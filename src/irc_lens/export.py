@@ -36,6 +36,7 @@ Known limitations (heuristic, best effort, not a guarantee):
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import re
 import secrets
@@ -46,12 +47,23 @@ from typing import Iterable
 
 from irc_lens.guest_store import GuestStore
 
-_EMAIL = re.compile(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+")
+# Possessive quantifiers: no backtracking (linear time on any input).
+_EMAIL = re.compile(r"[\w.+-]++@[\w-]++(?:\.[\w-]++)++")
 _IPV4 = re.compile(r"(?<![\w.])(?:\d{1,3}\.){3}\d{1,3}(?![\w.]*\w)")
-# Any run of hex groups with >= 2 colons (covers ::1, fe80::1, full v6, v4-mapped).
-_IPV6 = re.compile(
-    r"(?<![\w:])(?:[0-9A-Fa-f]{0,4}:){2,7}(?:[0-9A-Fa-f]{1,4}|(?:\d{1,3}\.){3}\d{1,3})?(?![\w:])"
-)
+# IPv6 candidates: a run of hex digits, dots and >= 2 colons, then confirmed
+# by ipaddress (covers ::1, fe80::1, full v6 and v4-mapped). Possessive
+# quantifiers keep the scan linear; validation keeps the pattern simple.
+_IPV6_CANDIDATE = re.compile(r"(?<![\w:])[0-9A-Fa-f.]*+(?::[0-9A-Fa-f.]*+){2,8}+(?![\w:])")
+
+
+def _ipv6_sub(m: re.Match[str]) -> str:
+    text = m.group(0)
+    core = text.rstrip(".")  # a sentence-ending dot is not part of the address
+    try:
+        ipaddress.IPv6Address(core)
+    except ValueError:
+        return text
+    return "[ip]" + text[len(core) :]
 _PHONE = re.compile(r"(?<![\w])\+?\(?\d[\d\s().-]{5,}\d(?![\w])")
 _NAME = r"[A-Z][\w'’-]+(?:\s+[A-Z][\w'’-]+){0,2}"
 _NAME_CUES = [
@@ -94,7 +106,7 @@ def scrub_text(
         text = _escape_ci(key).sub((replacements or {})[key], text)
     text = _EMAIL.sub("[email]", text)
     text = _ANY_SBX_NICK.sub("[nick]", text)
-    text = _IPV6.sub("[ip]", text)
+    text = _IPV6_CANDIDATE.sub(_ipv6_sub, text)
     text = _IPV4.sub("[ip]", text)
     text = _PHONE.sub(_phone_sub, text)
     for pat in _NAME_CUES:
@@ -105,7 +117,7 @@ def scrub_text(
     return text
 
 
-def _identifier_tokens(email: str, nick: str) -> set[str]:
+def _identifier_tokens(email: str) -> set[str]:
     local = email.split("@", 1)[0]
     tokens = {t for t in _SPLIT.split(local) if len(t) >= _MIN_TOKEN}
     tokens.add(local)
@@ -143,9 +155,9 @@ def export_redacted(store: GuestStore, *, fmt: str = "jsonl") -> str:
         replacements[email] = "[email]"
         if ip:
             replacements[ip] = "[ip]"
-        tokens |= _identifier_tokens(email, nick)
+        tokens |= _identifier_tokens(email)
     for email in emails:
-        tokens |= _identifier_tokens(email, "")
+        tokens |= _identifier_tokens(email)
     # nick/email replacements must not be re-scrubbed as names
     rows = []
     for email, kind, payload, ts in inputs:

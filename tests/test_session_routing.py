@@ -215,13 +215,15 @@ async def test_anonymous_gets_entry_card_and_no_session(env: Env) -> None:
     r = await env.client.get("/")
     assert r.status == 200
     assert await r.text() == "ENTRY-CARD"
-    assert env.mesh.received == [] and env.sandbox.received == []
+    assert env.mesh.received == []
+    assert env.sandbox.received == []
 
 
 async def test_anonymous_events_and_input_are_401(env: Env) -> None:
     assert (await env.client.get("/events")).status == 401
     assert (await env.client.post("/input", json={"text": "x"})).status == 401
-    assert env.mesh.received == [] and env.sandbox.received == []
+    assert env.mesh.received == []
+    assert env.sandbox.received == []
 
 
 async def test_banned_or_unknown_guest_cookie_is_anonymous(env: Env) -> None:
@@ -263,18 +265,21 @@ async def test_approved_toggle_round_trip(env: Env) -> None:
     assert _nicks(env.mesh) == ["testsrv-alice"]
 
     r = await env.client.post("/sandbox/enter", headers=h)
-    assert r.status == 200 and (await r.json())["backend"] == "sandbox"
+    assert r.status == 200
+    assert (await r.json())["backend"] == "sandbox"
     assert (await env.client.get("/", headers=h)).status == 200
     assert _nicks(env.sandbox) == ["sbx-op-alice"]  # never a guest's nick
     assert _nicks(env.mesh) == ["testsrv-alice"]  # mesh session untouched
 
     r = await env.client.post("/sandbox/leave", headers=h)
-    assert r.status == 200 and (await r.json())["backend"] == "mesh"
+    assert r.status == 200
+    assert (await r.json())["backend"] == "mesh"
     assert (await env.client.get("/", headers=h)).status == 200
     # back on the original mesh session: no second mesh connect, no re-auth
     assert _nicks(env.mesh) == ["testsrv-alice"]
     reg = env.app["registry"]
-    assert reg.has(_APPROVED, "mesh") and reg.has(_APPROVED, "sandbox")
+    assert reg.has(_APPROVED, "mesh")
+    assert reg.has(_APPROVED, "sandbox")
 
 
 async def test_toggle_is_per_principal_server_side(env: Env) -> None:
@@ -311,7 +316,8 @@ async def test_guest_without_consent_refused_on_input_and_events(
     env.add_guest()
     h = env.guest_headers()
     r = await env.client.post("/input", json={"text": "hi"}, headers=h)
-    assert r.status == 403 and (await r.json())["redirect"] == "/consent"
+    assert r.status == 403
+    assert (await r.json())["redirect"] == "/consent"
     assert (await env.client.get("/events", headers=h)).status == 403
     assert env.sandbox.received == []
 
@@ -401,7 +407,8 @@ async def test_guest_mode_off_sandbox_routes_404_and_auth_unchanged(
         assert (await client.get("/")).status == 401  # unchanged
         assert "guest_store" not in app
         assert (await client.get("/", headers=h)).status == 200
-        assert _nicks(mesh) == ["testsrv-alice"] and sandbox.received == []
+        assert _nicks(mesh) == ["testsrv-alice"]
+        assert sandbox.received == []
     finally:
         for s in app["registry"].values():
             await s.disconnect()
@@ -438,8 +445,9 @@ async def test_registry_keys_by_principal_and_backend() -> None:
     assert await reg.get_or_open(ident) is m1
     assert await reg.get_or_open(sbx, "sandbox") is s1
     assert made == [("mesh", "srv-a"), ("sandbox", "sbx-a")]
+    mesh_only = SessionRegistry(mk("mesh"))
     with pytest.raises(ValueError):
-        await SessionRegistry(mk("mesh")).get_or_open(ident, "sandbox")
+        await mesh_only.get_or_open(ident, "sandbox")
 
 
 async def test_guest_session_joins_its_private_room(env: Env) -> None:
@@ -526,7 +534,8 @@ async def test_idle_sandbox_sessions_are_closed() -> None:
     await reg.reap_idle(now=600.0, idle_s=600)
     assert not reg.has("guest:a@x", "sandbox")
     idle.disconnect.assert_awaited()
-    assert reg.has("guest:b@x", "sandbox") and "o@x" in reg
+    assert reg.has("guest:b@x", "sandbox")
+    assert "o@x" in reg
     mesh.disconnect.assert_not_awaited()
 
 

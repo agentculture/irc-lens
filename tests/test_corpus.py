@@ -50,11 +50,15 @@ def test_anonymized_pairs_strip_identity_and_drop_flagged(tmp_path) -> None:
     pairs = anonymized_pairs(s, EMAIL)
     assert len(pairs) == 2  # the NSFW-declined pair is dropped
     q, a, day = pairs[0]["question"], pairs[0]["answer"], pairs[0]["date"]
-    assert "Dana" not in q and "dana" not in q.lower() and "@" not in q
+    assert "Dana" not in q
+    assert "dana" not in q.lower()
+    assert "@" not in q
     assert "dana" not in a.lower()
     assert a.endswith("where agents collaborate.")
-    assert len(day) == 10 and day.count("-") == 2  # YYYY-MM-DD only
-    assert "415" not in pairs[1]["question"] and "sbx-dana" not in pairs[1]["question"]
+    assert len(day) == 10
+    assert day.count("-") == 2  # YYYY-MM-DD only
+    assert "415" not in pairs[1]["question"]
+    assert "sbx-dana" not in pairs[1]["question"]
     assert pairs[1]["answer"] == ""
     assert set(pairs[0]) == {"question", "answer", "date"}
 
@@ -71,4 +75,5 @@ def test_corpus_survives_deletion_without_identifiers(tmp_path) -> None:
     with sqlite3.connect(s.path) as con:
         dump = "\n".join(con.iterdump())
     assert dump.count(EMAIL) == 1  # the deletions record only
-    assert NICK not in dump and "203.0.113.9" not in dump
+    assert NICK not in dump
+    assert "203.0.113.9" not in dump

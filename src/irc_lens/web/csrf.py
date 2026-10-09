@@ -30,7 +30,6 @@ a guest cookie keep the original lenient behaviour (Origin-absent allowed).
 from __future__ import annotations
 
 import base64
-import binascii
 import hashlib
 import hmac
 import json
@@ -114,7 +113,7 @@ def verify_cookie_value(
         data = json.loads(_unb64(payload))
         guest_id = data["g"]
         exp = data["exp"]
-    except (ValueError, KeyError, TypeError, binascii.Error, UnicodeError):
+    except (ValueError, KeyError, TypeError):  # incl. binascii.Error / UnicodeError
         return None
     if not isinstance(guest_id, str) or not guest_id or not isinstance(exp, int):
         return None

@@ -61,7 +61,7 @@ def anonymized_pairs(store: Any, email: str) -> list[dict]:
     identifier removed (see the module docstring)."""
     nicks = {nick for _e, nick, _ip in store.get_guest(email)}
     ips = {ip for _e, _n, ip in store.get_guest(email) if ip}
-    tokens = set(_identifier_tokens(email, ""))
+    tokens = set(_identifier_tokens(email))
     replacements = {email: "[email]", **dict.fromkeys(ips, "[ip]")}
     for nick in nicks:
         replacements[nick] = "[nick]"

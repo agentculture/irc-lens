@@ -80,12 +80,14 @@ def test_ban_unban_email_and_ip_and_list(store, capsys):
     s = str(store.path)
     assert run("ban", EMAIL, "--reason", "spam", "--store", s) == 0
     assert run("ban", "198.51.100.1", "--store", s) == 0
-    assert store.is_banned(EMAIL, None) and store.is_banned(None, "198.51.100.1")
+    assert store.is_banned(EMAIL, None)
+    assert store.is_banned(None, "198.51.100.1")
     capsys.readouterr()
     assert run("list", "--store", s) == 0
     out = capsys.readouterr().out
     assert f"{NICK}\t{EMAIL}\t{IP} [banned]" in out
-    assert "198.51.100.1" in out and "spam" in out
+    assert "198.51.100.1" in out
+    assert "spam" in out
     assert run("unban", EMAIL, "--store", s) == 0
     assert run("unban", "198.51.100.1", "--store", s) == 0
     assert not store.is_banned(EMAIL, None)
@@ -113,7 +115,8 @@ def test_flags_lists_store_and_log_and_ban_by_flag(store, tmp_path, capsys):
     assert run("flags", "--store", s, "--flag-log", fl) == 0
     out = capsys.readouterr().out
     assert "s1\tstore\tother@example.net" in out
-    assert f"j1\tflag-log\t{NICK}" in out and "j3\tflag-log\tsbx-ghost" in out
+    assert f"j1\tflag-log\t{NICK}" in out
+    assert "j3\tflag-log\tsbx-ghost" in out
     # ids are stable across runs
     assert run("flags", "--store", s, "--flag-log", fl) == 0
     assert capsys.readouterr().out == out
@@ -295,7 +298,8 @@ async def test_banned_email_and_ip_refused_at_entry_and_guest_tier(env):
         "/entry/guest/start",
         data={"email": EMAIL, "nickname": "gus", "consent": "on"},
     )
-    assert resp.status == 200 and env.mail.sent == []
+    assert resp.status == 200
+    assert env.mail.sent == []
     # an existing cookie no longer yields the guest tier
     resp = await env.client.get("/residents", headers=env.cookie())
     assert resp.status == 401
@@ -307,7 +311,8 @@ async def test_banned_email_and_ip_refused_at_entry_and_guest_tier(env):
         data={"email": "new@example.net", "nickname": "newbie", "consent": "on"},
         headers={"CF-Connecting-IP": "192.0.2.77"},
     )
-    assert resp.status == 200 and env.mail.sent == []
+    assert resp.status == 200
+    assert env.mail.sent == []
 
 
 # -- deletion ------------------------------------------------------------------
@@ -334,7 +339,8 @@ async def test_deletion_flow_removes_everything_but_the_record(env):
         "/delete/request", data={"email": "nobody@example.org"}
     )
     body_b = (await page_b.text()).replace("nobody@example.org", "<E>")
-    assert page_a.status == page_b.status == 200 and body_a == body_b
+    assert page_a.status == page_b.status == 200
+    assert body_a == body_b
     assert len(env.mail.sent) == 1  # only the real guest got a (fresh) token
     code = env.token()
 
@@ -342,13 +348,15 @@ async def test_deletion_flow_removes_everything_but_the_record(env):
     bad = await env.client.post(
         "/delete/confirm", data={"email": EMAIL, "code": "nope"}
     )
-    assert bad.status == 401 and s.get_guest(EMAIL)
+    assert bad.status == 401
+    assert s.get_guest(EMAIL)
     # an entry-purpose token cannot delete
     entry_tok = s.issue_token(EMAIL, purpose="guest")
     bad = await env.client.post(
         "/delete/confirm", data={"email": EMAIL, "code": entry_tok}
     )
-    assert bad.status == 401 and s.get_guest(EMAIL)
+    assert bad.status == 401
+    assert s.get_guest(EMAIL)
 
     ok = await env.client.post(
         "/delete/confirm", data={"email": EMAIL, "code": code}, headers=env.cookie()
@@ -359,7 +367,8 @@ async def test_deletion_flow_removes_everything_but_the_record(env):
     dump = _all_text(s.path)
     assert NICK not in dump
     assert dump.count(EMAIL) == 1  # only the deletion record
-    assert s.get_guest(EMAIL) == [] and s.get_consents(EMAIL) == []
+    assert s.get_guest(EMAIL) == []
+    assert s.get_consents(EMAIL) == []
     assert s.list_flags(EMAIL) == []
     with sqlite3.connect(s.path) as con:
         assert con.execute("SELECT email FROM deletions").fetchall() == [(EMAIL,)]
@@ -438,7 +447,8 @@ async def test_deletion_purges_flag_log_and_keeps_anonymized_corpus(env, tmp_pat
     tok = env.store.issue_token(EMAIL, purpose="delete")
     r = await env.client.post("/delete/confirm", data={"email": EMAIL, "code": tok})
     assert r.status == 200
-    assert NICK not in flags.read_text() and "sbx-kim" in flags.read_text()
+    assert NICK not in flags.read_text()
+    assert "sbx-kim" in flags.read_text()
     assert env.store.list_rooms() == []
     assert [(c["question"], c["answer"]) for c in env.store.list_corpus()] == [
         ("what is culture?", "an IRC mesh")

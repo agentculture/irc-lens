@@ -95,7 +95,8 @@ async def test_read_guest_cookie(client: TestClient) -> None:
 def test_secret_from_env_not_hardcoded() -> None:
     assert csrf.load_secret({csrf.SECRET_ENV: "s3"}) == b"s3"
     a, b = csrf.load_secret({}), csrf.load_secret({})
-    assert a != b and len(a) >= 32
+    assert a != b
+    assert len(a) >= 32
 
 
 # --- criterion 2 / o9: cross-origin POST with valid cookie ---------------

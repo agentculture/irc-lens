@@ -42,7 +42,9 @@ def test_body_does_not_claim_a_link_or_reveal_approval():
     _, body = mail.render_token_email("T")
     low = body.lower()
     assert "http" not in low
-    assert "approved" not in low and "pending" not in low and "queued" not in low
+    assert "approved" not in low
+    assert "pending" not in low
+    assert "queued" not in low
 
 
 def test_o5_same_mail_for_approved_looking_and_unknown_address():
@@ -75,8 +77,9 @@ def test_none_provider_fails_clearly():
 
 
 def test_unknown_provider_rejected():
+    cfg = _cfg(guest_mail_provider="carrier-pigeon")
     with pytest.raises(AfiError):
-        mail.make_adapter(_cfg(guest_mail_provider="carrier-pigeon"))
+        mail.make_adapter(cfg)
 
 
 def test_make_adapter_resend():
@@ -128,8 +131,9 @@ def test_resend_send_reads_key_from_env_and_posts(monkeypatch):
 
 def test_resend_missing_key_names_env_not_value(monkeypatch):
     monkeypatch.delenv("NOPE_KEY", raising=False)
+    adapter = mail.ResendAdapter("f@x.y", "NOPE_KEY")
     with pytest.raises(AfiError) as ei:
-        mail.ResendAdapter("f@x.y", "NOPE_KEY").send("t@x.y", "s", "b")
+        adapter.send("t@x.y", "s", "b")
     assert "NOPE_KEY" in ei.value.message
 
 
@@ -145,11 +149,13 @@ def test_resend_http_error_does_not_leak_token_or_key(monkeypatch):
         )
 
     monkeypatch.setattr(urllib.request, "urlopen", fake)
+    adapter = mail.ResendAdapter("f@x.y", "MY_KEY")
     with pytest.raises(AfiError) as ei:
-        mail.ResendAdapter("f@x.y", "MY_KEY").send("t@x.y", "s", "TOKEN-xyz")
+        adapter.send("t@x.y", "s", "TOKEN-xyz")
     text = ei.value.message + ei.value.remediation
     assert "403" in text
-    assert "TOKEN-xyz" not in text and "key-secret" not in text
+    assert "TOKEN-xyz" not in text
+    assert "key-secret" not in text
 
 
 def test_resend_network_error_wrapped(monkeypatch):
@@ -161,13 +167,15 @@ def test_resend_network_error_wrapped(monkeypatch):
         raise urllib.error.URLError("down")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake)
+    adapter = mail.ResendAdapter("f@x.y", "MY_KEY")
     with pytest.raises(AfiError):
-        mail.ResendAdapter("f@x.y", "MY_KEY").send("t@x.y", "s", "b")
+        adapter.send("t@x.y", "s", "b")
 
 
 def test_mail_says_code_not_token_and_states_real_expiry():
     subject, body = mail.render_token_email("tok-123")
-    assert "code" in subject.lower() and "token" not in subject.lower()
+    assert "code" in subject.lower()
+    assert "token" not in subject.lower()
     assert "token" not in body.lower()
     assert "after a while" not in body
     assert "15 minutes" in body
@@ -177,7 +185,8 @@ def test_mail_expiry_follows_ttl_argument_and_stays_address_independent():
     _, body = mail.render_token_email("T", ttl_s=1800)
     assert "30 minutes" in body
     _, body1 = mail.render_token_email("T", ttl_s=60)
-    assert "1 minute" in body1 and "1 minutes" not in body1
+    assert "1 minute" in body1
+    assert "1 minutes" not in body1
 
 
 def test_mail_default_ttl_matches_store_default():

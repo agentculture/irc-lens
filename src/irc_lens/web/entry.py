@@ -152,13 +152,12 @@ class TurnstileVerifier:
             return False
         data = {"secret": self._secret, "response": token, "remoteip": ip}
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    self._url,
-                    data=data,
-                    timeout=aiohttp.ClientTimeout(total=self._timeout),
-                ) as resp:
-                    result = await resp.json(content_type=None)
+            async with aiohttp.ClientSession() as session, session.post(
+                self._url,
+                data=data,
+                timeout=aiohttp.ClientTimeout(total=self._timeout),
+            ) as resp:
+                result = await resp.json(content_type=None)
         except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as exc:
             logger.warning("turnstile verify failed: %s", type(exc).__name__)
             return False  # fail closed

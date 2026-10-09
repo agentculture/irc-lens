@@ -282,7 +282,7 @@ def test_exempt_lists_contain_exactly_static_healthz_media() -> None:
 
     expected = {"/static/", "/healthz", "/media/"}
     dev_exempt = _exempt_paths_in(app_module._dev_identity_middleware)
-    cf_exempt = _exempt_paths_in(auth_module.build_cloudflare_middleware)
+    cf_exempt = _exempt_paths_in(auth_module._is_public_path)
 
     assert dev_exempt == expected, f"dev exempt set drifted: {dev_exempt}"
     assert cf_exempt == expected, f"CF exempt set drifted: {cf_exempt}"
