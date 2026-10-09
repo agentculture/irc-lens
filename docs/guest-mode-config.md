@@ -63,3 +63,45 @@ and deletion routes) passes `csrf_middleware` first: a mismatching `Origin`
 is 403 (the existing same-host floor); a request carrying a guest cookie must
 additionally prove same-origin (matching `Origin`, or `Sec-Fetch-Site:
 same-origin`/`none`), otherwise 403 before any handler or IRC send.
+
+## Entry card
+
+With guest mode on, anonymous visitors get the entry card
+(`src/irc_lens/web/entry.py`, `templates/entry.html.j2`, `static/entry.css`):
+
+| Route | Step |
+| --- | --- |
+| `GET /entry` | Email + Continue (`get_entry`, also served on `/` for anonymous visitors) |
+| `POST /entry/email` | The password window — identical for every address |
+| `POST /entry/signin` | Approved email + correct password → 303 `/login`; otherwise `Email or password is wrong` |
+| `POST /entry/guest` | Nickname (`sbx-` prefix) + Terms/Privacy consent |
+| `POST /entry/guest/start` | Emails a single-use, 15-minute token (one fixed template) |
+| `POST /entry/verify` | Token check → guest + consent recorded, `lens_guest` cookie, 303 `/` |
+
+All six answer 404 while `guest_mode.enabled` is false. Sign-in failures are
+indistinguishable: an unknown email still pays one (dummy) argon2id verify, and
+every sign-in response is padded to a fixed floor (0.5 s). Sign-in and token
+verification are limited per email and per IP by
+`rate_limits.password_attempts_per_15min`; token requests by
+`rate_limits.entry_per_min` — over the limit the same body returns as 429. The
+visitor IP is `CF-Connecting-IP` (cloudflared) when present.
+
+Guest nicks are `sbx-<nickname>`: lowercased, reduced to `[a-z0-9_-]`, 2–16
+characters, unique among recorded guests, never derived from the email, and
+`ask` is reserved for the sandbox agent.
+
+Consent is recorded against `irc_lens.legal.current_legal_versions(cfg)` (the
+`legal_version_url` JSON, cached in-process for 5 minutes; a failed fetch with
+nothing cached blocks entry rather than recording an unknown version).
+
+### Bot protection (Cloudflare Turnstile)
+
+Set both **`IRC_LENS_TURNSTILE_SITE_KEY`** and **`IRC_LENS_TURNSTILE_SECRET`**
+in the environment to put a Turnstile widget on the password and guest steps
+(verified server-side on sign-in and token request; a failed check is the
+generic error). Unset, the check is a no-op. Only responses that render the
+widget get a CSP widened to `https://challenges.cloudflare.com`
+(`script-src`, `frame-src`, `connect-src`); every other page keeps
+`script-src 'self'`. Entry pages send `Referrer-Policy: same-origin` (not
+`no-referrer`) so browsers put the real `Origin` on their same-origin form
+POSTs instead of `null`, which the CSRF floor would refuse.
