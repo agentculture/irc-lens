@@ -16,7 +16,7 @@ from aiohttp import web
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
-from irc_lens.web import csrf, entry, routes
+from irc_lens.web import bans, csrf, deletion, entry, routes
 from irc_lens.web.auth import build_cloudflare_middleware
 from irc_lens.web.front import mount_agent_front
 from irc_lens.web.identity import TIER_APPROVED, Identity
@@ -170,6 +170,7 @@ def make_app(
     config: LensConfig,
     session_factory: SessionFactory,
     sandbox_session_factory: SessionFactory | None = None,
+    ban_sweep_interval_s: float = bans.DEFAULT_SWEEP_INTERVAL_S,
 ) -> web.Application:
     if config.auth_mode == "dev":
         middleware = _dev_identity_middleware(config)
@@ -242,6 +243,8 @@ def make_app(
     # Guest-mode entry card (/entry, /entry/*): 404 while guest mode is off.
     entry.install(app, config)
     if config.guest_enabled:
+        deletion.install(app)
+        bans.install(app, ban_sweep_interval_s)
         # Guest-mode off: these paths do not exist (404), exactly as before.
         app.router.add_post("/sandbox/enter", routes.post_sandbox_enter)
         app.router.add_post("/sandbox/leave", routes.post_sandbox_leave)

@@ -75,6 +75,9 @@ class SessionRegistry:
     def has(self, principal: str, backend: str) -> bool:
         return (principal, backend) in self._sessions
 
+    def keys(self) -> list[tuple[str, str]]:
+        return list(self._sessions)
+
     def values(self) -> list[Any]:
         return list(self._sessions.values())
 

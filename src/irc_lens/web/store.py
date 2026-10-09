@@ -224,8 +224,8 @@ def _verify_sniff(data: bytes, ext: str) -> None:
             "SVG uploads are not allowed",
             "SVG is a scriptable document format and is excluded from "
             "the upload allowlist (see docs/superpowers/specs/"
-            "2026-07-02-media-support-design.md, \"Why SVG is "
-            "excluded\"); convert to a raster format such as PNG.",
+            '2026-07-02-media-support-design.md, "Why SVG is '
+            'excluded"); convert to a raster format such as PNG.',
         )
     allowed = _ALLOWED_SNIFF.get(ext)
     if not allowed or sniffed not in allowed:
@@ -236,7 +236,9 @@ def _verify_sniff(data: bytes, ext: str) -> None:
         )
 
 
-def _accumulate_sniff(sniff_buf: bytearray, chunk: bytes, sniff_checked: bool, ext: str) -> bool:
+def _accumulate_sniff(
+    sniff_buf: bytearray, chunk: bytes, sniff_checked: bool, ext: str
+) -> bool:
     """Feed `chunk` into `sniff_buf` up to `_SNIFF_BYTES` and, once
     enough bytes have accumulated, verify and return `True`.
 
@@ -360,7 +362,9 @@ class MediaStore:
             raise
 
         await self._finalize(tmp_path, final_path)
-        return StoredMedia(token=token, ext=ext, kind=_EXT_KIND[ext], path=final_path, size=size)
+        return StoredMedia(
+            token=token, ext=ext, kind=_EXT_KIND[ext], path=final_path, size=size
+        )
 
     @staticmethod
     def _validate_extension(filename: str) -> str:
@@ -415,6 +419,26 @@ class MediaStore:
         both real filesystem work, offloaded off the event loop."""
         await asyncio.to_thread(tmp_path.replace, final_path)
         await asyncio.to_thread(self._evict, final_path)
+
+    def delete_principal(self, principal: str) -> int:
+        """Delete every blob uploaded under *principal*; returns the count.
+
+        Uploads are filed under a directory named after the sanitized
+        principal (for a guest, their email), so they are attributable.
+        """
+        principal_dir = self.root / _sanitize_principal(principal)
+        if not principal_dir.is_dir():
+            return 0
+        count = 0
+        for path in principal_dir.iterdir():
+            if path.is_file():
+                path.unlink()
+                count += 1
+        try:
+            principal_dir.rmdir()
+        except OSError:
+            pass
+        return count
 
     def resolve(self, token_and_ext: str) -> Path | None:
         """Return the path for a ``<token>.<ext>`` capability string, or
