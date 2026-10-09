@@ -12,6 +12,7 @@ Opt-in like the rest of the playwright suite (``-m playwright``).
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from urllib.parse import unquote
 
 import pytest
 import pytest_asyncio
@@ -136,5 +137,31 @@ async def test_no_csp_console_errors_and_enter_switches_room(
             await page.wait_for_timeout(300)
             csp = [t for t in problems if "content security policy" in t.lower()]
             assert not csp, csp
+        finally:
+            await browser.close()
+
+
+async def test_room_rows_still_work_after_a_live_roster_swap(
+    seeded_lens_client: TestClient,
+) -> None:
+    """The roster SSE event replaces the sidebar's HTML; the new rows must
+    still be wired to htmx (browser pass: after any live roster update the
+    rows were dead until a reload)."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        try:
+            page = await browser.new_page()
+            await page.goto(_url(seeded_lens_client))
+            for room in ("#ops", "#general", "#ops"):
+                row = page.locator(f'[data-testid="sidebar-channel"][data-channel="{room}"]')
+                await expect(row).to_be_visible(timeout=_T)
+                async with page.expect_request(
+                    lambda r: r.url.endswith("/input") and r.method == "POST", timeout=_T
+                ) as req_info:
+                    await row.click()
+                assert room in unquote((await req_info.value).post_data or "")
+                await expect(
+                    page.locator(f'[data-testid="sidebar-channel"][data-channel="{room}"]')
+                ).to_have_attribute("aria-current", "true", timeout=_T)
         finally:
             await browser.close()

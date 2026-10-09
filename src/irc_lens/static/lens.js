@@ -48,7 +48,10 @@
   }
 
   function swap(target, html) {
-    if (target) target.innerHTML = html;
+    if (!target) return;
+    target.innerHTML = html;
+    // Wire hx-* attributes in the new HTML (room rows) or they go dead.
+    if (window.htmx) window.htmx.process(target);
   }
 
   const src = new EventSource("/events");
