@@ -9,6 +9,7 @@ a ``/healthz`` endpoint.
 
 from __future__ import annotations
 
+import logging
 from importlib.resources import files
 from pathlib import Path
 
@@ -204,9 +205,17 @@ def make_app(
         factory=session_factory,
         sandbox_factory=sandbox_factory,
         room_prefix=config.guest_room_prefix,
+        guest_store=lambda: app.get("guest_store"),
     )
     app["registry"] = registry
     app["config"] = config
+    if config.guest_enabled and not (
+        config.guest_sandbox_history_db and config.guest_sandbox_flag_log
+    ):
+        logging.getLogger(__name__).warning(
+            "guest_mode on but guest_mode.sandbox.history_db/flag_log unset: guest "
+            "deletion will not erase the chat itself (Privacy Policy deletion right)"
+        )
     if config.guest_enabled:
         from irc_lens.guest_store import GuestStore
 

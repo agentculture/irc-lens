@@ -241,11 +241,12 @@ def _state(request: web.Request) -> EntryState:
 # ---------------------------------------------------------------------------
 
 
-_NICK_DROP = re.compile(r"[^a-z0-9_-]")
+# No "-": approved users' sandbox nicks are sbx-op-<x> (d7).
+_NICK_DROP = re.compile(r"[^a-z0-9_]")
 
 
 def sanitize_nickname(raw: str) -> str | None:
-    """Lowercase, keep ``[a-z0-9_-]``; None unless 2..16 chars remain."""
+    """Lowercase, keep ``[a-z0-9_]``; None unless 2..16 chars remain."""
     nick = _NICK_DROP.sub("", (raw or "").lower())
     if not NICK_MIN <= len(nick) <= NICK_MAX:
         return None

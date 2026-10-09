@@ -29,6 +29,8 @@ from argon2.exceptions import InvalidHashError, VerificationError
 DEFAULT_TOKEN_TTL = 900
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS rooms (
+    email TEXT PRIMARY KEY, room_id TEXT NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS guests (
     email TEXT NOT NULL, nick TEXT NOT NULL, ip TEXT NOT NULL,
     created INTEGER NOT NULL);
@@ -99,6 +101,30 @@ class GuestStore:
         return self._all(
             "SELECT email, nick, ip FROM guests WHERE email=? ORDER BY rowid", (email,)
         )
+
+    def room_id(self, email: str) -> str:
+        """The guest's private room id (``#g-<id>``), created on first use.
+
+        Random, not derived from the nickname: once a guest is deleted the
+        id is forgotten, so nobody re-using the nickname inherits the room
+        or its history (d7).
+        """
+        with closing(self._connect()) as con, con:
+            row = con.execute("SELECT room_id FROM rooms WHERE email=?", (email,)).fetchone()
+            if row:
+                return row[0]
+            rid = secrets.token_hex(5)
+            con.execute("INSERT INTO rooms (email, room_id) VALUES (?,?)", (email, rid))
+            return rid
+
+    def peek_room(self, email: str) -> str | None:
+        """The guest's room id if one was ever assigned (no side effect)."""
+        rows = self._all("SELECT room_id FROM rooms WHERE email=?", (email,))
+        return rows[0][0] if rows else None
+
+    def list_rooms(self) -> list[tuple[str, str]]:
+        """``(email, room_id)`` for every guest that still has a room."""
+        return self._all("SELECT email, room_id FROM rooms ORDER BY rowid")
 
     def list_guests(self) -> list[tuple[str, str, str]]:
         return self._all("SELECT email, nick, ip FROM guests ORDER BY rowid")
@@ -240,6 +266,7 @@ class GuestStore:
             con.execute("DELETE FROM consents WHERE email=?", (email,))
             con.execute("DELETE FROM tokens WHERE email=?", (email,))
             con.execute("DELETE FROM flags WHERE email=?", (email,))
+            con.execute("DELETE FROM rooms WHERE email=?", (email,))
             con.execute("DELETE FROM attempts WHERE key = ?", (f"e:{email}",))
             con.execute(
                 "INSERT INTO deletions (email, ts, removed) VALUES (?,?,?)",

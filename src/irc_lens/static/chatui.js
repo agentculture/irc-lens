@@ -19,6 +19,8 @@
     const title = $("room-name");
     if (head) head.textContent = room;
     if (title) title.textContent = room || "No room";
+    const hint = $("empty-hint");
+    if (hint) hint.hidden = Boolean(room);
   }
   if (sidebar) new MutationObserver(syncRoom).observe(sidebar, { childList: true });
 

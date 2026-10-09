@@ -50,6 +50,13 @@ class LensConfig:
     # Each guest gets a private room <prefix><nick> that the sandbox agent
     # follows; guests never see each other (d6).
     guest_room_prefix: str = "#g-"
+    # Where the sandbox IRCd keeps channel history and sbx-ask its flag log;
+    # guest deletion purges the guest's room/lines there (d7). Required for
+    # the Privacy Policy's deletion right to cover the chat itself.
+    guest_sandbox_history_db: str | None = None
+    guest_sandbox_flag_log: str | None = None
+    # Close a sandbox session after this long with no open event stream.
+    guest_idle_close_s: int = 600
     guest_store_path: str = ""
     guest_legal_version_url: str = "https://culture.dev/legal/version.json"
     guest_mail_provider: str = "none"
@@ -418,9 +425,19 @@ def _validate_culture_section(raw: dict) -> tuple[str | None, str | None]:
 
 
 _GUEST_KEYS = frozenset(
-    {"enabled", "sandbox", "store_path", "legal_version_url", "mail", "rate_limits"}
+    {
+        "enabled",
+        "sandbox",
+        "store_path",
+        "legal_version_url",
+        "mail",
+        "rate_limits",
+        "idle_close_s",
+    }
 )
-_GUEST_SANDBOX_KEYS = frozenset({"name", "host", "port", "room_prefix"})
+_GUEST_SANDBOX_KEYS = frozenset(
+    {"name", "host", "port", "room_prefix", "history_db", "flag_log"}
+)
 _GUEST_MAIL_KEYS = frozenset({"provider", "from", "api_key_env"})
 _GUEST_RATE_KEYS = frozenset(
     {"entry_per_min", "messages_per_min", "password_attempts_per_15min"}
@@ -454,6 +471,19 @@ def _coerce_str(value: object, where: str) -> str:
             f"{where} must be a string, got {value!r}", f"set `{where}:` to a string"
         )
     return value
+
+
+def _positive_int(value: object, where: str) -> int:
+    n = _coerce_int(value, where)
+    if n <= 0:
+        raise _err(f"{where} must be > 0, got {n}", f"set `{where}:` to a positive number")
+    return n
+
+
+def _optional_path(value: object, where: str) -> str | None:
+    if value is None:
+        return None
+    return str(Path(_coerce_str(value, where)).expanduser())
 
 
 def _room_prefix(value: object) -> str:
@@ -507,6 +537,15 @@ def _validate_guest_mode_section(raw: dict) -> dict:
             sandbox.get("port", 6668), "guest_mode.sandbox.port"
         ),
         "guest_room_prefix": _room_prefix(sandbox.get("room_prefix", "#g-")),
+        "guest_sandbox_history_db": _optional_path(
+            sandbox.get("history_db"), "guest_mode.sandbox.history_db"
+        ),
+        "guest_sandbox_flag_log": _optional_path(
+            sandbox.get("flag_log"), "guest_mode.sandbox.flag_log"
+        ),
+        "guest_idle_close_s": _positive_int(
+            guest.get("idle_close_s", 600), "guest_mode.idle_close_s"
+        ),
         "guest_store_path": _coerce_str(
             guest.get("store_path", _default_guest_store_path()),
             "guest_mode.store_path",

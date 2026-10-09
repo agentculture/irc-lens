@@ -141,7 +141,6 @@ async def test_route_approved_gets_snapshot_and_agent(
     guest_app: TestClient, jwks: FakeJWKS
 ) -> None:
     metrics_mod.get_metrics().entry()
-    metrics_mod.get_presence().seen("sbx-ask")
     token = jwks.mint(aud="aud-test", claims={"email": _APPROVED, "sub": "s"})
     resp = await guest_app.get(
         "/owner/metrics", headers={"Cf-Access-Jwt-Assertion": token}
@@ -156,7 +155,9 @@ async def test_route_approved_gets_snapshot_and_agent(
         "failed_sign_ins",
         "agent_errors",
     }
-    assert body["agent"]["state"] == "online"
+    # No sandbox session open: nothing to measure room membership against
+    # (online/offline: test_chat_ui::test_owner_metrics_agent_state_*).
+    assert body["agent"]["state"] == "unknown"
     assert body["agent"]["nick"] == "sbx-ask"
 
 

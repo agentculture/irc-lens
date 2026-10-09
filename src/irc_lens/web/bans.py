@@ -11,6 +11,7 @@ Requests are also refused individually (``auth._guest_identity`` checks
 from __future__ import annotations
 
 import asyncio
+import time
 import contextlib
 import logging
 
@@ -52,6 +53,14 @@ async def _loop(app: web.Application, interval: float) -> None:
             await sweep_once(app["registry"], app["guest_store"])
         except Exception:  # noqa: BLE001 -- the sweeper must never die
             logger.exception("ban sweep failed")
+        try:
+            # Same cadence: close sandbox sessions nobody has had open for
+            # guest_idle_close_s (closed tabs send no goodbye) (d7).
+            await app["registry"].reap_idle(
+                now=time.monotonic(), idle_s=app["config"].guest_idle_close_s
+            )
+        except Exception:  # noqa: BLE001 -- the sweeper must never die
+            logger.exception("idle session sweep failed")
 
 
 def install(app: web.Application, interval: float = DEFAULT_SWEEP_INTERVAL_S) -> None:

@@ -15,7 +15,12 @@ Every route is anonymous-allowed and 404 while guest mode is off.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
+import sqlite3
+from contextlib import closing
+from pathlib import Path
 
 from aiohttp import web
 
@@ -40,6 +45,47 @@ from irc_lens.web.sessions import BACKEND_SANDBOX, GUEST_PRINCIPAL_PREFIX
 logger = logging.getLogger(__name__)
 
 TOKEN_PURPOSE = "delete"
+
+
+def purge_sandbox_traces(cfg, *, room: str | None, nicks: set[str]) -> None:
+    """Erase a deleted guest's chat outside the guest store (d7).
+
+    * The sandbox IRCd's channel history (SQLite): every line in the
+      guest's private room, plus any line the guest's nick wrote elsewhere.
+      The IRCd's in-memory replay buffer keeps the room until it restarts,
+      but the room id is forgotten, so neither the guest nor the owner's
+      Guest view can reach it again.
+    * sbx-ask's flag log: lines naming the guest's nick.
+
+    Unset paths are skipped with a warning (see guest-mode-config.md: both
+    are required for the deletion right to cover the chat).
+    """
+    if cfg.guest_sandbox_history_db:
+        path = Path(cfg.guest_sandbox_history_db)
+        if path.exists():
+            with closing(sqlite3.connect(path, timeout=10)) as con, con:
+                if room:
+                    con.execute("DELETE FROM history WHERE channel = ?", (room,))
+                for nick in nicks:
+                    con.execute("DELETE FROM history WHERE nick = ?", (nick,))
+    else:
+        logger.warning("guest deletion: guest_mode.sandbox.history_db unset; chat history kept")
+    if cfg.guest_sandbox_flag_log:
+        path = Path(cfg.guest_sandbox_flag_log)
+        if path.exists():
+            kept = []
+            for line in path.read_text().splitlines(keepends=True):
+                try:
+                    nick = json.loads(line).get("nick")
+                except ValueError:
+                    nick = None
+                if nick not in nicks:
+                    kept.append(line)
+            tmp = path.with_suffix(path.suffix + ".tmp")
+            tmp.write_text("".join(kept))
+            os.replace(tmp, path)
+    else:
+        logger.warning("guest deletion: guest_mode.sandbox.flag_log unset; flag lines kept")
 
 
 def install(app: web.Application) -> None:
@@ -124,6 +170,14 @@ async def post_confirm(request: web.Request) -> web.Response:
     media = request.app.get("media_store")
     if media is not None:
         await asyncio.to_thread(media.delete_principal, email)
+    room_id = store.peek_room(email)
+    nicks = {nick for _e, nick, _ip in store.get_guest(email)}
+    await asyncio.to_thread(
+        purge_sandbox_traces,
+        cfg,
+        room=f"{cfg.guest_room_prefix}{room_id}" if room_id else None,
+        nicks=nicks,
+    )
     await asyncio.to_thread(store.delete_guest_inputs, email)
     resp = _page("done")
     resp.del_cookie(csrf.GUEST_COOKIE_NAME, path="/")

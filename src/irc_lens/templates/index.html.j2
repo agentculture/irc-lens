@@ -55,6 +55,8 @@
       <section class="lens-chat">
         <div class="lens-room-head" data-testid="room-head">
           <h1 class="lens-room-name" id="room-name">{{ session.current_channel or "No room" }}</h1>
+          {# h58: an empty state names its next step. #}
+          <span class="lens-empty-hint" id="empty-hint" data-testid="empty-hint"{% if session.current_channel %} hidden{% endif %}>Type /join #room</span>
           {% if presence is not none and presence is defined %}
             {% include "_presence.html.j2" %}
           {% endif %}

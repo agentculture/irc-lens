@@ -570,7 +570,7 @@ async def test_guest_start_bot_check(h):
     [
         ("Maya", "maya"),
         ("ma ya!", "maya"),
-        ("dash-and_under", "dash-and_under"),
+        ("dash-and_under", "dashand_under"),
         ("a", None),  # too short
         ("x" * 17, None),  # too long
         ("!!", None),  # sanitizes to empty
@@ -731,3 +731,12 @@ async def test_turnstile_verifier_posts_to_siteverify(monkeypatch):
         assert len(calls) == 2
     finally:
         await server.close()
+
+
+def test_guest_nicknames_cannot_contain_a_dash() -> None:
+    """d7: approved users' sandbox nicks are sbx-op-<x>; a dash-free guest
+    nickname can never collide with one (or impersonate it)."""
+    from irc_lens.web.entry import sanitize_nickname
+
+    assert sanitize_nickname("op-ori") == "opori"
+    assert sanitize_nickname("a_b") == "a_b"

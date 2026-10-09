@@ -335,3 +335,19 @@ def test_password_hash_survives_restart_and_is_salted(tmp_path: Path) -> None:
         con.close()
     assert len(set(hashes)) == 2, "per-user salt: equal passwords differ"
     assert GuestStore(db).check_password("a@example.com", "same")
+
+
+def test_room_id_is_random_stable_and_forgotten_on_deletion(tmp_path) -> None:
+    """d7: rooms are #g-<random id> per guest, not derived from the nickname,
+    so nickname reuse never inherits a deleted guest's history."""
+    s = GuestStore(tmp_path / "g.db")
+    a = s.room_id("a@example.org")
+    assert a == s.room_id("a@example.org")
+    assert a != s.room_id("b@example.org")
+    assert len(a) >= 8 and a.isalnum()
+    assert sorted(s.list_rooms()) == sorted(
+        [("a@example.org", a), ("b@example.org", s.room_id("b@example.org"))]
+    )
+    s.delete_guest_inputs("a@example.org")
+    assert [e for e, _ in s.list_rooms()] == ["b@example.org"]
+    assert s.room_id("a@example.org") != a

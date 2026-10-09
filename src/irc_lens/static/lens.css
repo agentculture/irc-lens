@@ -479,3 +479,8 @@ body[data-conn="down"] .lens-conn { color: var(--lens-down); }
 @media (prefers-reduced-motion: reduce) {
   .lens-sidebar { transition: none; }
 }
+
+.lens-empty-hint {
+  color: var(--lens-muted);
+  font-size: 0.85rem;
+}

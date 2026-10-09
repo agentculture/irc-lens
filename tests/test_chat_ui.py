@@ -216,7 +216,7 @@ async def test_sandbox_preview_has_amber_rule_banner_and_back(env: Env) -> None:
     assert r.status == 200 and r.headers["HX-Refresh"] == "true"
     html = await (await env.client.get("/", headers=h)).text()
     assert 'data-testid="tier-badge">Sandbox preview<' in html
-    assert 'data-testid="identity">sbx-alice<' in html
+    assert 'data-testid="identity">sbx-op-alice<' in html
     assert "lens-sandbox" in html
     assert 'data-testid="sandbox-banner"' in html
     assert "<strong>Guest view</strong>" in html
@@ -251,11 +251,12 @@ async def test_agent_state_follows_room_membership(env: Env) -> None:
     h = env.guest_headers()
     html = await (await env.client.get("/", headers=h)).text()
     assert 'data-testid="agent-state" data-state="offline"' in html
-    env.sandbox.channel_members["#g-gus"].add("sbx-ask")  # the agent follows in
+    room = "#g-" + env.store.room_id("gus@example.org")
+    env.sandbox.channel_members[room].add("sbx-ask")  # the agent follows in
     frag = await (await env.client.get("/presence", headers=h)).text()
     assert 'data-state="online"' in frag and "agent online" in frag
     assert 'hx-get="/presence"' in frag
-    env.sandbox.channel_members["#g-gus"].discard("sbx-ask")  # stopped, no QUIT
+    env.sandbox.channel_members[room].discard("sbx-ask")  # stopped, no QUIT
     frag = await (await env.client.get("/presence", headers=h)).text()
     assert 'data-state="offline"' in frag and "agent offline" in frag
 
@@ -447,3 +448,21 @@ async def test_rate_limited_message_never_reaches_irc(env: Env, limit3) -> None:
     before = len(env.sandbox.received)
     await env.client.post("/input", json={"text": "hi"}, headers=h)
     assert len(env.sandbox.received) == before
+
+
+async def test_mesh_empty_state_has_a_next_step(env: Env) -> None:
+    """h58: an approved user on the real mesh with no room gets a hint."""
+    html = await (await env.client.get("/", headers=env.approved_headers())).text()
+    assert 'data-testid="empty-hint"' in html and "/join" in html
+
+
+async def test_owner_metrics_agent_state_uses_room_membership(env: Env) -> None:
+    env.add_guest()
+    await env.client.get("/", headers=env.guest_headers())
+    room = "#g-" + env.store.room_id("gus@example.org")
+    body = await (await env.client.get("/owner/metrics", headers=env.approved_headers())).json()
+    assert body["agent"]["state"] == "offline"
+    env.sandbox.channel_members[room].add("sbx-ask")
+    await env.client.get("/presence", headers=env.guest_headers())  # a poll re-reads WHO
+    body = await (await env.client.get("/owner/metrics", headers=env.approved_headers())).json()
+    assert body["agent"]["state"] == "online"

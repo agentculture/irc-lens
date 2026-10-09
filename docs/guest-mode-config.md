@@ -12,7 +12,10 @@ guest_mode:
     name: sbx
     host: 127.0.0.1
     port: 6668
-    room_prefix: "#g-"      # each guest gets a private room #g-<nick>; must match sbx-ask
+    room_prefix: "#g-"      # private room per guest; must match sbx-ask
+    history_db: ~/.culture/sbx/history.db     # deletion purges it
+    flag_log: ~/.culture/sandbox/flags.jsonl  # deletion purges it
+  idle_close_s: 600         # close a session with no open tab
   store_path: ~/.local/share/irc-lens/guests.db   # default: $XDG_DATA_HOME/irc-lens/guests.db
   legal_version_url: https://culture.dev/legal/version.json
   mail:                     # sender for guest token emails
@@ -32,6 +35,9 @@ guest_mode:
 | `sandbox.host` | `guest_sandbox_host` | `127.0.0.1` |
 | `sandbox.port` | `guest_sandbox_port` | `6668` |
 | `sandbox.room_prefix` | `guest_room_prefix` | `#g-` |
+| `sandbox.history_db` | `guest_sandbox_history_db` | unset (required for full deletion) |
+| `sandbox.flag_log` | `guest_sandbox_flag_log` | unset (required for full deletion) |
+| `idle_close_s` | `guest_idle_close_s` | `600` |
 | `store_path` | `guest_store_path` | `$XDG_DATA_HOME/irc-lens/guests.db` |
 | `legal_version_url` | `guest_legal_version_url` | `https://culture.dev/legal/version.json` |
 | `mail.provider` | `guest_mail_provider` | `none` |
@@ -111,13 +117,31 @@ POSTs instead of `null`, which the CSRF floor would refuse.
 
 ## Private guest rooms
 
-Each guest session joins its own room, `<room_prefix><nick>` (for example
-`#g-vis1` for `sbx-vis1`). Guests never share a room, so they never see each
-other's messages or history. The sandbox agent follows each guest into its
-room (`guest_room_prefix` in the agent config, same default `#g-`). The
-approved user's Guest view joins its own room plus every existing guest room,
-so the owner can watch them all. Sandbox views hide `system-*` join and
-welcome lines; the real mesh view is unchanged.
+Each guest session joins its own room, `<room_prefix><id>`, where `<id>` is a
+random id stored with the guest (not derived from the nickname). Guests never
+share a room, so they never see each other's messages or history. The sandbox
+agent follows each guest into its room (`guest_room_prefix` in the agent
+config, same default `#g-`) and leaves rooms that have emptied. The approved
+user's Guest view joins its own room (`#g-op-<name>`) plus every current
+guest's room, listed from the guest store, and can `/switch` between them.
+Sandbox views hide `system-*` join and welcome lines; the real mesh view is
+unchanged.
+
+Approved users' sandbox nicks are `sbx-op-<name>` and guest nicknames may only
+use `[a-z0-9_]`, so a guest can never take an approved user's nick or room.
+
+A sandbox session with no open browser tab is closed after `idle_close_s`.
+
+### Deletion
+
+A confirmed deletion erases the guest's profile, inputs, consents, tokens,
+flags and room id from the guest store, their uploads, every line of their
+room in the sandbox IRCd history (`sandbox.history_db`) and their lines in
+sbx-ask's flag log (`sandbox.flag_log`). Bans are kept. The IRCd keeps an
+in-memory copy of recent room history until it restarts, but the room id is
+forgotten, so neither the guest nor the Guest view can reach that room again.
+Without `history_db` and `flag_log` the chat itself is **not** erased and the
+lens logs a warning at startup.
 
 The agent state badge (`agent online` / `agent offline`) reflects whether the
 agent is in the session's room right now, read from the live member list. Each

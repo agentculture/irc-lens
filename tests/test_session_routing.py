@@ -265,7 +265,7 @@ async def test_approved_toggle_round_trip(env: Env) -> None:
     r = await env.client.post("/sandbox/enter", headers=h)
     assert r.status == 200 and (await r.json())["backend"] == "sandbox"
     assert (await env.client.get("/", headers=h)).status == 200
-    assert _nicks(env.sandbox) == ["sbx-alice"]  # distinct sbx- nick
+    assert _nicks(env.sandbox) == ["sbx-op-alice"]  # never a guest's nick
     assert _nicks(env.mesh) == ["testsrv-alice"]  # mesh session untouched
 
     r = await env.client.post("/sandbox/leave", headers=h)
@@ -452,7 +452,7 @@ async def test_guest_session_joins_its_private_room(env: Env) -> None:
     r = await env.client.get("/", headers=env.guest_headers())
     assert r.status == 200
     joins = [ln.params[0] for ln in env.sandbox.received if ln.command == "JOIN"]
-    assert joins == ["#g-gus"]
+    assert joins == ["#g-" + env.store.room_id(_GUEST)]
     assert env.mesh.received == []
 
 
@@ -467,13 +467,19 @@ async def test_two_guests_never_share_a_room(env: Env) -> None:
         for (p, b), s in zip(env.app["registry"].keys(), env.app["registry"].values())
         if b == "sandbox"
     }
-    assert rooms == {"sbx-gus": {"#g-gus"}, "sbx-ola": {"#g-ola"}}
+    assert rooms == {
+        "sbx-gus": {"#g-" + env.store.room_id(_GUEST)},
+        "sbx-ola": {"#g-" + env.store.room_id("other@example.org")},
+    }
+    assert rooms["sbx-gus"] != rooms["sbx-ola"]
 
 
 async def test_approved_guest_view_sees_every_guest_room(env: Env) -> None:
-    """Guest view joins the owner's own room plus every existing guest room."""
+    """Guest view joins the owner's own room plus every current guest's room
+    (from the guest store — a deleted guest's room is never rejoined)."""
     env.add_guest()
     assert (await env.client.get("/", headers=env.guest_headers())).status == 200
+    env.sandbox.channel_members["#g-deadbeef"] = {"sbx-gone"}  # stale room
     r = await env.client.post("/sandbox/enter", headers=env.approved_headers())
     assert r.status in (200, 204)
     assert (await env.client.get("/", headers=env.approved_headers())).status == 200
@@ -481,5 +487,42 @@ async def test_approved_guest_view_sees_every_guest_room(env: Env) -> None:
         s for (p, b), s in zip(env.app["registry"].keys(), env.app["registry"].values())
         if b == "sandbox" and not p.startswith("guest:")
     ][0]
-    assert preview.joined_channels >= {"#g-alice", "#g-gus"}
-    assert preview.current_channel == "#g-alice"
+    gus_room = "#g-" + env.store.room_id(_GUEST)
+    assert preview.joined_channels == {"#g-op-alice", gus_room}
+    assert preview.current_channel == "#g-op-alice"
+
+
+async def test_idle_sandbox_sessions_are_closed() -> None:
+    """d7: a sandbox session with no open event stream for idle_close_s is
+    closed; one with a live stream, and every mesh session, is kept."""
+    from unittest.mock import AsyncMock, MagicMock
+
+    def mk(nick):
+        s = MagicMock()
+        s.nick = nick
+        s.connect = AsyncMock()
+        s.wait_for_welcome = AsyncMock()
+        s.disconnect = AsyncMock()
+        s.join = AsyncMock()
+        s.list_channels = AsyncMock(return_value=[])
+        s.refresh_roster = AsyncMock()
+        s.event_bus.subscriber_count.return_value = 0
+        return s
+
+    reg = SessionRegistry(mk, sandbox_factory=mk)
+    idle = await reg.get_or_open(
+        Identity(principal="guest:a@x", nick="sbx-a", raw_jwt_subject="g"), "sandbox"
+    )
+    live = await reg.get_or_open(
+        Identity(principal="guest:b@x", nick="sbx-b", raw_jwt_subject="g"), "sandbox"
+    )
+    live.event_bus.subscriber_count.return_value = 1
+    mesh = await reg.get_or_open(Identity(principal="o@x", nick="srv-o", raw_jwt_subject="s"))
+    await reg.reap_idle(now=0.0, idle_s=600)
+    await reg.reap_idle(now=599.0, idle_s=600)
+    assert reg.has("guest:a@x", "sandbox")
+    await reg.reap_idle(now=600.0, idle_s=600)
+    assert not reg.has("guest:a@x", "sandbox")
+    idle.disconnect.assert_awaited()
+    assert reg.has("guest:b@x", "sandbox") and "o@x" in reg
+    mesh.disconnect.assert_not_awaited()

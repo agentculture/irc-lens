@@ -414,3 +414,47 @@ async def test_delete_routes_404_when_guest_mode_off(jwks, legal_server, tmp_pat
         )
     finally:
         await client.close()
+
+
+async def test_deletion_purges_sandbox_history_and_flag_log(env, tmp_path):
+    """d7: the Privacy Policy's deletion right covers the chat itself — the
+    guest's room in the sandbox IRCd history and its sbx-ask flag lines."""
+    import dataclasses
+
+    hist = tmp_path / "history.db"
+    with sqlite3.connect(hist) as con:
+        con.execute(
+            "CREATE TABLE history (id INTEGER PRIMARY KEY AUTOINCREMENT, channel TEXT,"
+            " nick TEXT, text TEXT, timestamp REAL, msgid TEXT)"
+        )
+    room = "#g-" + env.store.room_id(EMAIL)
+    with sqlite3.connect(hist) as con:
+        con.executemany(
+            "INSERT INTO history (channel, nick, text, timestamp) VALUES (?,?,?,?)",
+            [
+                (room, NICK, "my secret question", 1.0),
+                (room, "sbx-ask", f"{NICK}: an answer", 2.0),
+                ("#g-other", "sbx-kim", "someone else", 3.0),
+            ],
+        )
+    flags = tmp_path / "flags.jsonl"
+    flags.write_text(
+        json.dumps({"ts": 1, "reason": "nsfw", "nick": NICK, "excerpt": "x"})
+        + "\n"
+        + json.dumps({"ts": 2, "reason": "nsfw", "nick": "sbx-kim", "excerpt": "y"})
+        + "\n"
+    )
+    cfg = dataclasses.replace(
+        env.app["config"],
+        guest_sandbox_history_db=str(hist),
+        guest_sandbox_flag_log=str(flags),
+    )
+    env.app[entry.ENTRY_STATE].config = cfg
+    tok = env.store.issue_token(EMAIL, purpose="delete")
+    r = await env.client.post("/delete/confirm", data={"email": EMAIL, "code": tok})
+    assert r.status == 200
+    with sqlite3.connect(hist) as con:
+        rows = con.execute("SELECT channel, nick FROM history").fetchall()
+    assert rows == [("#g-other", "sbx-kim")]
+    assert NICK not in flags.read_text() and "sbx-kim" in flags.read_text()
+    assert env.store.list_rooms() == []

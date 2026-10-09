@@ -105,12 +105,18 @@ def _json_error(status: int, error: str, hint: str, **extra) -> web.Response:
     return web.json_response({"error": error, "hint": hint, **extra}, status=status)
 
 
+#: Approved users' sandbox nicks live under ``sbx-op-``; guest nicknames
+#: may not contain ``-``, so a guest can never take one (d7).
+APPROVED_SANDBOX_INFIX = "op-"
+
+
 def sandbox_nick_for(config, identity: Identity) -> str:
-    """``sbx-<real nick suffix>`` — distinct from the user's mesh nick."""
+    """``sbx-op-<real nick suffix>`` — distinct from the user's mesh nick and
+    from every possible guest nick."""
     prefix = f"{config.server_name}-"
     nick = identity.nick
     suffix = nick[len(prefix) :] if nick.startswith(prefix) else nick
-    return f"{SANDBOX_NICK_PREFIX}{suffix}"
+    return f"{SANDBOX_NICK_PREFIX}{APPROVED_SANDBOX_INFIX}{suffix}"
 
 
 def _backend_for(request: web.Request) -> tuple[Identity, str]:
@@ -146,6 +152,22 @@ def _backend_for(request: web.Request) -> tuple[Identity, str]:
         ),
         content_type="application/json",
     )
+
+
+def _owner_agent_state(registry) -> dict:
+    """Agent state for the owner: online iff it is in any open sandbox
+    session's room (the same room-membership rule as the badge, d7)."""
+    from irc_lens.web.sessions import sandbox_presence
+
+    nick = metrics.get_presence().nick
+    states = [
+        sandbox_presence(session, nick)
+        for (_principal, backend), session in zip(registry.keys(), registry.values())
+        if backend == BACKEND_SANDBOX
+    ]
+    if not states:
+        return {"nick": nick, "state": "unknown", "online": False, "last_seen_age_s": None}
+    return next((st for st in states if st["online"]), states[0])
 
 
 def _sandbox_state(session) -> dict:
@@ -915,6 +937,6 @@ async def get_owner_metrics(request: web.Request) -> web.Response:  # NOSONAR S7
     return web.json_response(
         {
             "counters": metrics.get_metrics().snapshot(),
-            "agent": metrics.get_presence().state(),
+            "agent": _owner_agent_state(request.app["registry"]),
         }
     )

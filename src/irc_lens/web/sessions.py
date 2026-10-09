@@ -80,28 +80,25 @@ async def _join_room(session: Any, room: str) -> None:
     await _maybe_await(session.join(room))
 
 
-async def _open_sandbox_rooms(session: Any, prefix: str, preview: bool) -> None:
-    """Put a fresh sandbox session in its private room (d6).
+async def _open_sandbox_rooms(session: Any, own: str, others: list[str]) -> None:
+    """Put a fresh sandbox session in its private room (d6/d7).
 
     A guest joins only its own room. The approved user's Guest view also
-    joins every existing guest room so the owner can watch them all; its
-    own room stays current.
+    joins every current guest's room (*others*) so the owner can watch them
+    all; its own room stays current.
     """
-    own = guest_room(session.nick, prefix)
     await _join_room(session, own)
-    if preview and hasattr(session, "list_channels"):
-        try:
-            rows = await session.list_channels()
-        except Exception:  # noqa: BLE001 — the owner's own room still works
-            rows = []
-        for row in rows:
-            name = row.get("channel") if isinstance(row, dict) else str(row)
-            if name and name.startswith(prefix) and name != own:
-                await _join_room(session, name)
+    for room in others:
+        if room != own:
+            await _join_room(session, room)
     session.set_current_channel(own)
     refresh = getattr(session, "refresh_roster", None)
     if refresh is not None:
         await _maybe_await(refresh())
+
+
+#: Provides the guest store lazily (it may be swapped after app build).
+StoreGetter = Callable[[], Any]
 
 
 class SessionRegistry:
@@ -112,12 +109,17 @@ class SessionRegistry:
         factory: SessionFactory,
         sandbox_factory: SessionFactory | None = None,
         room_prefix: str = "#g-",
+        guest_store: StoreGetter | None = None,
     ) -> None:
         self._factories: dict[str, SessionFactory] = {BACKEND_MESH: factory}
         # Prefix of the private room every sandbox session joins on open:
         # guests may not /join (command allowlist), so this is how they
         # reach the sandbox agent, which follows them in.
         self._room_prefix = room_prefix
+        # Guest rooms are #<prefix><random id> from the guest store (d7);
+        # without a store (unit tests) they fall back to the nickname.
+        self._guest_store = guest_store or (lambda: None)
+        self._idle_since: dict[tuple[str, str], float] = {}
         if sandbox_factory is not None:
             self._factories[BACKEND_SANDBOX] = sandbox_factory
         self._sessions: dict[tuple[str, str], Any] = {}
@@ -178,6 +180,41 @@ class SessionRegistry:
         except Exception:  # noqa: BLE001 — closing must not raise
             pass
 
+    def _rooms_for(self, identity: Identity, is_guest: bool) -> tuple[str, list[str]]:
+        """(own room, other rooms to join) for a new sandbox session."""
+        store = self._guest_store()
+        if is_guest:
+            email = identity.principal[len(GUEST_PRINCIPAL_PREFIX) :]
+            if store is None:
+                return guest_room(identity.nick, self._room_prefix), []
+            return self._room_prefix + store.room_id(email), []
+        own = guest_room(identity.nick, self._room_prefix)
+        if store is None:
+            return own, []
+        return own, [self._room_prefix + rid for _email, rid in store.list_rooms()]
+
+    async def reap_idle(self, *, now: float, idle_s: float) -> list[tuple[str, str]]:
+        """Close sandbox sessions that had no open event stream for *idle_s*.
+
+        Guests close the tab without telling us, so without this every guest
+        IRC connection (and its room) lived until the lens restarted (d7).
+        Mesh sessions are never reaped.
+        """
+        closed = []
+        for key, session in list(self._sessions.items()):
+            if key[1] != BACKEND_SANDBOX:
+                continue
+            bus = getattr(session, "event_bus", None)
+            if bus is not None and bus.subscriber_count() > 0:
+                self._idle_since.pop(key, None)
+                continue
+            since = self._idle_since.setdefault(key, now)
+            if now - since >= idle_s:
+                self._idle_since.pop(key, None)
+                await self.close(*key)
+                closed.append(key)
+        return closed
+
     async def get_or_open(self, identity: Identity, backend: str = BACKEND_MESH) -> Any:
         """Return the Session for (``identity.principal``, *backend*).
 
@@ -221,7 +258,8 @@ class SessionRegistry:
                 session.ui_tier = "guest" if is_guest else "sandbox_preview"
                 for command in ("PRIVMSG", "JOIN", "PART", "QUIT"):
                     session._transport.add_listener(command, _presence_listener)
-                await _open_sandbox_rooms(session, self._room_prefix, preview=not is_guest)
+                own, others = self._rooms_for(identity, is_guest)
+                await _open_sandbox_rooms(session, own, others)
             self._sessions[key] = session
             if self._counts_as_guest(*key):
                 metrics.get_metrics().session_opened()
