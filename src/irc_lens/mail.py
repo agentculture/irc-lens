@@ -29,19 +29,30 @@ from typing import Protocol, runtime_checkable
 
 from irc_lens._errors import EXIT_ENV_ERROR, AfiError
 from irc_lens.config import LensConfig
+from irc_lens.guest_store import DEFAULT_TOKEN_TTL
 
 #: POST target of Resend's transactional email API.
 RESEND_API_URL = "https://api.resend.com/emails"
 
-_SUBJECT = "Your Culture chat.culture.dev guest token"
+_SUBJECT = "Your chat.culture.dev code"
 
 
-def render_token_email(token: str) -> tuple[str, str]:
+def _human_duration(seconds: int) -> str:
+    """``900`` -> ``15 minutes``; ``60`` -> ``1 minute``; sub-minute in seconds."""
+    if seconds >= 60 and seconds % 60 == 0:
+        n, unit = seconds // 60, "minute"
+    else:
+        n, unit = seconds, "second"
+    return f"{n} {unit}{'' if n == 1 else 's'}"
+
+
+def render_token_email(token: str, ttl_s: int = DEFAULT_TOKEN_TTL) -> tuple[str, str]:
     """Render the single fixed guest-token template.
 
     Returns ``(subject, text_body)``. The body shape is identical for
-    every token and every address; only the token line varies. The token
-    itself is embedded in the body (it *is* the credential the guest
+    every token and every address; only the code line varies. *ttl_s* is
+    the real lifetime the store issues tokens with (the same for every
+    address). The code itself is embedded in the body (it *is* the credential the guest
     types in) but is never written to any log by this module.
     """
     if not isinstance(token, str) or not token:
@@ -52,11 +63,11 @@ def render_token_email(token: str) -> tuple[str, str]:
         )
     body = (
         "Hello,\n\n"
-        "You asked for a guest seat on chat.culture.dev. Use the token "
-        "below to enter:\n\n"
+        "You asked for a guest seat on chat.culture.dev. Enter the code "
+        "below in the Code field to continue:\n\n"
         f"    {token}\n\n"
-        "The token expires after a while; after that you can request a "
-        "fresh one from the same page.\n\n"
+        f"The code works once and expires in {_human_duration(ttl_s)}; "
+        "after that you can request a fresh one from the same page.\n\n"
         "If you did not ask for a guest seat, you can ignore this email "
         "— nothing else needs doing.\n\n"
         "The Culture team\n"

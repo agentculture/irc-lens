@@ -248,3 +248,18 @@ html, body {
 
   .entry-transcript .nick { text-align: left; }
 }
+
+/* Username field for password managers (Chrome password-form warning); visually hidden. */
+.entry-username-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+}

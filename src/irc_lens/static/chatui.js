@@ -123,6 +123,17 @@
     });
   }
 
+  // Keyboard activation for sidebar room rows. htmx `hx-trigger` event
+  // filters (`keyup[key=='Enter']`) need eval, which our CSP forbids, so
+  // rows trigger on plain `click` and Enter/Space is turned into a click here.
+  document.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" && e.key !== " ") return;
+    const row = e.target.closest?.("#sidebar [role=button][tabindex]");
+    if (!row || e.target !== row) return;
+    e.preventDefault();
+    row.click();
+  });
+
   // A successful send clears the input (lens.js); close the palette too.
   if (form) form.addEventListener("htmx:afterRequest", (e) => {
     if (e.detail?.xhr?.status === 204) closePalette();

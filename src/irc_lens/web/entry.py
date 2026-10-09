@@ -211,6 +211,8 @@ def install(app: web.Application, config: LensConfig) -> None:
         config=config, store=app.get("guest_store"), verifier=make_bot_verifier()
     )
     app.router.add_get("/entry", get_entry)
+    # Post-SSO landing: Cloudflare Access forwards the user back here.
+    app.router.add_get("/login", get_login)
     # Consent gate target (routes.CONSENT_PATH): a guest whose consent is
     # outdated re-runs the entry flow, which records consent for the
     # current Terms/Privacy versions on verification.
@@ -364,6 +366,18 @@ async def _pad(started: float, floor: float) -> None:
 async def get_entry(request: web.Request) -> web.Response:  # NOSONAR S7503
     """Step 1: Email + Continue. Also the anonymous landing for ``/``."""
     return _page(_state(request), "email")
+
+
+@allows_anonymous
+async def get_login(request: web.Request) -> web.Response:  # NOSONAR S7503
+    """Return target after Cloudflare Access SSO (path-scoped on ``/login``).
+
+    Always 303 ``/``, whatever the tier: ``/`` routes approved users to the
+    console and everyone else to the entry card, so this answer can never
+    reveal whether an address is approved. Never 404 (also with guest mode
+    off) and never cached.
+    """
+    return _see_other("/")
 
 
 @allows_anonymous

@@ -253,6 +253,47 @@ async def test_sign_in_success_redirects_to_login(h):
     assert resp.headers["Location"] == "/login"
 
 
+async def test_login_landing_approved_jwt_redirects_to_root(h, jwks):
+    token = jwks.mint(aud="aud-test", claims={"email": APPROVED, "sub": "s"})
+    resp = await h.client.get(
+        "/login",
+        headers={"Cf-Access-Jwt-Assertion": token},
+        allow_redirects=False,
+    )
+    assert resp.status == 303
+    assert resp.headers["Location"] == "/"
+    assert resp.headers["Cache-Control"] == "no-store"
+
+
+async def test_login_landing_anonymous_redirects_to_root(h):
+    resp = await h.client.get("/login", allow_redirects=False)
+    assert resp.status == 303
+    assert resp.headers["Location"] == "/"
+    assert resp.headers["Cache-Control"] == "no-store"
+
+
+async def test_login_landing_same_for_garbage_cookie(h):
+    anon = await h.client.get("/login", allow_redirects=False)
+    bad = await h.client.get(
+        "/login",
+        headers={"Cookie": "CF_Authorization=expired.garbage.jwt"},
+        allow_redirects=False,
+    )
+    assert (bad.status, bad.headers["Location"]) == (anon.status, anon.headers["Location"])
+
+
+async def test_password_step_has_hidden_username_and_current_password(h):
+    resp = await h.post("/entry/email", {"email": APPROVED})
+    html = await resp.text()
+    m = re.search(r'<input[^>]*name="username"[^>]*>', html)
+    assert m, "password form needs a username field"
+    tag = m.group(0)
+    assert 'autocomplete="username"' in tag
+    assert f'value="{APPROVED}"' in tag
+    assert "readonly" in tag and 'tabindex="-1"' in tag
+    assert re.search(r'<input[^>]*type="password"[^>]*autocomplete="current-password"', html)
+
+
 async def test_sign_in_failures_identical(h):
     cases = [
         {"email": APPROVED, "password": "wrong"},
@@ -472,6 +513,8 @@ async def test_same_email_template_for_every_address(h):
     ).group(1)
     assert (s1, b1) == render_token_email(t1)
     assert (s2, b2) == render_token_email(t2)
+    assert "code" in b1.lower() and "token" not in b1.lower()
+    assert "15 minutes" in b1
     assert b1.replace(t1, "T") == b2.replace(t2, "T")
 
 
