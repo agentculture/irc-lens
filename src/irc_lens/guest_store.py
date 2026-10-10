@@ -411,16 +411,16 @@ class GuestStore:
         A fresh random id is minted every time (a cookie the browser held
         before is never promoted). Trust rows of *previous_raw* (this
         browser's earlier ``lens_device``, e.g. for another email) move to
-        the new id, restarting their year with the re-issued cookie.
+        the new id and keep their original year (moving never extends trust).
         """
         raw = secrets.token_urlsafe(32)
         new_hash, now = _hash_token(raw), self._now()
         with closing(self._connect()) as con, con:
             if previous_raw:
                 con.execute(
-                    "UPDATE trusted_devices SET device_hash=?, created=? "
+                    "UPDATE trusted_devices SET device_hash=? "
                     "WHERE device_hash=? AND email<>? AND created > ?",
-                    (new_hash, now, _hash_token(previous_raw), email,
+                    (new_hash, _hash_token(previous_raw), email,
                      now - TRUSTED_DEVICE_S),
                 )
                 con.execute(

@@ -275,6 +275,19 @@ async def test_one_browser_trusted_for_two_emails(env: TEnv) -> None:
     assert not env.store.is_trusted_device(alice_device, ALICE)
 
 
+async def test_moving_trust_to_a_new_id_keeps_its_year(env: TEnv) -> None:
+    """Trusting the browser for BOB must not extend ALICE's year (c37)."""
+    alice_device = await env.trusted_device(ALICE, PW)
+    env.clock["t"] += 300 * 86400
+    r = await env.full_signin(
+        BOB, BOB_PW, "192.0.2.10", device=alice_device, trust=True
+    )
+    device = r.cookies[DEVICE].value
+    env.clock["t"] += 66 * 86400  # 366 days after ALICE trusted it
+    assert not env.store.is_trusted_device(device, ALICE)
+    assert env.store.is_trusted_device(device, BOB)
+
+
 async def _exhaust(env: TEnv, email: str = ALICE, start: int = 0) -> None:
     for i in range(start, start + 4):
         await env.pw(email, WRONG_PW, _ip(i))
