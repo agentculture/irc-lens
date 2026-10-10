@@ -89,6 +89,9 @@ def _config(jwks: FakeJWKS, legal_url: str, *, guest: bool = True) -> LensConfig
         guest_legal_version_url=legal_url,
         guest_rate_entry_per_min=3,
         guest_rate_password_attempts_per_15min=4,
+        # The 0.12.2 password -> /login path (c7/h3, c32/h23); app sign-in
+        # (the default) is covered by test_app_signin.py.
+        app_signin_enabled=False,
     )
 
 
