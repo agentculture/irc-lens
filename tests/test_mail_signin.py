@@ -43,17 +43,16 @@ def test_signin_rejects_empty_token():
         mail.render_token_email("", purpose=mail.PURPOSE_SIGNIN)
 
 
+#: Golden outputs of the 0.12.2 templates (rendered from mail.py before the
+#: sign-in purpose was added); the guest and deletion emails must not change.
+_GUEST_0_12_2 = ('Your chat.culture.dev code', 'Hello,\n\nYou asked for a guest seat on chat.culture.dev. Enter the code below in the Code field to continue:\n\n    tok\n\nThe code works once and expires in 15 minutes; after that you can request a fresh one from the same page.\n\nIf you did not ask for a guest seat, you can ignore this email — nothing else needs doing.\n\nThe Culture team\n')
+_DELETE_0_12_2 = ('Your chat.culture.dev deletion code', "Hello,\n\nYou asked to delete your guest data on chat.culture.dev. Enter the code below in the Code field on the deletion page to confirm:\n\n    tok\n\nDeleting is permanent: your guest account, your conversations and your room are erased and can't be recovered.\n\nThe code works once and expires in 15 minutes; after that you can request a fresh one from the same page.\n\nIf you did not ask to delete anything, you can ignore this email — nothing will be deleted.\n\nThe Culture team\n")
+
+
 def test_guest_and_delete_outputs_unchanged():
-    assert mail.render_token_email("tok") == (
-        "Your chat.culture.dev code",
-        mail.render_token_email("tok", purpose=mail.PURPOSE_GUEST)[1],
-    )
-    g = mail.render_token_email("tok")[1]
-    assert g.startswith("Hello,\n\nYou asked for a guest seat on chat.culture.dev.")
-    assert "sign-in" not in g
-    s, d = mail.render_token_email("tok", purpose=mail.PURPOSE_DELETE)
-    assert s == "Your chat.culture.dev deletion code"
-    assert d.startswith("Hello,\n\nYou asked to delete your guest data")
+    assert mail.render_token_email("tok") == _GUEST_0_12_2
+    assert mail.render_token_email("tok", purpose=mail.PURPOSE_GUEST) == _GUEST_0_12_2
+    assert mail.render_token_email("tok", purpose=mail.PURPOSE_DELETE) == _DELETE_0_12_2
 
 
 def test_link_email_subject_link_and_expiry():
