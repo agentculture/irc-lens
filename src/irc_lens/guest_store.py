@@ -58,6 +58,10 @@ CREATE TABLE IF NOT EXISTS consents (
 CREATE TABLE IF NOT EXISTS tokens (
     token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, purpose TEXT NOT NULL,
     issued INTEGER NOT NULL, ttl INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0);
+-- Binds a sign-in code to the browser that entered the password: both
+-- columns are sha256 digests (pending sign-in cookie value, code).
+CREATE TABLE IF NOT EXISTS signin_pending (
+    pending_hash TEXT PRIMARY KEY, token_hash TEXT NOT NULL);
 -- sessions.id_hash is sha256(raw session id); the raw id lives only in the cookie.
 CREATE TABLE IF NOT EXISTS sessions (
     id_hash TEXT PRIMARY KEY, email TEXT NOT NULL,
@@ -267,6 +271,33 @@ class GuestStore:
             "UPDATE tokens SET used=1 WHERE token_hash=? AND email=? AND purpose=? "
             "AND used=0 AND issued + ttl > ?",
             (_hash_token(token), email, purpose, now),
+        )
+        return n == 1
+
+    def bind_signin(self, pending: str, token: str) -> None:
+        """Tie sign-in *token* to the pending sign-in cookie value *pending*.
+
+        Only sha256 digests of both are stored.
+        """
+        self._run(
+            "INSERT OR REPLACE INTO signin_pending (pending_hash, token_hash) "
+            "VALUES (?,?)",
+            (_hash_token(pending), _hash_token(token)),
+        )
+
+    def verify_signin_token(self, email: str, token: str, pending: str) -> bool:
+        """True exactly once for a live ``signin`` token bound to *pending*.
+
+        Like :meth:`verify_token` (single use, TTL, email) plus the binding
+        made by :meth:`bind_signin`; one atomic UPDATE, so a code from
+        another browser, a reused code and an expired code all fail alike.
+        """
+        n = self._run(
+            "UPDATE tokens SET used=1 WHERE token_hash=? AND email=? "
+            "AND purpose='signin' AND used=0 AND issued + ttl > ? "
+            "AND token_hash IN (SELECT token_hash FROM signin_pending "
+            "WHERE pending_hash=?)",
+            (_hash_token(token), email, self._now(), _hash_token(pending)),
         )
         return n == 1
 
@@ -495,6 +526,10 @@ class GuestStore:
             counts["tokens"] = con.execute(
                 "DELETE FROM tokens WHERE issued < ?", (now - TOKEN_RETENTION_S,)
             ).rowcount
+            con.execute(
+                "DELETE FROM signin_pending WHERE token_hash NOT IN "
+                "(SELECT token_hash FROM tokens)"
+            )
             counts["sessions"] = con.execute(
                 "DELETE FROM sessions WHERE last_seen < ? OR created < ?",
                 (now - SESSION_IDLE_S, now - SESSION_MAX_S),
