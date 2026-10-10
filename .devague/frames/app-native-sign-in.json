@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-10-10T14:30:58Z",
-  "updated": "2026-10-10T17:04:57Z",
+  "updated": "2026-10-10T17:19:44Z",
   "claims": [
     {
       "id": "c1",
@@ -230,18 +230,18 @@
       "kind": "requirement",
       "text": "Rate limits (superseded in detail by r6/c36-c38): password checks and code entries from untrusted browsers are limited per IP (3 per 15 minutes, counted together; over the limit, no check, same screen) and by the email's untrusted budget (c38); a trusted browser (c37) is not limited, so an attack on an email cannot lock out its owner's trusted browser",
       "origin": "llm",
-      "status": "proposed",
+      "status": "confirmed",
       "honesty_conditions": [
         {
           "id": "h10",
           "text": "the 6th password attempt from one IP in 15 minutes is not checked yet shows the same screen; an approved email under a distributed attack still gets codes when the right password is entered, up to 5 per 15 minutes",
-          "status": "confirmed",
+          "status": "rejected",
           "instruction": ""
         },
         {
           "id": "h28",
           "text": "the 4th untrusted attempt (password or code) from one IP within 15 minutes is not checked yet answers exactly like a checked one; a trusted browser from that same IP still signs in",
-          "status": "proposed",
+          "status": "confirmed",
           "instruction": ""
         }
       ],
@@ -635,7 +635,7 @@
       "kind": "requirement",
       "text": "Trusted browser: completing code entry with 'Trust this browser' ticked (c39) sets lens_device (random id, only its sha256 stored with the email; HttpOnly, Secure, SameSite=Lax, one year from the trusting sign-in, never extended by later moves); it exempts that browser from all sign-in attempt limits for that email only; logout keeps it; setting or resetting the password revokes every trusted browser for that email",
       "origin": "llm",
-      "status": "proposed",
+      "status": "confirmed",
       "honesty_conditions": [
         {
           "id": "h26",
