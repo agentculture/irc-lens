@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-10-10T14:30:58Z",
-  "updated": "2026-10-10T16:51:20Z",
+  "updated": "2026-10-10T17:04:57Z",
   "claims": [
     {
       "id": "c1",
@@ -228,21 +228,33 @@
     {
       "id": "c14",
       "kind": "requirement",
-      "text": "Rate limits: password checks stay limited per IP (5 per 15 minutes; over the limit, no check, same screen); per email there is no lockout, only a cap of 5 sign-in codes sent per 15 minutes",
+      "text": "Rate limits (superseded in detail by r6/c36-c38): password checks and code entries from untrusted browsers are limited per IP (3 per 15 minutes, counted together; over the limit, no check, same screen) and by the email's untrusted budget (c38); a trusted browser (c37) is not limited, so an attack on an email cannot lock out its owner's trusted browser",
       "origin": "llm",
-      "status": "confirmed",
+      "status": "proposed",
       "honesty_conditions": [
         {
           "id": "h10",
           "text": "the 6th password attempt from one IP in 15 minutes is not checked yet shows the same screen; an approved email under a distributed attack still gets codes when the right password is entered, up to 5 per 15 minutes",
           "status": "confirmed",
           "instruction": ""
+        },
+        {
+          "id": "h28",
+          "text": "the 4th untrusted attempt (password or code) from one IP within 15 minutes is not checked yet answers exactly like a checked one; a trusted browser from that same IP still signs in",
+          "status": "proposed",
+          "instruction": ""
         }
       ],
       "hard_questions": [],
       "links": [],
       "instruction": "",
-      "revisions": []
+      "revisions": [
+        {
+          "text": "Rate limits: password checks stay limited per IP (5 per 15 minutes; over the limit, no check, same screen); per email there is no lockout, only a cap of 5 sign-in codes sent per 15 minutes",
+          "kind": "requirement",
+          "reason": "r6 replaced the 5-per-15 per-IP limit and the 5-codes-per-email cap"
+        }
+      ]
     },
     {
       "id": "c15",
@@ -621,9 +633,9 @@
     {
       "id": "c37",
       "kind": "requirement",
-      "text": "Trusted browser: completing code entry sets lens_device (random id, only its sha256 stored with the email; HttpOnly, Secure, SameSite=Lax, one year); it exempts that browser from all sign-in attempt limits for that email only; logout keeps it; setting or resetting the password revokes every trusted browser for that email",
+      "text": "Trusted browser: completing code entry with 'Trust this browser' ticked (c39) sets lens_device (random id, only its sha256 stored with the email; HttpOnly, Secure, SameSite=Lax, one year from the trusting sign-in, never extended by later moves); it exempts that browser from all sign-in attempt limits for that email only; logout keeps it; setting or resetting the password revokes every trusted browser for that email",
       "origin": "llm",
-      "status": "confirmed",
+      "status": "proposed",
       "honesty_conditions": [
         {
           "id": "h26",
@@ -635,7 +647,13 @@
       "hard_questions": [],
       "links": [],
       "instruction": "",
-      "revisions": []
+      "revisions": [
+        {
+          "text": "Trusted browser: completing code entry sets lens_device (random id, only its sha256 stored with the email; HttpOnly, Secure, SameSite=Lax, one year); it exempts that browser from all sign-in attempt limits for that email only; logout keeps it; setting or resetting the password revokes every trusted browser for that email",
+          "kind": "requirement",
+          "reason": "c39 made trust opt-in; review fix 9b908ef keeps the original year"
+        }
+      ]
     },
     {
       "id": "c38",
@@ -855,6 +873,17 @@
       "skipped_check": "real-browser POST of the set-password form",
       "refs": [
         "t6 tests/test_setpw.py"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l8",
+      "code": "grader-unverified",
+      "what": "trusted-browser task's tests never checked that moving trust to a new browser id keeps the first email's one-year limit; the migration reset created (extending trust without that email signing in) and passed its 1261-test suite \u2014 caught in main-agent diff review, fixed test-first in 9b908ef",
+      "skipped_check": "",
+      "refs": [
+        "c37 add_trusted_device"
       ],
       "origin": "llm",
       "status": "proposed"

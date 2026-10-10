@@ -52,6 +52,10 @@
   - honesty: metrics expose the five counters; a grep of logs from a full test run finds no code, session id or password value
 - The retention sweep deletes expired sessions and used or expired sign-in and set-password tokens after a day, the same as guest codes
   - honesty: a sweep at day+1 leaves no expired session row and no used or expired signin/setpw token
+- Trusted browser: completing code entry sets `lens_device` (random id, only its sha256 stored with the email; HttpOnly, Secure, SameSite=Lax, one year); it exempts that browser from all sign-in attempt limits for that email only; logout keeps it; setting or resetting the password revokes every trusted browser for that email
+  - honesty: a trusted browser signs in after 20 blocked attempts on its email from other browsers; the trust cookie of one email does not exempt another email; after set-password the old trust cookie gives no exemption
+- Untrusted-browser budget per email counts password submissions and code entries together: 3 per 15 minutes; after it is first exhausted the email is strict at 2 per 30 minutes until 24 hours pass with no blocked attempt; untrusted browsers are also limited per IP to 3 attempts per 15 minutes (password and code entry)
+  - honesty: the 4th untrusted attempt within 15 minutes is blocked silently (byte-identical responses, no code mail); after exhaustion only 2 per 30 minutes pass; 24 quiet hours restore 3 per 15 minutes
 
 ## Honesty conditions
 
@@ -104,6 +108,8 @@
 - An email-delivery outage needs no extra sign-in fallback for now (break-glass /login covers the trial)
 - When Resend can't send (the 3000-email quota is used up, or Resend returns an error) the approved users get an alert email sent through Cloudflare email
 - After idle sign-off a guest's cookie still works: if the slot is free they rejoin their room, otherwise they see the busy message; no new code is emailed
+- r6 (owner): a browser that has completed the full sign-in (password, code, chat) for an email is trusted for that email and gets no attempt limit; untrusted browsers share one per-email budget of 3 attempts per 15 minutes, dropping to 2 per 30 minutes once it has been exhausted; a blocked attempt looks exactly like an unblocked one (same code screen, no code sent; same code error)
+- Owner: the sign-in code screen has a 'Trust this browser' checkbox; only when it is ticked does completing sign-in make the browser trusted (`lens_device`)
 
 ## Open parks
 
