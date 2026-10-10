@@ -33,6 +33,7 @@ from jwt.algorithms import RSAAlgorithm
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
+from irc_lens.web import app_session
 from irc_lens.web.identity import (
     ANONYMOUS_IDENTITY,
     TIER_APPROVED,
@@ -424,6 +425,20 @@ def build_cloudflare_middleware(config: LensConfig):
         # present). See docs/superpowers/specs/
         # 2026-07-02-media-support-design.md ("Upload path").
         if _is_public_path(request):
+            return await handler(request)
+        # App-native sign-in: a valid lens_session cookie is checked before
+        # the Access JWT. Anything short of a live, still-allowlisted
+        # session yields None and falls through unchanged (break-glass).
+        app_identity = app_session.identity_for(request)
+        if app_identity is not None:
+            request["identity"] = app_identity
+            logger.info(
+                "auth=ok via=app-session principal=%s nick=%s method=%s path=%s",
+                app_identity.principal,
+                app_identity.nick,
+                request.method,
+                request.path,
+            )
             return await handler(request)
         token = _extract_token(request)
         if not token:

@@ -132,6 +132,7 @@ body.lens-sandbox { border-top: 4px solid var(--lens-amber); }
 .lens-btn:hover { border-color: var(--lens-accent); color: var(--lens-fg); }
 .lens-btn--amber { border-color: var(--lens-amber); color: var(--lens-amber); }
 .lens-btn--amber:hover { border-color: var(--lens-amber); color: var(--lens-fg); }
+.lens-logout { display: inline-flex; margin: 0; }
 
 .lens-rooms-btn {
   display: none;
