@@ -85,6 +85,56 @@ the base of the links mailed by the set-password flow; when unset,
 header. If neither key is set, `POST /password` still answers with the same
 "check your email" page but sends nothing and logs one error.
 
+## App sign-in
+
+With `auth.app_signin.enabled: true` (default) and guest mode on, an approved
+user signs in inside the app, without Cloudflare Access:
+
+1. `POST /entry/signin` (email + password) always returns the same code screen
+   and sets the pending cookie `lens_signin` (`SameSite=Strict`, `Path=/entry`,
+   10 minutes). Only a right password for an address in `auth.allowed_emails`
+   mails a code (from a background task); the response never depends on the
+   password, and is padded to a 0.5 s floor.
+2. `POST /entry/code` takes the code. It must come from the same browser as
+   step 1, is single use and valid for 10 minutes; 5 tries per 15 minutes per
+   email and per IP (`rate_limits.password_attempts_per_15min`) and at most 5
+   codes per window per email. Success creates a fresh session id, clears
+   `lens_signin`, sets `lens_session` (`HttpOnly; Secure; SameSite=Lax;
+   Path=/`) and redirects to `/`.
+3. The session is server-side: the guest store keeps only `sha256(id)`. It
+   expires after 7 days idle or 30 days total, and the email is re-checked
+   against `allowed_emails` on every request. The resulting identity is the
+   same as an Access JWT for that email.
+4. `POST /logout` (approved, CSRF-checked) ends the session, closes the IRC
+   session(s) it opened and clears the cookie (`303 /`, or `HX-Redirect: /`
+   for htmx). Setting a new password, removing the address from
+   `allowed_emails` and expiry end sessions the same way (swept on the ban
+   sweeper's interval).
+
+Approved users are still exactly the `allowed_emails` list: there is no
+sign-up and no account creation. The Cloudflare Access `/login` path keeps
+working as break-glass.
+
+**Rollback switch.** `auth.app_signin.enabled: false` restores 0.12.2: a
+correct password answers `303 /login` (wrong ones `Email or password is
+wrong`), `/entry/code` and `POST /logout` do not exist, `lens_session` is
+not read, and the set-password routes are not mounted.
+
+## Delivery alerts
+
+When the Resend adapter fails to send (any HTTP error, including 429 quota
+exhaustion, or a network error) and `guest_mode.mail.alert_url` is set, the
+lens posts `{"kind": "quota" | "send_failed", "message": ...}` as JSON to that
+URL with `Authorization: Bearer <secret>`, the secret read from the env var
+named by `guest_mode.mail.alert_secret_env`. The receiver is a small
+Cloudflare email Worker that mails the approved users; the message says
+sign-in and guest codes are not being delivered and that approved users can
+still sign in at `/login`. At most one alert per kind per hour; the post runs
+on a daemon thread and any failure is logged and swallowed. The payload never
+contains a recipient address, a code or the provider's response. With
+`alert_url` unset (default) alerts are off. Each alert increments
+`delivery_alerts`.
+
 ## Set or reset password
 
 With guest mode and app sign-in on, `src/irc_lens/web/setpw.py`
@@ -107,9 +157,12 @@ replaces `/password/<token>` with `/password/[redacted]`.
 
 ## Owner metrics counters
 
-`/owner/metrics` also reports `signin_codes_sent`, `sessions_started`,
-`sessions_ended`, `guest_busy` and `delivery_alerts` (counts only; no codes,
-session ids or passwords are ever logged).
+`/owner/metrics` also reports `signin_codes_sent` (app sign-in codes mailed),
+`sessions_started` / `sessions_ended` (app sessions), `guest_busy` (busy
+pages shown) and `delivery_alerts` (alerts posted). Counts only: no code,
+session id, token or password is ever logged (`tests/test_log_hygiene.py`
+runs the sign-in, set-password, guest and deletion flows and checks every log
+record).
 
 ## Guest session cookie and CSRF
 
@@ -140,7 +193,8 @@ With guest mode on, anonymous visitors get the entry card
 | --- | --- |
 | `GET /entry` | Email + Continue (`get_entry`, also served on `/` for anonymous visitors) |
 | `POST /entry/email` | The password window — identical for every address |
-| `POST /entry/signin` | Approved email + correct password → 303 `/login`; otherwise `Email or password is wrong` |
+| `POST /entry/signin` | Password step. With app sign-in on (default): always the same code screen, whatever the email or password (see [App sign-in](#app-sign-in)). With `auth.app_signin.enabled: false` (0.12.2 behavior): approved email + correct password → 303 `/login`; otherwise `Email or password is wrong` |
+| `POST /entry/code` | App sign-in code step: the emailed code plus the `lens_signin` cookie → `lens_session` cookie, 303 `/`; any failure is the one error `Wrong or expired code`. 404 with the switch off |
 | `POST /entry/guest` | Nickname (`sbx-` prefix) + Terms/Privacy consent + optional training opt-in |
 | `POST /entry/guest/start` | Emails a single-use, 15-minute code (one fixed template; the mail says "code", matching the Code field) |
 | `GET /login` | Post-SSO return target (Cloudflare Access forwards the user here): always 303 `/`, `Cache-Control: no-store`, any tier, never 404 and never reveals approval; served even with guest mode off |
