@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-10
+
+### Fixed
+
+- **Guest code mail never sent via Resend.** The adapter posted with
+  urllib's default `Python-urllib/3.x` User-Agent, which Cloudflare (in
+  front of Resend's API) rejects with error 1010 / HTTP 403. Requests now
+  carry `User-Agent: irc-lens/<version>`; verified live against Resend's
+  `delivered@resend.dev` test inbox.
+
 ### Added
 
 - **`culture.yaml` with a `gate:` section only** (no `agents:`): the test
