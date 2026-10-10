@@ -1,0 +1,8 @@
+# Test gate for the culture-rules PR fixer: it runs `setup`, then `test`
+# (argv lists, no shell) in a fresh checkout before pushing a fix.
+# irc-lens declares no mesh agent, so there is deliberately no `agents:` here.
+gate:
+  setup:
+  - [uv, sync, --extra, dev]
+  test:
+  - [uv, run, pytest, -q]
