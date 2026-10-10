@@ -36,6 +36,22 @@
   - honesty: with one guest active, a second visitor gets the busy message and 0 codes are emailed; two guests verifying codes at the same moment yield exactly one active guest; after the first guest's 15 idle minutes or deletion, the next visitor gets in; approved users in Guest view are never refused
 - Delivery alert: when a Resend send fails (HTTP error, including quota exhaustion, or a network error), the lens posts at most one alert per hour per failure kind to a Cloudflare Worker over HTTPS with a shared secret; the Worker emails each approved user through Cloudflare Email Routing; the alert names what failed, says sign-in and guest codes are not being delivered, and points to /login; it never contains a guest's email address or a code
   - honesty: a forced Resend failure sends exactly one alert per failure kind within an hour, the alert body holds no guest email address or code, and the Worker rejects a request without the shared secret
+- The CSRF guard that today demands same-origin proof for cookie-bearing POSTs without an Origin header (csrf.py: only when `lens_guest` is present) also applies to the `lens_session` and pending-sign-in cookies
+  - honesty: a cross-site POST carrying `lens_session` or the pending cookie, with no Origin and Sec-Fetch-Site cross-site, gets 403 before any handler runs
+- Guest idle sign-off counts actions, not open tabs: 15 minutes with no message or command sent closes the guest's session even if the tab stays open (today's `reap_idle` only closes sessions with no open event stream)
+  - honesty: a guest with the tab open who sends nothing for 15 minutes is signed off and frees the slot; a guest who keeps chatting is not
+- Ending an approved session (logout, password change, expiry, removal from `allowed_emails`) also closes that user's open IRC session and event stream, as the ban sweeper does for guests, so an open tab doesn't keep working
+  - honesty: after logout or password change, the user's already-open tab stops receiving events and its next POST is refused within one sweep interval
+- Opening a set-password link (GET) never uses it up; only submitting the new password (POST) consumes the token, so mail scanners that prefetch links can't burn it
+  - honesty: a GET of a set-password link leaves the token usable; only the POST that sets the password consumes it
+- A new random session id is minted at each successful code entry and the pending-sign-in cookie is cleared; a session id from before sign-in is never promoted
+  - honesty: the session cookie after sign-in differs from any cookie the browser held before, and the pending-sign-in cookie is gone
+- A config switch (auth.`app_signin`.enabled, default on) turns app sign-in off and restores the 0.12.2 behavior (correct password -> /login), as the rollback if something goes wrong at cutover
+  - honesty: with auth.`app_signin`.enabled false, a correct password answers 303 /login exactly as 0.12.2 did
+- Owner metrics count sign-in codes sent, sessions started and ended, guest-busy refusals and delivery alerts; no log line contains a code, a session id or a password
+  - honesty: metrics expose the five counters; a grep of logs from a full test run finds no code, session id or password value
+- The retention sweep deletes expired sessions and used or expired sign-in and set-password tokens after a day, the same as guest codes
+  - honesty: a sweep at day+1 leaves no expired session row and no used or expired signin/setpw token
 
 ## Honesty conditions
 
@@ -70,6 +86,12 @@
 - `s3` — `src/irc_lens/web/csrf.py guest cookie`: guest session is a stateless HMAC cookie `lens_guest` (Secure, SameSite=Strict, secret `IRC_LENS_GUEST_COOKIE_SECRET`) - not revocable server-side; Origin check on cookie-bearing POSTs
 - `s4` — `src/irc_lens/guest_store.py`: passwords table (argon2id, CLI-set via irc-lens guests passwd), tokens table with purpose (guest/delete), attempts table for rate limits; no sessions table
 - `s5` — `src/irc_lens/web/deletion.py + mail.py`: emailed single-use token pattern with purpose and fixed per-purpose template already exists (0.12.2); Resend adapter live
+- `s6` — `challenge pass / security lens: src/irc_lens/web/csrf.py csrf_middleware`: same-origin proof without Origin is checked only for the `lens_guest` cookie; a SameSite=Lax `lens_session` would not be covered - seeded the CSRF requirement
+- `s7` — `challenge pass / lifecycle lens: src/irc_lens/web/sessions.py reap_idle + bans.py _loop`: `reap_idle` closes sandbox sessions only after `idle_s` with no open SSE tab; an open idle tab is never reaped, so with `max_guests`=1 one forgotten tab holds the only slot forever - seeded the action-based idle requirement
+- `s8` — `challenge pass / security lens: src/irc_lens/web/bans.py sweep_once`: bans close live sessions via registry.close; nothing equivalent exists for approved users because Access JWT expiry was enforced per request only - seeded the revocation requirement
+- `s9` — `challenge pass / adjacent-systems lens: src/irc_lens/web/entry.py get_login`: /login always 303s to / whatever the tier; with Access path-scoped and `path_cookie` off, the Access cookie still covers / so break-glass keeps working - consistent with c16, no new claim
+- `s10` — `challenge pass / concurrency lens: guest slot (sessions.py registry, store calls via asyncio.to_thread)`: slot check and session open are separate awaits; two verifies can interleave - c24 already demands the verify-time re-check; plan must hold an asyncio lock across check+open (plan-side risk)
+- `s11` — `challenge pass / adjacent-systems lens: Cloudflare Email Routing Worker (cultureflare)`: not read - no Worker code exists yet; `send_email` destination-verification rule rests on assumption c26; Resend quota error shape unknown (v3)
 
 ## Decisions
 
@@ -85,6 +107,7 @@
 ## Open parks
 
 - [unknown_nonblocking] Whether Resend reports quota exhaustion distinctly (status or error name) so the alert can say 'quota used up' instead of a generic failure; any failure alerts either way
+- [unknown_nonblocking] Cloudflare Email Routing `send_email` limits and pricing for a Worker were not checked in this pass
 - [follow_up] Many IPs each sending 5 argon2id checks per 15 minutes can still cost CPU; whether a global password-check budget is needed
 
 ## Resolved vagueness
