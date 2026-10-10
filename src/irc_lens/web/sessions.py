@@ -209,7 +209,7 @@ class SessionRegistry:
     # -- guest limit (c24/h16) ----------------------------------------------
 
     def _live_reservations(self, now: float) -> set[str]:
-        for principal, expires in list(self._reserved.items()):
+        for principal, expires in tuple(self._reserved.items()):  # snapshot: deleting below
             if expires <= now:
                 del self._reserved[principal]
         return set(self._reserved)

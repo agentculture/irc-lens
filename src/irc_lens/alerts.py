@@ -130,7 +130,7 @@ class Alerter:
 
     def wait(self, timeout: float = 5.0) -> None:
         """Join in-flight posts (tests / shutdown)."""
-        for t in list(self._threads):
+        for t in tuple(self._threads):  # snapshot: other threads may append
             t.join(timeout)
         self._threads = [t for t in self._threads if t.is_alive()]
 

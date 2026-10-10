@@ -159,8 +159,10 @@ def test_clear_session_cookie_expires_it() -> None:
     resp = web.Response()
     app_session.clear_session_cookie(resp)
     header = _set_cookie_header(resp, "lens_session")
-    assert "Max-Age=0" in header and "Path=/" in header
-    assert "HttpOnly" in header and "Secure" in header
+    assert "Max-Age=0" in header
+    assert "Path=/" in header
+    assert "HttpOnly" in header
+    assert "Secure" in header
 
 
 def test_signin_cookie_flags_exact() -> None:
@@ -173,7 +175,8 @@ def test_signin_cookie_flags_exact() -> None:
     resp2 = web.Response()
     app_session.clear_signin_cookie(resp2)
     header2 = _set_cookie_header(resp2, "lens_signin")
-    assert "Max-Age=0" in header2 and "Path=/entry" in header2
+    assert "Max-Age=0" in header2
+    assert "Path=/entry" in header2
 
 
 async def test_read_cookies_round_trip(env: Env) -> None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 import urllib.error
 
 import pytest
@@ -13,6 +14,8 @@ from irc_lens.mail import MailSendError
 
 RECIPIENT = "victim@example.com"
 CODE = "SECRETCODE-9X"
+SECRET = secrets.token_urlsafe(8)
+API_KEY = secrets.token_urlsafe(8)
 
 
 class Clock:
@@ -44,7 +47,7 @@ class Failing:
         )
 
 
-def _alerter(rec=None, clock=None, url="https://w.example/a", secret="s3"):
+def _alerter(rec=None, clock=None, url="https://w.example/a", secret=SECRET):
     rec = rec if rec is not None else Rec()
     clock = clock or Clock()
     return alerts.Alerter(url, secret, clock=clock, poster=rec), rec, clock
@@ -62,15 +65,16 @@ def test_429_is_quota_and_payload_is_clean():
     _send(Failing(429), a)
     assert len(rec.posts) == 1
     url, secret, payload = rec.posts[0]
-    assert (url, secret) == ("https://w.example/a", "s3")
+    assert (url, secret) == ("https://w.example/a", SECRET)
     assert set(payload) == {"kind", "message"}
     assert payload["kind"] == "quota"
     assert payload["message"].startswith("Resend quota used up")
-    assert (
-        "/login" in payload["message"] and "not being delivered" in payload["message"]
-    )
+    assert "/login" in payload["message"]
+    assert "not being delivered" in payload["message"]
     blob = json.dumps(payload)
-    assert RECIPIENT not in blob and CODE not in blob and "example.com" not in blob
+    assert RECIPIENT not in blob
+    assert CODE not in blob
+    assert "example.com" not in blob
     assert metrics.get_metrics().snapshot()["delivery_alerts"] == before + 1
 
 
@@ -91,14 +95,15 @@ def test_network_error_is_send_failed():
 
 
 def test_resend_adapter_surfaces_status(monkeypatch):
-    monkeypatch.setenv("K", "key")
+    monkeypatch.setenv("K", API_KEY)
 
     def boom(req, timeout):
         raise urllib.error.HTTPError(req.full_url, 429, "x", {}, None)
 
     monkeypatch.setattr("urllib.request.urlopen", boom)
+    adapter = mail.ResendAdapter("a@b.c", "K")
     with pytest.raises(MailSendError) as ei:
-        mail.ResendAdapter("a@b.c", "K").send(RECIPIENT, "s", "b")
+        adapter.send(RECIPIENT, "s", "b")
     assert ei.value.status == 429
 
 
@@ -151,8 +156,9 @@ def test_non_provider_errors_do_not_alert():
             raise RuntimeError("nope")
 
     a, rec, _ = _alerter()
+    other = Other()
     with pytest.raises(RuntimeError):
-        mail.send_with_alert(Other(), a, RECIPIENT, "s", "b")
+        mail.send_with_alert(other, a, RECIPIENT, "s", "b")
     a.wait()
     assert rec.posts == []
 
@@ -162,7 +168,7 @@ def test_make_alerter_reads_secret_from_env(monkeypatch):
 
     from helpers import DEV_CONFIG
 
-    monkeypatch.setenv("ALERT_S", "topsecret")
+    monkeypatch.setenv("ALERT_S", SECRET)
     cfg = dataclasses.replace(
         DEV_CONFIG,
         guest_mail_alert_url="https://w.example/a",

@@ -194,10 +194,11 @@ async def csrf_middleware(request: web.Request, handler):
     if not routes._origin_ok(request):
         return routes._origin_denied_response(request)  # same body + log as /input
     has_cookie = any(request.cookies.get(name) for name in PROOF_COOKIE_NAMES)
-    if has_cookie and request.headers.get("Origin") is None:
-        if request.headers.get("Sec-Fetch-Site", "").lower() not in (
-            "same-origin",
-            "none",
-        ):
-            return _denied(request, "cookie_without_same_origin_proof")
+    if (
+        has_cookie
+        and request.headers.get("Origin") is None
+        and request.headers.get("Sec-Fetch-Site", "").lower()
+        not in ("same-origin", "none")
+    ):
+        return _denied(request, "cookie_without_same_origin_proof")
     return await handler(request)

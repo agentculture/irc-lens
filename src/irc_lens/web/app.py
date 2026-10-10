@@ -176,6 +176,41 @@ def _default_sandbox_factory(config: LensConfig) -> SessionFactory:
     return factory
 
 
+def _install_guest_state(app: web.Application, config: LensConfig) -> None:
+    if not config.guest_enabled:
+        return
+    from irc_lens.guest_store import GuestStore
+
+    if "guest_store" not in app:
+        app["guest_store"] = GuestStore(
+            config.guest_store_path or _default_guest_store_path()
+        )
+    # Server-side sandbox toggle: principals of approved users currently
+    # viewing the sandbox instead of the real mesh. Never client-set.
+    app["sandbox_toggle"] = set()
+
+
+def _install_media_state(app: web.Application, config: LensConfig) -> None:
+    if not config.media_enabled:
+        return
+    app["media_store"] = MediaStore(
+        root=Path(config.media_dir),
+        max_file_bytes=config.media_max_file_bytes,
+        max_store_bytes=config.media_max_store_bytes,
+    )
+    # Advertised base URL for capability links returned by
+    # `POST /upload`. `media_public_base_url` (when set) is the
+    # operator-declared reachable address (needed once a peer on
+    # another machine has to fetch the blob); otherwise fall back
+    # to this instance's own bind/port, which is at least correct
+    # for same-host / same-LAN consumers.
+    app["media_base"] = (
+        config.media_public_base_url.rstrip("/")
+        if config.media_public_base_url
+        else f"http://{config.web_bind}:{config.web_port}"  # NOSONAR — loopback default; TLS terminates at cloudflared in CF mode
+    )
+
+
 def make_app(
     config: LensConfig,
     session_factory: SessionFactory,
@@ -223,34 +258,8 @@ def make_app(
             "guest_mode on but guest_mode.sandbox.flag_log unset: guest deletion "
             "will not erase the guest's sbx-ask flag lines"
         )
-    if config.guest_enabled:
-        from irc_lens.guest_store import GuestStore
-
-        if "guest_store" not in app:
-            app["guest_store"] = GuestStore(
-                config.guest_store_path or _default_guest_store_path()
-            )
-        # Server-side sandbox toggle: principals of approved users currently
-        # viewing the sandbox instead of the real mesh. Never client-set.
-        app["sandbox_toggle"] = set()
-
-    if config.media_enabled:
-        app["media_store"] = MediaStore(
-            root=Path(config.media_dir),
-            max_file_bytes=config.media_max_file_bytes,
-            max_store_bytes=config.media_max_store_bytes,
-        )
-        # Advertised base URL for capability links returned by
-        # `POST /upload`. `media_public_base_url` (when set) is the
-        # operator-declared reachable address (needed once a peer on
-        # another machine has to fetch the blob); otherwise fall back
-        # to this instance's own bind/port, which is at least correct
-        # for same-host / same-LAN consumers.
-        app["media_base"] = (
-            config.media_public_base_url.rstrip("/")
-            if config.media_public_base_url
-            else f"http://{config.web_bind}:{config.web_port}"  # NOSONAR — loopback default; TLS terminates at cloudflared in CF mode
-        )
+    _install_guest_state(app, config)
+    _install_media_state(app, config)
 
     app.router.add_get("/", routes.get_index)
     app.router.add_post("/input", routes.post_input)

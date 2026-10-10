@@ -19,6 +19,7 @@ import asyncio
 import dataclasses
 import logging
 import re
+import secrets
 import sqlite3
 import warnings
 from collections.abc import AsyncIterator
@@ -48,7 +49,11 @@ SECRET = b"s" * 32
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 T0 = 1_800_000_000.0
 BASE = "https://lens.example.com"
-GOOD_PW = "correct horse battery"
+GOOD_PW = secrets.token_urlsafe(16)  # generated per run: no literal secret
+ELEVEN_PW = secrets.token_urlsafe(9)[:11]  # one short of the 12-char minimum
+TWELVE_PW = secrets.token_urlsafe(9)  # exactly 12 chars
+OLD_PW = secrets.token_urlsafe(16)
+NEW_PW = secrets.token_urlsafe(16)
 SENT_TEXT = "If this address can sign in here, we've emailed a link"
 EXPIRED_TEXT = "This link has expired or was already used."
 DONE_TEXT = "Password set. Sign in with your new password."
@@ -257,7 +262,8 @@ async def test_get_link_twice_leaves_token_usable(env: Env) -> None:
         r = await env.client.get(f"/password/{token}")
         assert r.status == 200
         html = await r.text()
-        assert 'name="password"' in html and 'name="confirm"' in html
+        assert 'name="password"' in html
+        assert 'name="confirm"' in html
         assert 'minlength="12"' in html
         # Never no-referrer: browsers then send Origin: null on the form
         # POST and the CSRF floor refuses it (found in the browser pass).
@@ -287,16 +293,16 @@ async def test_unknown_token_shows_neutral_page(env: Env) -> None:
 async def test_short_password_refused_and_token_stays_valid(env: Env) -> None:
     await env.request_link(ALICE)
     _base, token = env.link()
-    r = await env.submit(token, "elevenchars")  # 11 characters
+    r = await env.submit(token, ELEVEN_PW)  # 11 characters
     assert r.status == 400
     html = await r.text()
     assert "at least 12 characters" in html
     assert 'name="password"' in html
     assert env.store.peek_token(token, purpose="setpw") == ALICE
-    assert not env.store.check_password(ALICE, "elevenchars")
-    r = await env.submit(token, "twelve chars")  # exactly 12
+    assert not env.store.check_password(ALICE, ELEVEN_PW)
+    r = await env.submit(token, TWELVE_PW)  # exactly 12
     assert r.status == 200
-    assert env.store.check_password(ALICE, "twelve chars")
+    assert env.store.check_password(ALICE, TWELVE_PW)
 
 
 async def test_mismatched_confirmation_refused_and_token_stays_valid(env: Env) -> None:
@@ -311,7 +317,7 @@ async def test_mismatched_confirmation_refused_and_token_stays_valid(env: Env) -
 async def test_set_password_argon2id_consumes_token_and_ends_sessions(
     env: Env, tmp_path: Path
 ) -> None:
-    env.store.set_password(ALICE, "old password value")
+    env.store.set_password(ALICE, OLD_PW)
     raw1 = env.store.create_session(ALICE)
     raw2 = env.store.create_session(ALICE)
     # A live IRC session opened through an app session.
@@ -327,7 +333,7 @@ async def test_set_password_argon2id_consumes_token_and_ends_sessions(
     assert 'href="/"' in html
 
     assert env.store.check_password(ALICE, GOOD_PW)
-    assert not env.store.check_password(ALICE, "old password value")
+    assert not env.store.check_password(ALICE, OLD_PW)
     with sqlite3.connect(tmp_path / "setpw.db") as con:
         (hashed,) = con.execute(
             "SELECT hash FROM passwords WHERE email=?", (ALICE,)
@@ -342,7 +348,7 @@ async def test_set_password_argon2id_consumes_token_and_ends_sessions(
         assert (await r.json())["tier"] == "anonymous"
 
     # Single use: the second submit (and a GET) now fail.
-    r = await env.submit(token, "another good password")
+    r = await env.submit(token, NEW_PW)
     assert r.status == 400
     assert EXPIRED_TEXT in await r.text()
     assert env.store.check_password(ALICE, GOOD_PW)
