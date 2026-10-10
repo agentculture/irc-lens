@@ -31,6 +31,11 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
 DEFAULT_TOKEN_TTL = 900
+#: Per-purpose token lifetimes for the app-native sign-in flow.
+TOKEN_TTLS = {"signin": 600, "setpw": 1800}
+#: App sessions expire after this much idle time or this much total age.
+SESSION_IDLE_S = 7 * 86400
+SESSION_MAX_S = 30 * 86400
 #: Retention (d9): guests inactive this long are erased by :meth:`GuestStore.sweep`.
 DEFAULT_INACTIVE_DAYS = 90
 _DAY_S = 86400
@@ -53,6 +58,10 @@ CREATE TABLE IF NOT EXISTS consents (
 CREATE TABLE IF NOT EXISTS tokens (
     token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, purpose TEXT NOT NULL,
     issued INTEGER NOT NULL, ttl INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0);
+-- sessions.id_hash is sha256(raw session id); the raw id lives only in the cookie.
+CREATE TABLE IF NOT EXISTS sessions (
+    id_hash TEXT PRIMARY KEY, email TEXT NOT NULL,
+    created INTEGER NOT NULL, last_seen INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS bans (
     email TEXT, ip TEXT, reason TEXT, ts INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS inputs (
@@ -230,8 +239,10 @@ class GuestStore:
 
     # -- tokens (single use, hashed, TTL) --------------------------------
     def issue_token(
-        self, email: str, *, purpose: str, ttl: int = DEFAULT_TOKEN_TTL
+        self, email: str, *, purpose: str, ttl: int | None = None
     ) -> str:
+        if ttl is None:
+            ttl = TOKEN_TTLS.get(purpose, DEFAULT_TOKEN_TTL)
         token = secrets.token_urlsafe(32)
         self._run(
             "INSERT INTO tokens (token_hash, email, purpose, issued, ttl) VALUES (?,?,?,?,?)",
@@ -249,6 +260,44 @@ class GuestStore:
             (_hash_token(token), email, purpose, now),
         )
         return n == 1
+
+    # -- approved-user app sessions (id stored only as sha256) -------------
+    def create_session(self, email: str) -> str:
+        """Start a session; return the raw id (never stored, only its hash)."""
+        raw = secrets.token_urlsafe(32)
+        now = self._now()
+        self._run(
+            "INSERT INTO sessions (id_hash, email, created, last_seen) VALUES (?,?,?,?)",
+            (_hash_token(raw), email, now, now),
+        )
+        return raw
+
+    def get_session(self, raw_id: str) -> tuple[str, int, int] | None:
+        """``(email, created, last_seen)`` for a live session, else None.
+
+        Idle over :data:`SESSION_IDLE_S` or older than :data:`SESSION_MAX_S`
+        counts as gone (the sweep removes the row later).
+        """
+        now = self._now()
+        rows = self._all(
+            "SELECT email, created, last_seen FROM sessions WHERE id_hash=? "
+            "AND last_seen >= ? AND created >= ?",
+            (_hash_token(raw_id), now - SESSION_IDLE_S, now - SESSION_MAX_S),
+        )
+        return rows[0] if rows else None
+
+    def touch_session(self, raw_id: str, now: int | None = None) -> None:
+        self._run(
+            "UPDATE sessions SET last_seen=? WHERE id_hash=?",
+            (self._now() if now is None else int(now), _hash_token(raw_id)),
+        )
+
+    def delete_session(self, raw_id: str) -> int:
+        return self._run("DELETE FROM sessions WHERE id_hash=?", (_hash_token(raw_id),))
+
+    def delete_sessions_for_email(self, email: str) -> int:
+        """Revoke every session of *email*; returns how many were removed."""
+        return self._run("DELETE FROM sessions WHERE email=?", (email,))
 
     # -- attempt counting (rate limits for the entry task) ---------------
     def record_attempt(self, kind: str, key: str) -> None:
@@ -396,14 +445,23 @@ class GuestStore:
           web app passes the full user-deletion path, which also clears
           uploads and flag-log lines) and logged by hash.
         * ``flags``: flag rows of those guests (erased with them).
-        * ``tokens`` issued more than a day ago.
+        * ``tokens`` issued more than a day ago (so used or expired
+          guest, signin and setpw tokens are gone a day later).
+        * ``sessions`` idle over 7 days or older than 30 days.
         * ``attempts`` (rate-limit counters) older than a day.
         * ``bans`` older than 365 days.
         """
         now = self._now() if now is None else int(now)
         erase = erase or self.delete_guest_inputs
         expired = self.inactive_guests(now - int(inactive_days) * _DAY_S)
-        counts = {"guests": 0, "flags": 0, "tokens": 0, "attempts": 0, "bans": 0}
+        counts = {
+            "guests": 0,
+            "flags": 0,
+            "tokens": 0,
+            "sessions": 0,
+            "attempts": 0,
+            "bans": 0,
+        }
         for email in expired:
             counts["flags"] += self._all(
                 "SELECT COUNT(*) FROM flags WHERE email=?", (email,)
@@ -413,6 +471,10 @@ class GuestStore:
         with closing(self._connect()) as con, con:
             counts["tokens"] = con.execute(
                 "DELETE FROM tokens WHERE issued < ?", (now - TOKEN_RETENTION_S,)
+            ).rowcount
+            counts["sessions"] = con.execute(
+                "DELETE FROM sessions WHERE last_seen < ? OR created < ?",
+                (now - SESSION_IDLE_S, now - SESSION_MAX_S),
             ).rowcount
             counts["attempts"] = con.execute(
                 "DELETE FROM attempts WHERE ts < ?", (now - ATTEMPT_RETENTION_S,)
