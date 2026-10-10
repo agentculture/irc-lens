@@ -56,7 +56,8 @@ async def test_untrusted_signin_mails_a_notice(env: TEnv) -> None:
     assert "Set or reset password" in body
     session = r.cookies["lens_session"].value
     code = re.search(r"^ {4}(\S+)$", env.mail.sent[-2][2], flags=re.M).group(1)
-    assert session not in body and code not in body
+    assert session not in body
+    assert code not in body
 
 
 async def test_ticked_first_signin_is_still_a_new_browser(env: TEnv) -> None:
@@ -105,7 +106,8 @@ def test_notice_browser_text_is_cleaned() -> None:
     _subject, body = render_signin_notice(
         ip="192.0.2.1", user_agent=ua, when=1_800_000_000
     )
-    assert "\r" not in body and "\x00" not in body
+    assert "\r" not in body
+    assert "\x00" not in body
     assert "Bcc: x@example.com\n" not in body
     line = next(ln for ln in body.splitlines() if "Browser:" in ln)
     assert len(line) < 200
