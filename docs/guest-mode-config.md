@@ -14,7 +14,8 @@ guest_mode:
     port: 6668
     room_prefix: "#g-"      # private room per guest; must match sbx-ask
     flag_log: ~/.culture/sandbox/flags.jsonl  # deletion purges it
-  idle_close_s: 600         # close a session with no open tab
+  idle_close_s: 900         # close a session with no open tab
+  max_guests: 1             # concurrent guest sessions allowed
   retention_days: 90        # erase guests inactive this many days
   store_path: ~/.local/share/irc-lens/guests.db   # default: $XDG_DATA_HOME/irc-lens/guests.db
   legal_version_url: https://culture.dev/legal/version.json
@@ -22,6 +23,8 @@ guest_mode:
     provider: none
     from: ""
     api_key_env: IRC_LENS_MAIL_API_KEY            # env var holding the provider key
+    alert_url: ""             # optional delivery-alert webhook (https; http only for 127.0.0.1/localhost)
+    alert_secret_env: ""      # env var holding the alert webhook secret
   rate_limits:
     entry_per_min: 10
     messages_per_min: 20
@@ -36,13 +39,16 @@ guest_mode:
 | `sandbox.port` | `guest_sandbox_port` | `6668` |
 | `sandbox.room_prefix` | `guest_room_prefix` | `#g-` |
 | `sandbox.flag_log` | `guest_sandbox_flag_log` | unset (required for full deletion) |
-| `idle_close_s` | `guest_idle_close_s` | `600` |
+| `idle_close_s` | `guest_idle_close_s` | `900` |
+| `max_guests` | `guest_max_guests` | `1` |
 | `retention_days` | `guest_retention_days` | `90` |
 | `store_path` | `guest_store_path` | `$XDG_DATA_HOME/irc-lens/guests.db` |
 | `legal_version_url` | `guest_legal_version_url` | `https://culture.dev/legal/version.json` |
 | `mail.provider` | `guest_mail_provider` | `none` |
 | `mail.from` | `guest_mail_from` | `""` |
 | `mail.api_key_env` | `guest_mail_api_key_env` | `IRC_LENS_MAIL_API_KEY` |
+| `mail.alert_url` | `guest_mail_alert_url` | unset (alerts off) |
+| `mail.alert_secret_env` | `guest_mail_alert_secret_env` | unset |
 | `rate_limits.entry_per_min` | `guest_rate_entry_per_min` | `10` |
 | `rate_limits.messages_per_min` | `guest_rate_messages_per_min` | `20` |
 | `rate_limits.password_attempts_per_15min` | `guest_rate_password_attempts_per_15min` | `5` |
@@ -51,7 +57,26 @@ Validation: every sub-section must be a mapping; unknown keys anywhere in the
 section are rejected (typo guard); `enabled` must be a boolean, ports go
 through the shared port check, `legal_version_url` must be an `http(s)` URL
 with a host, rate limits must be integers, and `idle_close_s` and
-`retention_days` must be positive integers.
+`retention_days` must be positive integers, as must `max_guests`.
+`mail.alert_url`, when set, must be an `https` URL (plain `http` is accepted
+only for `127.0.0.1` / `localhost`).
+
+## App sign-in switch
+
+```yaml
+auth:
+  app_signin:
+    enabled: true   # default; false restores 0.12.2 (correct password -> /login)
+```
+
+Maps to `LensConfig.app_signin_enabled`. Unknown keys under `auth.app_signin`
+and non-boolean values are rejected at load.
+
+## Owner metrics counters
+
+`/owner/metrics` also reports `signin_codes_sent`, `sessions_started`,
+`sessions_ended`, `guest_busy` and `delivery_alerts` (counts only; no codes,
+session ids or passwords are ever logged).
 
 ## Guest session cookie and CSRF
 
