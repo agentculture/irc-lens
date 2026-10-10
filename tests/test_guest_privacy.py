@@ -421,8 +421,9 @@ def test_retention_days_config_default_and_override(tmp_path) -> None:
 def test_retention_days_must_be_positive_int(tmp_path, bad) -> None:
     from irc_lens.cli._errors import AfiError
 
+    path = _cfg_yaml(tmp_path, f"guest_mode:\n  retention_days: {bad}\n")
     with pytest.raises(AfiError) as exc:
-        load_config(_cfg_yaml(tmp_path, f"guest_mode:\n  retention_days: {bad}\n"))
+        load_config(path)
     assert "guest_mode.retention_days" in exc.value.message
 
 
