@@ -27,6 +27,8 @@ import urllib.error
 import urllib.request
 from typing import Protocol, runtime_checkable
 
+from dataclasses import dataclass
+
 from irc_lens import __version__
 from irc_lens._errors import EXIT_ENV_ERROR, AfiError
 from irc_lens.config import LensConfig
@@ -188,6 +190,13 @@ def _delete_body(token: str, ttl_s: int) -> str:
     )
 
 
+@dataclass
+class MailSendError(AfiError):
+    """A provider send failure; ``status`` is the HTTP code, None for network."""
+
+    status: int | None = None
+
+
 @runtime_checkable
 class MailAdapter(Protocol):
     """A provider that delivers one plain-text email."""
@@ -281,13 +290,14 @@ class ResendAdapter:
         except urllib.error.HTTPError as exc:
             # Re-raise without the response body: it may echo the
             # request back, which would put the token in logs.
-            raise AfiError(
+            raise MailSendError(
                 code=EXIT_ENV_ERROR,
                 message=f"mail provider rejected the send (HTTP {exc.code})",
                 remediation="check `guest_mode.mail.*` and the provider account",
+                status=exc.code,
             ) from exc
         except urllib.error.URLError as exc:
-            raise AfiError(
+            raise MailSendError(
                 code=EXIT_ENV_ERROR,
                 message=f"mail provider unreachable ({exc.reason})",
                 remediation="check network connectivity to the mail provider",
@@ -306,3 +316,23 @@ def make_adapter(cfg: LensConfig) -> MailAdapter:
         message=f"unknown guest mail provider {cfg.guest_mail_provider!r}",
         remediation=("set `guest_mode.mail.provider:` to one of: none, resend"),
     )
+
+
+def send_with_alert(
+    adapter: MailAdapter, alerter, to: str, subject: str, body: str
+) -> None:
+    """``adapter.send`` plus a delivery alert on provider failure; re-raises.
+
+    Only :class:`MailSendError` (HTTP / network failure) alerts; the alert
+    text carries the status code only -- never *to*, the code, or the
+    provider's response.
+    """
+    try:
+        adapter.send(to, subject, body)
+    except MailSendError as exc:
+        if alerter is not None:
+            from irc_lens.alerts import classify, message_for
+
+            kind = classify(exc.status)
+            alerter.notify(kind, message_for(kind, exc.status))
+        raise
