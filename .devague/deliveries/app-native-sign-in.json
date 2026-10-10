@@ -2,7 +2,7 @@
   "plan_slug": "app-native-sign-in",
   "schema_version": 2,
   "created": "2026-10-10T15:04:29Z",
-  "updated": "2026-10-10T21:58:34Z",
+  "updated": "2026-10-10T22:21:22Z",
   "deviations": [
     {
       "id": "d1",
@@ -628,7 +628,7 @@
         "e11"
       ],
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false
     }
   ],

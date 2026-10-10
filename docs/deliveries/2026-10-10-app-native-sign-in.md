@@ -146,7 +146,7 @@ Decisions no record covers:
 ## Delivery Claims
 
 The owner approved evidence `e1`–`e23`, deltas `b1`–`b5`, deviation `d9`
-and lapses `l1`–`l9` on 2026-10-11; the delta for `d9` is `b6` (proposed).
+and lapses `l1`–`l9` on 2026-10-11, and the `d9` delta `b6` after it.
 Each approved lapse caps the confidence of the claims it touches at medium,
 named in the row: `l3`/`l4`/`l6` (tests not watched failing first), `l7`
 (the set-password grader missed the referrer bug), `l8` (trust-year test
@@ -176,7 +176,7 @@ gap), `l9` (same-IP multi-browser case untested before go-live), `l1`/`l5`
 | `c34` the sweep removes expired sessions and old tokens after a day | medium | `tests/test_app_sessions_store.py::test_sweep_at_day_plus_one_leaves_no_expired_rows` · `e19` · capped by approved lapse l4 |
 | `c37`/`c39` trusted browsers via an unchecked-by-default checkbox | medium | `tests/test_trusted_devices.py` · delta `b1` · live sign-in with trust ticked · capped by approved lapse l8 |
 | `c40` new-browser sign-in notice | high | `tests/test_signin_notice.py` · delta `b5` · notice received live |
-| `d9` review fixes (no-provider auto-off, case-insensitive allowlist, base-URL check, 429 wording) | high | `tests/test_signin_review_fixes.py` · `tests/test_alerts.py` · `d9` approved, delta `b6` (proposed) |
+| `d9` review fixes (no-provider auto-off, case-insensitive allowlist, base-URL check, 429 wording) | high | `tests/test_signin_review_fixes.py` · `tests/test_alerts.py` · `d9` approved, delta `b6` |
 
 Lapse ledger (all approved): `l1` binding shape written from memory (now
 backed by live delivery), `l2` weak 'templates unchanged' grader, `l3`–`l6`
@@ -187,7 +187,6 @@ referrer policy (fixed, regression test added), `l8` trust-year test gap
 
 ## Remaining Work / Follow-up
 
-- Owner adjudication — confirm or reject delta `b6` (the review fixes, `d9`).
 - Alert recipients — add the collaborator after their address is verified
   in Cloudflare Email Routing; redeploy with `cf-delivery-alert-deploy.sh
   --apply`.
