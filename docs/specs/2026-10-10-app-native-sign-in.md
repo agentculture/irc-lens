@@ -110,6 +110,8 @@
 - After idle sign-off a guest's cookie still works: if the slot is free they rejoin their room, otherwise they see the busy message; no new code is emailed
 - r6 (owner): a browser that has completed the full sign-in (password, code, chat) for an email is trusted for that email and gets no attempt limit; untrusted browsers share one per-email budget of 3 attempts per 15 minutes, dropping to 2 per 30 minutes once it has been exhausted; a blocked attempt looks exactly like an unblocked one (same code screen, no code sent; same code error)
 - Owner: the sign-in code screen has a 'Trust this browser' checkbox; only when it is ticked does completing sign-in make the browser trusted (`lens_device`)
+- Owner: email the user when a sign-in completes from a new browser so they are aware; a browser already trusted for that email is not new, even from a changed IP (no email); a browser without trust has nothing that identifies it, so every sign-in from it emails
+  - ⚠ contested by `d6`: owner request during review of #68: users should learn of sign-ins from browsers they have not trusted
 
 ## Open parks
 
