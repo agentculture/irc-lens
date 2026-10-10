@@ -98,6 +98,14 @@
           </div>
         </form>
 
+        {% elif step == "busy" %}
+        <div class="entry-form">
+          <p class="entry-note" role="status">{{ busy }}</p>
+          <div class="entry-actions">
+            <a href="/entry" class="btn btn-outline">Back</a>
+          </div>
+        </div>
+
         {% elif step in ("code", "signin_code") %}
         {% set signin = step == "signin_code" %}
         <form method="post" action="{{ '/entry/code' if signin else '/entry/verify' }}" class="entry-form">

@@ -62,8 +62,9 @@ async def _loop(app: web.Application, interval: float) -> None:
         except Exception:  # noqa: BLE001 -- the sweeper must never die
             logger.exception("app session sweep failed")
         try:
-            # Same cadence: close sandbox sessions nobody has had open for
-            # guest_idle_close_s (closed tabs send no goodbye) (d7).
+            # Same cadence: sign off guests with no action (message or
+            # command) for guest_idle_close_s, open tab or not (c28), and
+            # close Guest-view sessions with no open tab that long (d7).
             await app["registry"].reap_idle(
                 now=time.monotonic(), idle_s=app["config"].guest_idle_close_s
             )
