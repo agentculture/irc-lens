@@ -24,6 +24,7 @@ import asyncio
 import logging
 import time
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
@@ -391,6 +392,84 @@ def _adopt_app_session(request: web.Request) -> bool:
     return True
 
 
+@dataclass(frozen=True)
+class _AccessContext:
+    """What the cloudflare-access middleware checks a request against."""
+
+    cache: _JWKSCache
+    issuer: str
+    aud: str
+    team_domain: str
+    allowed_emails: set[str]
+    allowed_tokens: set[str]
+    server_name: str
+    guest_enabled: bool
+
+
+async def _as_anonymous(request: web.Request, handler, reason: str):
+    """Guest mode: resolve to the anonymous tier, deny-by-default routes."""
+    logger.info(
+        "auth=anonymous reason=%s method=%s path=%s",
+        reason,
+        request.method,
+        request.path,
+    )
+    if not _route_allows_anonymous(request):
+        return _http_error(401, _ERR_APPROVED_REQUIRED, _HINT_APPROVED_REQUIRED)
+    request["identity"] = _guest_identity(request) or ANONYMOUS_IDENTITY
+    return await handler(request)
+
+
+async def _fallback(
+    ctx: _AccessContext, request: web.Request, handler, reason: str, deny
+):
+    """Guest mode: continue as anonymous; otherwise answer with ``deny()``."""
+    if ctx.guest_enabled:
+        return await _as_anonymous(request, handler, reason)
+    return deny()
+
+
+async def _via_access_jwt(
+    ctx: _AccessContext, request: web.Request, handler, token: str
+):
+    """Verify the Access JWT, authorize its principal, run the handler.
+
+    A denial whose status allows it falls back to the anonymous tier in
+    guest mode; any other denial is answered as-is.
+    """
+    try:
+        claims = await _decode_and_verify_jwt(
+            ctx.cache, token, ctx.aud, ctx.issuer, ctx.team_domain
+        )
+        identity = _authorize_principal(
+            claims, ctx.allowed_emails, ctx.allowed_tokens, ctx.server_name
+        )
+    except _AuthDenied as denied:
+        refusal = denied.response
+        if refusal.status not in _ANONYMOUS_FALLBACK_STATUSES:
+            return refusal
+        return await _fallback(
+            ctx, request, handler, f"not-approved-{refusal.status}", lambda: refusal
+        )
+    request["identity"] = identity
+    logger.info(
+        "auth=ok principal=%s nick=%s method=%s path=%s",
+        identity.principal,
+        identity.nick,
+        request.method,
+        request.path,
+    )
+    return await handler(request)
+
+
+def _missing_identity() -> web.Response:
+    return _http_error(
+        401,
+        "missing Cloudflare Access identity",
+        "ensure this request is reaching the lens through cloudflared",
+    )
+
+
 def build_cloudflare_middleware(config: LensConfig):
     """Build the @web.middleware coroutine for cloudflare-access mode.
 
@@ -399,33 +478,16 @@ def build_cloudflare_middleware(config: LensConfig):
     ``request['identity']`` so downstream handlers stay mode-agnostic.
     """
     _require_cf_config(config)
-    cache = _JWKSCache(config.cf_team_domain)
-    issuer = _build_issuer(config.cf_team_domain)
-    aud = config.cf_aud
-    team_domain = config.cf_team_domain
-    allowed_emails = set(config.allowed_emails)
-    allowed_tokens = set(config.allowed_service_tokens)
-    server_name = config.server_name
-    guest_enabled = config.guest_enabled
-
-    async def _as_anonymous(request: web.Request, handler, reason: str):
-        """Guest mode: resolve to the anonymous tier, deny-by-default routes."""
-        logger.info(
-            "auth=anonymous reason=%s method=%s path=%s",
-            reason,
-            request.method,
-            request.path,
-        )
-        if not _route_allows_anonymous(request):
-            return _http_error(401, _ERR_APPROVED_REQUIRED, _HINT_APPROVED_REQUIRED)
-        request["identity"] = _guest_identity(request) or ANONYMOUS_IDENTITY
-        return await handler(request)
-
-    async def _fallback(request: web.Request, handler, reason: str, deny):
-        """Guest mode: continue as anonymous; otherwise answer with ``deny()``."""
-        if guest_enabled:
-            return await _as_anonymous(request, handler, reason)
-        return deny()
+    ctx = _AccessContext(
+        cache=_JWKSCache(config.cf_team_domain),
+        issuer=_build_issuer(config.cf_team_domain),
+        aud=config.cf_aud,
+        team_domain=config.cf_team_domain,
+        allowed_emails=set(config.allowed_emails),
+        allowed_tokens=set(config.allowed_service_tokens),
+        server_name=config.server_name,
+        guest_enabled=config.guest_enabled,
+    )
 
     @web.middleware
     async def middleware(request: web.Request, handler):
@@ -450,40 +512,9 @@ def build_cloudflare_middleware(config: LensConfig):
         token = _extract_token(request)
         if not token:
             return await _fallback(
-                request,
-                handler,
-                "no-jwt",
-                lambda: _http_error(
-                    401,
-                    "missing Cloudflare Access identity",
-                    "ensure this request is reaching the lens through cloudflared",
-                ),
+                ctx, request, handler, "no-jwt", _missing_identity
             )
-        try:
-            claims = await _decode_and_verify_jwt(
-                cache, token, aud, issuer, team_domain
-            )
-            identity = _authorize_principal(
-                claims, allowed_emails, allowed_tokens, server_name
-            )
-        except _AuthDenied as denied:
-            if denied.response.status not in _ANONYMOUS_FALLBACK_STATUSES:
-                return denied.response
-            return await _fallback(
-                request,
-                handler,
-                f"not-approved-{denied.response.status}",
-                lambda: denied.response,
-            )
-        request["identity"] = identity
-        logger.info(
-            "auth=ok principal=%s nick=%s method=%s path=%s",
-            identity.principal,
-            identity.nick,
-            request.method,
-            request.path,
-        )
-        return await handler(request)
+        return await _via_access_jwt(ctx, request, handler, token)
 
     return middleware
 
