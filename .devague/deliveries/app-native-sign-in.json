@@ -2,7 +2,7 @@
   "plan_slug": "app-native-sign-in",
   "schema_version": 2,
   "created": "2026-10-10T15:04:29Z",
-  "updated": "2026-10-10T16:40:36Z",
+  "updated": "2026-10-10T17:35:45Z",
   "deviations": [
     {
       "id": "d1",
@@ -69,6 +69,19 @@
       "status": "approved",
       "classification": "acceptable",
       "seq": 5
+    },
+    {
+      "id": "d6",
+      "what": "owner adds a new-browser sign-in notice email (c40) to the app sign-in PR, after the review fixes",
+      "task_ref": "t8",
+      "reason": "owner request during review of #68: users should learn of sign-ins from browsers they have not trusted",
+      "affects": [
+        "c40"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": null,
+      "seq": 6
     }
   ],
   "evidence": [],

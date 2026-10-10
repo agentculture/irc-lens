@@ -67,6 +67,7 @@ from irc_lens.mail import (
     PURPOSE_SIGNIN,
     MailAdapter,
     make_adapter,
+    render_signin_notice,
     render_token_email,
     send_with_alert,
 )
@@ -533,6 +534,33 @@ def _schedule_signin_code(state: EntryState, email: str, code: str) -> None:
     task.add_done_callback(state.mail_tasks.discard)
 
 
+async def _send_signin_notice(
+    state: EntryState, email: str, ip: str, user_agent: str, when: float
+) -> None:
+    """Mail the new-browser sign-in notice (c40; background, off the request)."""
+    subject, body = render_signin_notice(ip=ip, user_agent=user_agent, when=when)
+    try:
+        await asyncio.to_thread(
+            send_with_alert, state.get_mailer(), state.alerter, email, subject, body
+        )
+    except Exception as exc:  # noqa: BLE001 -- the sign-in already succeeded
+        logger.warning("sign-in notice mail not sent: %s", type(exc).__name__)
+
+
+def _schedule_signin_notice(state: EntryState, request: web.Request, email: str) -> None:
+    task = asyncio.create_task(
+        _send_signin_notice(
+            state,
+            email,
+            client_ip(request),
+            request.headers.get("User-Agent", ""),
+            state.get_store().now(),
+        )
+    )
+    state.mail_tasks.add(task)
+    task.add_done_callback(state.mail_tasks.discard)
+
+
 async def _post_signin_app(request: web.Request) -> web.Response:
     """Oracle-free sign-in: every case answers with the same code screen.
 
@@ -622,12 +650,17 @@ async def post_code(request: web.Request) -> web.Response:
         return _page(state, "signin_code", status=401, email=email, error=ERR_CODE)
     raw = store.create_session(email)
     device = app_session.read_device_cookie(request)
+    was_trusted = store.is_trusted_device(device, email)
     new_device = None
     if form.get("trust") == "on":
         new_device = store.add_trusted_device(email, previous_raw=device)
         logger.info("app sign-in browser trusted")
-    elif device is not None and store.is_trusted_device(device, email):
+    elif was_trusted:
         store.touch_trusted_device(device, email)
+    if not was_trusted:
+        # A browser not trusted for this email is new to it (c40): tell the
+        # user, whatever the IP. A trusted one is known, even from a new IP.
+        _schedule_signin_notice(state, request, email)
     await _pad(started, state.signin_floor_s)
     resp = _see_other("/")
     app_session.issue_session_cookie(resp, raw)

@@ -135,6 +135,15 @@ user signs in inside the app, without Cloudflare Access:
   password step gets the same code screen (same status, body and floor) and
   no code is mailed; a blocked code entry gets the one `Wrong or expired
   code` error without checking or using up the code.
+- **New-browser notice.** A completed sign-in from a browser that is not
+  trusted for that email mails the user "New sign-in to chat.culture.dev"
+  with the time (UTC), the IP and the browser (User-Agent, cleaned and cut
+  to 120 characters), and points to **Set or reset password** if it wasn't
+  them. A browser already trusted for that email gets no notice, even from
+  a new IP. An untrusted browser has nothing that identifies it, so every
+  sign-in from it sends one. The notice carries no code, session id or
+  device id and goes out in the background; if it fails, the sign-in still
+  succeeds (a provider failure raises the usual delivery alert).
 
 Approved users are still exactly the `allowed_emails` list: there is no
 sign-up and no account creation. The Cloudflare Access `/login` path keeps

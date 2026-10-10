@@ -37,6 +37,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   per IP (password and code together); blocked attempts look exactly like
   unblocked ones. Replaces the per-email 5 code tries, the 5 codes per 15
   minutes and the per-IP 5 password checks on the app sign-in path.
+- **New-browser sign-in notice** (owner decision c40). A completed sign-in
+  from a browser not trusted for that email mails the user the time, IP and
+  browser, and how to reset the password if it wasn't them. Trusted
+  browsers get none, even from a new IP.
 - `auth.app_signin.enabled` (default true) and `auth.app_signin.base_url`.
   App sign-in needs a mail provider: with `guest_mode.mail.provider: none`
   it stays off (approved users use `/login`) and the console logs why.

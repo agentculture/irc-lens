@@ -115,9 +115,11 @@ class TEnv(Env):
         assert r.status == 200
         await self.drain()
         assert len(self.mail.sent) == before + 1, "no code was mailed"
-        return await self.enter(
+        r = await self.enter(
             email, self.last_code(), pending_of(r), ip, device=device, trust=trust
         )
+        await self.drain()  # the new-browser notice (c40) goes out too
+        return r
 
     async def trusted_device(self, email: str = ALICE, password: str = PW) -> str:
         self._trust_ip = getattr(self, "_trust_ip", 199) + 1  # own IP budget

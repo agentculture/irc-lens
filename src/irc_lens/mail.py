@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import urllib.error
 import urllib.request
 from typing import Protocol, runtime_checkable
@@ -122,6 +123,44 @@ def _signin_body(token: str, ttl_s: int) -> str:
         "'Set or reset password' on the sign-in page to change it.\n\n"
         "The Culture team\n"
     )
+
+
+NOTICE_SUBJECT = "New sign-in to chat.culture.dev"
+_NOTICE_UA_MAX = 120
+
+
+def _clean_ua(user_agent: object) -> str:
+    """The browser's User-Agent as one short printable line (it is untrusted)."""
+    text = "".join(
+        ch if ch.isprintable() else " " for ch in str(user_agent or "")
+    )
+    text = " ".join(text.split())[:_NOTICE_UA_MAX]
+    return text or "unknown"
+
+
+def render_signin_notice(*, ip: str, user_agent: object, when: float) -> tuple[str, str]:
+    """Render the new-browser sign-in notice: ``(subject, text_body)``.
+
+    Sent after a completed sign-in from a browser not trusted for the email
+    (c40). It carries only the time, IP and browser -- never a code,
+    session id or device id.
+    """
+    stamp = time.strftime("%Y-%m-%d %H:%M UTC", time.gmtime(when))
+    body = (
+        "Hello,\n\n"
+        "Your chat.culture.dev account was just signed in from a browser "
+        "that isn't trusted for it:\n\n"
+        f"    Time: {stamp}\n"
+        f"    IP address: {_clean_ua(ip)}\n"
+        f"    Browser: {_clean_ua(user_agent)}\n\n"
+        "If this was you, there's nothing to do. Tick 'Trust this browser' "
+        "when you sign in to stop these emails for that browser.\n\n"
+        "If it wasn't you, someone knows your password and can read your "
+        "email: use 'Set or reset password' on the sign-in page now. That "
+        "signs out every session and untrusts every browser.\n\n"
+        "The Culture team\n"
+    )
+    return NOTICE_SUBJECT, body
 
 
 def is_allowed_base_url(base_url: object) -> bool:
