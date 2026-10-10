@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-10
+
+### Fixed
+
+- **App sign-in code entries are no longer limited or counted** (owner
+  decision c41, deviation d7). On go-live a second browser on the same IP had
+  its correct code silently refused: the first browser's sign-in had used the
+  per-IP slots, and code entries counted toward the per-IP limit and the
+  per-email budget. A code is 256 random bits, valid once for 10 minutes and
+  only in the browser that entered the right password, so guessing one is
+  infeasible; counting code entries only locked out the real user. The per-IP
+  limit (3 per 15 minutes) and the per-email untrusted budget now count
+  password submissions only, and any number of wrong code entries leaves the
+  right code working. Blocked password attempts still look exactly like
+  unblocked ones.
+- **Only wrong passwords count** (owner decision c42, deviation d8, from
+  review of this fix). A correct password is taken back from the per-IP
+  limit and the per-email budget once checked, so several new browsers on
+  one home IP no longer lock each other out at the password step. The count
+  is never visible, so this reveals nothing; brute force stays fully
+  limited, and a blocked attempt (never checked) is not refunded.
+
 ## [0.13.0] - 2026-10-10
 
 ### Added

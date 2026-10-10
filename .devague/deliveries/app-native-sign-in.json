@@ -2,7 +2,7 @@
   "plan_slug": "app-native-sign-in",
   "schema_version": 2,
   "created": "2026-10-10T15:04:29Z",
-  "updated": "2026-10-10T17:35:45Z",
+  "updated": "2026-10-10T20:40:17Z",
   "deviations": [
     {
       "id": "d1",
@@ -82,6 +82,32 @@
       "status": "approved",
       "classification": null,
       "seq": 6
+    },
+    {
+      "id": "d7",
+      "what": "code entries no longer count toward the per-IP limit or the per-email untrusted budget (amends c38/h27: those count password submissions only); no limit on code entries",
+      "task_ref": "t8",
+      "reason": "live go-live: an owner's second browser on the same IP had its correct code silently refused, because the first sign-in's code entry used an IP slot; code guessing is infeasible, so counting codes only locked out the real user",
+      "affects": [
+        "c38"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": null,
+      "seq": 7
+    },
+    {
+      "id": "d8",
+      "what": "correct password submissions are refunded from the per-IP limit and the per-email untrusted budget; only wrong ones count (amends c38)",
+      "task_ref": "t8",
+      "reason": "review of #73 (finding 2): several new browsers on one home IP could still silently lock out the owner at the password step",
+      "affects": [
+        "c38"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": null,
+      "seq": 8
     }
   ],
   "evidence": [],

@@ -408,12 +408,12 @@ config key and default, in [guest-mode-config.md](guest-mode-config.md).
   (unchecked by default) on the code screen sets `lens_device` (one year;
   only its sha256 is stored, per email): that browser has no sign-in attempt
   limit for that email. Logout keeps it; setting or resetting the password
-  (including `irc-lens guests passwd`) revokes it. Untrusted browsers share
-  one per-email budget of password and code attempts: 3 per 15 minutes, then
+  (including `irc-lens guests passwd`) revokes it. Untrusted browsers have
+  one per-email budget of wrong password submissions: 3 per 15 minutes, then
   2 per 30 minutes once exhausted until 24 hours pass with no blocked
-  attempt, plus 3 attempts per 15 minutes per IP. A blocked attempt looks
-  exactly like an unblocked one (same code screen and no code mailed; same
-  code error).
+  attempt, plus 3 wrong password submissions per 15 minutes per IP. Correct
+  passwords and code entries are never counted. A blocked password attempt
+  looks exactly like an unblocked one (same code screen, no code mailed).
 - **Set or reset a password.** `GET/POST /password` mails a single-use
   30-minute link `<auth.app_signin.base_url>/password/<token>` (falls back to
   `media.public_base_url`); setting a password (12 characters or more, argon2id)
