@@ -28,7 +28,13 @@ The pending sign-in cookie ``lens_signin`` (``SameSite=Strict``,
 ``Path=/entry``, 10 minutes) ties the emailed code to the browser that
 entered the password; its value is opaque to this module.
 
-Raw session ids and cookie values are never logged.
+A browser that completes sign-in with "Trust this browser" ticked gets the
+trusted-browser cookie ``lens_device`` (``HttpOnly; Secure; SameSite=Lax;
+Path=/``, one year): a random id whose sha256 the store keeps per email. It
+exempts that browser from the sign-in attempt limits for that email only.
+Logout keeps it; setting or resetting the password revokes it.
+
+Raw session ids, device ids and cookie values are never logged.
 """
 
 from __future__ import annotations
@@ -50,6 +56,8 @@ SIGNIN_COOKIE_NAME = "lens_signin"
 SESSION_COOKIE_MAX_AGE = 30 * 86400
 SIGNIN_COOKIE_MAX_AGE = 600
 SIGNIN_COOKIE_PATH = "/entry"
+DEVICE_COOKIE_NAME = "lens_device"
+DEVICE_COOKIE_MAX_AGE = 365 * 86400
 
 #: Write ``last_seen`` at most this often per session (no DB write per request).
 TOUCH_INTERVAL_S = 60
@@ -122,6 +130,33 @@ def clear_signin_cookie(response: web.StreamResponse) -> None:
         secure=True,
         httponly=True,
         samesite="Strict",
+    )
+
+
+def issue_device_cookie(response: web.StreamResponse, raw_id: str) -> None:
+    """Set ``lens_device`` (HttpOnly, Secure, SameSite=Lax, Path=/, one year)."""
+    response.set_cookie(
+        DEVICE_COOKIE_NAME,
+        raw_id,
+        max_age=DEVICE_COOKIE_MAX_AGE,
+        path="/",
+        httponly=True,
+        secure=True,
+        samesite="Lax",
+    )
+
+
+def read_device_cookie(request: web.Request) -> str | None:
+    """The raw trusted-browser id from ``lens_device``, or None if absent/malformed."""
+    value = request.cookies.get(DEVICE_COOKIE_NAME)
+    if not value or not _RAW_ID_RE.fullmatch(value):
+        return None
+    return value
+
+
+def clear_device_cookie(response: web.StreamResponse) -> None:
+    response.del_cookie(
+        DEVICE_COOKIE_NAME, path="/", secure=True, httponly=True, samesite="Lax"
     )
 
 
@@ -262,6 +297,8 @@ async def end_sessions_for_email(app: web.Application, email: str) -> int:
 
 async def post_logout(request: web.Request) -> web.Response:
     """End this browser's app session, clear the cookie, go home.
+
+    The trusted-browser cookie ``lens_device`` is deliberately kept (c37).
 
     Approved-only (not ``allows_anonymous``) and CSRF-checked like every
     POST. htmx requests get ``HX-Redirect`` (an XHR would follow a 303

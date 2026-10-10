@@ -42,6 +42,16 @@ _DAY_S = 86400
 TOKEN_RETENTION_S = _DAY_S
 ATTEMPT_RETENTION_S = _DAY_S
 BAN_RETENTION_S = 365 * _DAY_S
+#: Trusted browsers (``lens_device``) last one year from the trusting sign-in.
+TRUSTED_DEVICE_S = 365 * _DAY_S
+#: Untrusted sign-in budget per email (r6/c38): password submissions and
+#: code entries together. Normal: 3 per 15 minutes. Once it has been
+#: exhausted the email is strict -- 2 per 30 minutes -- until 24 hours pass
+#: with no blocked attempt.
+SIGNIN_BUDGET = (3, 900)
+SIGNIN_BUDGET_STRICT = (2, 1800)
+SIGNIN_BUDGET_QUIET_S = _DAY_S
+SIGNIN_BUDGET_KIND = "signin-email"
 
 # d9 removed the anonymized ``corpus`` table (deletion keeps nothing).
 _SCHEMA = """
@@ -66,6 +76,15 @@ CREATE TABLE IF NOT EXISTS signin_pending (
 CREATE TABLE IF NOT EXISTS sessions (
     id_hash TEXT PRIMARY KEY, email TEXT NOT NULL,
     created INTEGER NOT NULL, last_seen INTEGER NOT NULL);
+-- Trusted browsers: device_hash is sha256(raw lens_device id); one browser
+-- may be trusted for several emails, each row exempts it for that email only.
+CREATE TABLE IF NOT EXISTS trusted_devices (
+    device_hash TEXT NOT NULL, email TEXT NOT NULL,
+    created INTEGER NOT NULL, last_used INTEGER NOT NULL,
+    PRIMARY KEY (device_hash, email));
+-- Escalation state of the untrusted sign-in budget: the last blocked attempt.
+CREATE TABLE IF NOT EXISTS signin_budget (
+    email TEXT PRIMARY KEY, last_blocked INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS bans (
     email TEXT, ip TEXT, reason TEXT, ts INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS inputs (
@@ -385,6 +404,94 @@ class GuestStore:
         """Revoke every session of *email*; returns how many were removed."""
         return self._run("DELETE FROM sessions WHERE email=?", (email,))
 
+    # -- trusted browsers (id stored only as sha256) ------------------------
+    def add_trusted_device(self, email: str, previous_raw: str | None = None) -> str:
+        """Trust a fresh browser id for *email*; return the raw id.
+
+        A fresh random id is minted every time (a cookie the browser held
+        before is never promoted). Trust rows of *previous_raw* (this
+        browser's earlier ``lens_device``, e.g. for another email) move to
+        the new id, restarting their year with the re-issued cookie.
+        """
+        raw = secrets.token_urlsafe(32)
+        new_hash, now = _hash_token(raw), self._now()
+        with closing(self._connect()) as con, con:
+            if previous_raw:
+                con.execute(
+                    "UPDATE trusted_devices SET device_hash=?, created=? "
+                    "WHERE device_hash=? AND email<>? AND created > ?",
+                    (new_hash, now, _hash_token(previous_raw), email,
+                     now - TRUSTED_DEVICE_S),
+                )
+                con.execute(
+                    "DELETE FROM trusted_devices WHERE device_hash=?",
+                    (_hash_token(previous_raw),),
+                )
+            con.execute(
+                "INSERT OR REPLACE INTO trusted_devices "
+                "(device_hash, email, created, last_used) VALUES (?,?,?,?)",
+                (new_hash, email, now, now),
+            )
+        return raw
+
+    def is_trusted_device(self, raw: str | None, email: str) -> bool:
+        """True iff browser id *raw* is trusted for *email* (and under a year old)."""
+        if not raw:
+            return False
+        rows = self._all(
+            "SELECT 1 FROM trusted_devices WHERE device_hash=? AND email=? "
+            "AND created > ?",
+            (_hash_token(raw), email, self._now() - TRUSTED_DEVICE_S),
+        )
+        return bool(rows)
+
+    def touch_trusted_device(self, raw: str, email: str) -> None:
+        self._run(
+            "UPDATE trusted_devices SET last_used=? WHERE device_hash=? AND email=?",
+            (self._now(), _hash_token(raw), email),
+        )
+
+    def delete_trusted_devices_for_email(self, email: str) -> int:
+        """Revoke every trusted browser of *email*; returns rows removed."""
+        return self._run("DELETE FROM trusted_devices WHERE email=?", (email,))
+
+    # -- untrusted sign-in budget per email (r6/c38) ---------------------
+    def signin_budget_take(self, email: str) -> bool:
+        """Count one untrusted sign-in attempt for *email*; False if blocked.
+
+        Only attempts that pass are counted. Normal budget
+        :data:`SIGNIN_BUDGET`; while the last blocked attempt is less than
+        :data:`SIGNIN_BUDGET_QUIET_S` old the strict
+        :data:`SIGNIN_BUDGET_STRICT` applies. A blocked attempt (re)starts
+        the strict period. One transaction, so concurrent takes can't both
+        slip past the last slot.
+        """
+        now, key = self._now(), f"e:{email}"
+        with closing(self._connect()) as con, con:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute(
+                "SELECT last_blocked FROM signin_budget WHERE email=?", (email,)
+            ).fetchone()
+            strict = row is not None and now - row[0] < SIGNIN_BUDGET_QUIET_S
+            limit, window = SIGNIN_BUDGET_STRICT if strict else SIGNIN_BUDGET
+            (used,) = con.execute(
+                "SELECT COUNT(*) FROM attempts WHERE kind=? AND key=? AND ts > ?",
+                (SIGNIN_BUDGET_KIND, key, now - window),
+            ).fetchone()
+            if used >= limit:
+                con.execute(
+                    "INSERT INTO signin_budget (email, last_blocked) VALUES (?,?) "
+                    "ON CONFLICT(email) DO UPDATE "
+                    "SET last_blocked=excluded.last_blocked",
+                    (email, now),
+                )
+                return False
+            con.execute(
+                "INSERT INTO attempts (kind, key, ts) VALUES (?,?,?)",
+                (SIGNIN_BUDGET_KIND, key, now),
+            )
+            return True
+
     # -- attempt counting (rate limits for the entry task) ---------------
     def record_attempt(self, kind: str, key: str) -> None:
         self._run(
@@ -536,6 +643,8 @@ class GuestStore:
         * ``sessions`` idle over 7 days or older than 30 days.
         * ``attempts`` (rate-limit counters) older than a day.
         * ``bans`` older than 365 days.
+        * ``trusted_devices`` trusted more than 365 days ago.
+        * ``signin_budget`` rows whose last block is over 24 hours old.
         """
         now = self._now() if now is None else int(now)
         erase = erase or self.delete_guest_inputs
@@ -547,6 +656,8 @@ class GuestStore:
             "sessions": 0,
             "attempts": 0,
             "bans": 0,
+            "trusted_devices": 0,
+            "signin_budget": 0,
         }
         for email in expired:
             counts["flags"] += self._all(
@@ -572,15 +683,27 @@ class GuestStore:
             counts["bans"] = con.execute(
                 "DELETE FROM bans WHERE ts < ?", (now - BAN_RETENTION_S,)
             ).rowcount
+            counts["trusted_devices"] = con.execute(
+                "DELETE FROM trusted_devices WHERE created <= ?",
+                (now - TRUSTED_DEVICE_S,),
+            ).rowcount
+            counts["signin_budget"] = con.execute(
+                "DELETE FROM signin_budget WHERE last_blocked <= ?",
+                (now - SIGNIN_BUDGET_QUIET_S,),
+            ).rowcount
         return counts
 
     # -- approved-user passwords (argon2id only) --------------------------
     def set_password(self, email: str, password: str) -> None:
-        self._run(
-            "INSERT INTO passwords (email, hash) VALUES (?,?) "
-            "ON CONFLICT(email) DO UPDATE SET hash=excluded.hash",
-            (email, self._hasher.hash(password)),
-        )
+        """Set *email*'s password and revoke every trusted browser of it (c37)."""
+        hashed = self._hasher.hash(password)
+        with closing(self._connect()) as con, con:
+            con.execute(
+                "INSERT INTO passwords (email, hash) VALUES (?,?) "
+                "ON CONFLICT(email) DO UPDATE SET hash=excluded.hash",
+                (email, hashed),
+            )
+            con.execute("DELETE FROM trusted_devices WHERE email=?", (email,))
 
     def check_password(self, email: str, password: str) -> bool:
         rows = self._all("SELECT hash FROM passwords WHERE email=?", (email,))

@@ -86,9 +86,13 @@ SIGNIN_WINDOW_S = 900
 TOKEN_REQUEST_WINDOW_S = 60
 TOKEN_VERIFY_WINDOW_S = 900
 TOKEN_PURPOSE = "guest"
-#: App sign-in: at most this many codes mailed per email per window (c14).
-SIGNIN_CODES_PER_WINDOW = 5
 SIGNIN_CODE_PURPOSE = PURPOSE_SIGNIN
+#: App sign-in, untrusted browsers: password submissions and code entries
+#: from one IP, counted together, per 15 minutes (r6/c38). Separate from
+#: ``rate_limits.password_attempts_per_15min``, which guests and the 0.12.2
+#: rollback path keep using.
+SIGNIN_IP_ATTEMPTS_PER_15MIN = 3
+SIGNIN_IP_KIND = "signin-ip"
 NICK_PREFIX = "sbx-"
 NICK_MIN, NICK_MAX = 2, 16
 #: Nicknames a guest may never take (``sbx-ask`` is the sandbox agent).
@@ -400,6 +404,30 @@ def _guests_full(request: web.Request, email: str) -> bool:
     return not registry.guest_slot_free(GUEST_PRINCIPAL_PREFIX + email, limit)
 
 
+def _signin_blocked(store: GuestStore, request: web.Request, email: str) -> bool:
+    """App sign-in limits for one password submission or code entry (r6).
+
+    A trusted browser (a valid ``lens_device`` for *this* email, c37) skips
+    every limit and is not counted. Any other browser is limited per IP
+    (:data:`SIGNIN_IP_ATTEMPTS_PER_15MIN`, password and code attempts
+    together), then -- if the IP still has room -- by the email's shared
+    untrusted budget (c38: 3 per 15 minutes, strict 2 per 30 minutes after
+    exhaustion until 24 quiet hours). The caller answers a blocked attempt
+    exactly like an unblocked one.
+    """
+    if store.is_trusted_device(app_session.read_device_cookie(request), email):
+        return False
+    ip_key = f"i:{client_ip(request)}"
+    ip_limited = store.rate_limited(
+        SIGNIN_IP_KIND,
+        ip_key,
+        limit=SIGNIN_IP_ATTEMPTS_PER_15MIN,
+        window=SIGNIN_WINDOW_S,
+    )
+    store.record_attempt(SIGNIN_IP_KIND, ip_key)
+    return ip_limited or not store.signin_budget_take(email)
+
+
 async def _pad(started: float, floor: float) -> None:
     remaining = floor - (time.perf_counter() - started)
     if remaining > 0:
@@ -508,12 +536,13 @@ def _schedule_signin_code(state: EntryState, email: str, code: str) -> None:
 async def _post_signin_app(request: web.Request) -> web.Response:
     """Oracle-free sign-in: every case answers with the same code screen.
 
-    Unknown email, wrong password, right password and an over-limit IP all
-    get status 200, the same page (only the echoed email differs), one fresh
+    Unknown email, wrong password, right password and a blocked attempt
+    (over the per-IP limit or the email's untrusted budget, r6) all get
+    status 200, the same page (only the echoed email differs), one fresh
     ``lens_signin`` pending cookie and the same time floor. Only for an
-    approved email with the right password (and under the per-email code
-    cap) is a code issued, bound to this pending value, and mailed from a
-    background task -- so only the mailbox learns the password was right.
+    approved email with the right password, not blocked, is a code issued,
+    bound to this pending value, and mailed from a background task -- so
+    only the mailbox learns the password was right.
     """
     started = time.perf_counter()
     state = _state(request)
@@ -523,16 +552,10 @@ async def _post_signin_app(request: web.Request) -> web.Response:
     password = str(form.get("password") or "")
     ip = client_ip(request)
     store = state.get_store()
-    # Password checks are limited per IP only: a per-email lockout would let
-    # anyone lock the owner out (c14).
-    ip_key = f"i:{ip}"
-    limited = store.rate_limited(
-        "signin-ip",
-        ip_key,
-        limit=cfg.guest_rate_password_attempts_per_15min,
-        window=SIGNIN_WINDOW_S,
-    )
-    store.record_attempt("signin-ip", ip_key)
+    # A trusted browser is never limited, so an attack on the email can't
+    # lock its owner out (r6); untrusted browsers are limited per IP and by
+    # the email's shared budget.
+    limited = _signin_blocked(store, request, email)
     correct = False
     if limited:
         await asyncio.to_thread(_dummy_verify, password)
@@ -547,17 +570,9 @@ async def _post_signin_app(request: web.Request) -> web.Response:
         correct = human and pw_ok
     pending = secrets.token_urlsafe(32)
     if correct:
-        email_key = f"e:{email}"
-        if not store.rate_limited(
-            "signin-code",
-            email_key,
-            limit=SIGNIN_CODES_PER_WINDOW,
-            window=SIGNIN_WINDOW_S,
-        ):
-            store.record_attempt("signin-code", email_key)
-            code = store.issue_token(email, purpose=SIGNIN_CODE_PURPOSE)
-            store.bind_signin(pending, code)
-            _schedule_signin_code(state, email, code)
+        code = store.issue_token(email, purpose=SIGNIN_CODE_PURPOSE)
+        store.bind_signin(pending, code)
+        _schedule_signin_code(state, email, code)
     else:
         metrics.get_metrics().failed_sign_in()
     if limited:
@@ -572,10 +587,15 @@ async def _post_signin_app(request: web.Request) -> web.Response:
 async def post_code(request: web.Request) -> web.Response:
     """Sign-in code + this browser's pending cookie -> a new app session.
 
-    A wrong, expired, reused, other-browser or rate-limited code all get
-    the one error. On success a fresh session id is minted (nothing the
-    browser held before is promoted) and the pending cookie is cleared.
+    A wrong, expired, reused, other-browser or blocked (per-IP limit or the
+    email's untrusted budget, r6) code all get the one error, padded to the
+    sign-in floor; a blocked try never checks (or uses up) the code. On
+    success a fresh session id is minted (nothing the browser held before
+    is promoted) and the pending cookie is cleared. With "Trust this
+    browser" ticked (c39) the browser also gets a fresh ``lens_device``;
+    unticked leaves any existing trust as it is.
     """
+    started = time.perf_counter()
     state = _state(request)
     cfg = state.config
     if not cfg.app_signin_enabled:
@@ -584,16 +604,8 @@ async def post_code(request: web.Request) -> web.Response:
     email = _norm_email(form.get("email"))
     code = str(form.get("code") or "").strip()
     pending = app_session.read_signin_cookie(request)
-    ip = client_ip(request)
     store = state.get_store()
-    limited = _over_limit(
-        store,
-        "signin-verify",
-        email,
-        ip,
-        limit=cfg.guest_rate_password_attempts_per_15min,
-        window=TOKEN_VERIFY_WINDOW_S,
-    )
+    limited = _signin_blocked(store, request, email)
     allowed = {e.lower() for e in cfg.allowed_emails}
     ok = (
         not limited
@@ -606,11 +618,22 @@ async def post_code(request: web.Request) -> web.Response:
         metrics.get_metrics().failed_sign_in()
         if limited:
             metrics.get_metrics().rate_limited()
+        await _pad(started, state.signin_floor_s)
         return _page(state, "signin_code", status=401, email=email, error=ERR_CODE)
     raw = store.create_session(email)
+    device = app_session.read_device_cookie(request)
+    new_device = None
+    if form.get("trust") == "on":
+        new_device = store.add_trusted_device(email, previous_raw=device)
+        logger.info("app sign-in browser trusted")
+    elif device is not None and store.is_trusted_device(device, email):
+        store.touch_trusted_device(device, email)
+    await _pad(started, state.signin_floor_s)
     resp = _see_other("/")
     app_session.issue_session_cookie(resp, raw)
     app_session.clear_signin_cookie(resp)
+    if new_device is not None:
+        app_session.issue_device_cookie(resp, new_device)
     metrics.get_metrics().session_started()
     logger.info("app sign-in session started")
     return resp

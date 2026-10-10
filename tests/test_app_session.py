@@ -416,7 +416,7 @@ async def test_end_sessions_for_email_revokes_all_and_closes_now(env: Env) -> No
 # -- criterion 4 / c27 / h18: CSRF proof for the new cookies -----------------
 
 
-@pytest.mark.parametrize("cookie", ["lens_session", "lens_signin"])
+@pytest.mark.parametrize("cookie", ["lens_session", "lens_signin", "lens_device"])
 @pytest.mark.parametrize("site", ["cross-site", "same-site", None])
 async def test_cross_site_post_with_new_cookie_is_403(
     env: Env, cookie: str, site: str | None
@@ -431,7 +431,7 @@ async def test_cross_site_post_with_new_cookie_is_403(
     assert STUB_HITS == []
 
 
-@pytest.mark.parametrize("cookie", ["lens_session", "lens_signin"])
+@pytest.mark.parametrize("cookie", ["lens_session", "lens_signin", "lens_device"])
 async def test_same_origin_post_with_new_cookie_passes(env: Env, cookie: str) -> None:
     r = await env.client.post(
         "/_stub", headers={"Cookie": f"{cookie}=x", "Sec-Fetch-Site": "same-origin"}
@@ -440,11 +440,12 @@ async def test_same_origin_post_with_new_cookie_passes(env: Env, cookie: str) ->
     assert STUB_HITS == ["/_stub"]
 
 
-def test_csrf_proof_cookie_set_covers_all_three() -> None:
+def test_csrf_proof_cookie_set_covers_all_four() -> None:
     assert set(csrf.PROOF_COOKIE_NAMES) == {
         "lens_guest",
         "lens_session",
         "lens_signin",
+        "lens_device",  # trusted browser (r6/c37)
     }
 
 

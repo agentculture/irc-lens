@@ -13,16 +13,19 @@ Covers spec claims:
           each >= the floor, and only the right case sends exactly one mail,
           from a background task (``test_signin_four_cases_identical_and_floored``,
           ``test_signin_mail_is_sent_off_the_request_path``).
-* c11/h7  codes: same browser only, single use, 10 minutes, 5 tries per
-          15 minutes per email and per IP, one error
+* c11/h7  codes: same browser only, single use, 10 minutes, limited per IP
+          (3 per 15 minutes, r6/c38) and -- superseded by r6/c38 -- by the email's
+          shared untrusted budget (3 per 15 minutes), one error
           (``test_code_from_another_browser_fails``, ``test_code_is_single_use``,
           ``test_code_expires_after_ten_minutes``,
-          ``test_sixth_code_try_fails_even_with_right_code``,
-          ``test_sixth_code_try_per_ip_fails_even_with_right_code``,
+          ``test_fourth_untrusted_try_fails_even_with_right_code``,
+          ``test_fourth_try_per_ip_fails_even_with_right_code``,
           ``test_every_code_failure_is_the_one_error``).
-* c14/h10 per-IP password limit without per-email lockout; per-email cap of
-          5 codes (``test_password_attempts_limited_per_ip_without_check``,
-          ``test_no_per_email_lockout_and_code_cap``).
+* c14/h10 per-IP password limit (``test_password_attempts_limited_per_ip_without_check``);
+          the old per-email code cap is replaced by r6: an attack on the
+          email blocks untrusted browsers silently but never a trusted one
+          (``test_distributed_attack_blocks_untrusted_but_not_trusted``; the
+          full r6 suite is ``test_trusted_devices.py``).
 * c31/h22 fresh session id at code entry, pending cookie cleared, a prior
           session id never promoted (``test_full_signin_reaches_real_mesh``).
 * c32/h23 + c7/h3 the switch off restores 0.12.2 (``test_switch_off_restores_login_redirect``;
@@ -49,7 +52,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from _agentirc_server import AgentIRCTestServer
 from _jwks_server import FakeJWKS
-from irc_lens import metrics
+from irc_lens import guest_store, metrics
 from irc_lens.guest_store import GuestStore
 from irc_lens.mail import RecordingAdapter
 from irc_lens.session import Session
@@ -165,6 +168,11 @@ class Env:
         return pending_of(r), self.last_code()
 
 
+def roomy_budget(monkeypatch) -> None:
+    """Lift the per-email untrusted budget (r6) for tests about other limits."""
+    monkeypatch.setattr(guest_store, "SIGNIN_BUDGET", (100, 900))
+
+
 def pending_of(resp) -> str:
     return resp.cookies[app_session.SIGNIN_COOKIE_NAME].value
 
@@ -173,9 +181,8 @@ async def _make_env(jwks, tmp_path, monkeypatch, **cfg_kw) -> Env:
     monkeypatch.setenv("IRC_LENS_GUEST_COOKIE_SECRET", SECRET.decode())
     mesh = AgentIRCTestServer()
     await mesh.start()
-    config = dataclasses.replace(
-        _config(jwks, mesh, mesh, tmp_path), allowed_emails=(ALICE,), **cfg_kw
-    )
+    cfg_kw.setdefault("allowed_emails", (ALICE,))
+    config = dataclasses.replace(_config(jwks, mesh, mesh, tmp_path), **cfg_kw)
     clock = {"t": T0}
     store = GuestStore(tmp_path / "signin.db", clock=lambda: clock["t"])
     store.set_password(ALICE, PW)
@@ -231,8 +238,8 @@ def _shape(resp, body: str, email: str) -> tuple:
 
 async def test_signin_four_cases_identical_and_floored(env: Env) -> None:
     env.state.signin_floor_s = entry.SIGNIN_FLOOR_S  # the real floor
-    # Use up the per-IP password budget of 198.51.100.99.
-    for _ in range(5):
+    # Use up the per-IP sign-in budget of 198.51.100.99 (3 per 15 minutes).
+    for _ in range(entry.SIGNIN_IP_ATTEMPTS_PER_15MIN):
         await env.signin(UNKNOWN, "x", ip="198.51.100.99")
     env.mail.sent.clear()
     cases = [
@@ -336,7 +343,8 @@ async def test_correct_password_without_mailbox_never_yields_session(env: Env) -
     assert env.store._all("SELECT COUNT(*) FROM sessions")[0][0] == 0
 
 
-async def test_code_from_another_browser_fails(env: Env) -> None:
+async def test_code_from_another_browser_fails(env: Env, monkeypatch) -> None:
+    roomy_budget(monkeypatch)  # 5 tries on one email; the budget is not under test
     pending_a, code_a = await env.password_and_code(ip="192.0.2.10")
     # Browser B ran the password step itself and holds its own pending value.
     r_b = await env.signin(ALICE, PW, ip="192.0.2.11")
@@ -373,27 +381,32 @@ async def test_code_still_good_just_under_ten_minutes(env: Env) -> None:
     assert (await env.code(ALICE, code, pending)).status == 303
 
 
-async def test_sixth_code_try_fails_even_with_right_code(env: Env) -> None:
-    pending, code = await env.password_and_code()
-    for i in range(5):  # different IPs: the per-email budget runs out
+async def test_fourth_untrusted_try_fails_even_with_right_code(env: Env) -> None:
+    # r6/c38: the password step and code entries share the email's untrusted
+    # budget of 3 per 15 minutes (was: 5 code tries per email).
+    pending, code = await env.password_and_code()  # 1
+    for i in range(2):  # 2, 3 -- different IPs: the per-email budget runs out
         assert (await env.code(ALICE, "nope", pending, ip=f"10.1.0.{i}")).status == 401
-    r = await env.code(ALICE, code, pending, ip="10.1.9.9")
+    r = await env.code(ALICE, code, pending, ip="10.1.9.9")  # 4
     assert r.status == 401
     assert app_session.SESSION_COOKIE_NAME not in r.cookies
-    # After the window the same (still live) code works again: it was the limit.
-    env.clock["t"] = T0 + 15 * 60 + 1
+    # After 24 quiet hours the budget is back: a fresh sign-in works.
+    env.clock["t"] = T0 + 24 * 3600 + 1
     pending2, code2 = await env.password_and_code(ip="10.1.9.8")
     assert (await env.code(ALICE, code2, pending2, ip="10.1.9.8")).status == 303
 
 
-async def test_sixth_code_try_per_ip_fails_even_with_right_code(env: Env) -> None:
-    pending, code = await env.password_and_code(ip="10.2.0.1")
-    for i in range(5):  # one IP, other emails: the per-IP budget runs out
+async def test_fourth_try_per_ip_fails_even_with_right_code(env: Env) -> None:
+    # r6/c38: 3 per IP per 15 minutes, password and code entries together
+    # (was 5 code tries per IP).
+    pending, code = await env.password_and_code(ip="10.2.0.1")  # 1
+    for i in range(2):  # 2, 3 -- one IP, other emails: the per-IP budget runs out
         await env.code(f"u{i}@example.com", "nope", pending, ip="10.2.0.1")
     assert (await env.code(ALICE, code, pending, ip="10.2.0.1")).status == 401
 
 
-async def test_every_code_failure_is_the_one_error(env: Env) -> None:
+async def test_every_code_failure_is_the_one_error(env: Env, monkeypatch) -> None:
+    roomy_budget(monkeypatch)  # the per-IP case; budget blocks: test_trusted_devices
     bodies = set()
 
     async def record(resp) -> None:
@@ -408,7 +421,7 @@ async def test_every_code_failure_is_the_one_error(env: Env) -> None:
     pending, code = await env.password_and_code(ip="10.3.0.6")
     env.clock["t"] += 11 * 60
     await record(await env.code(ALICE, code, pending, ip="10.3.0.7"))  # expired
-    for _ in range(5):
+    for _ in range(entry.SIGNIN_IP_ATTEMPTS_PER_15MIN):
         await env.code(ALICE, "x", pending, ip="10.3.1.1")
     await record(await env.code(ALICE, code, pending, ip="10.3.1.1"))  # limited
     assert len(bodies) == 1
@@ -423,6 +436,7 @@ async def test_every_code_failure_is_the_one_error(env: Env) -> None:
 async def test_password_attempts_limited_per_ip_without_check(
     env: Env, monkeypatch
 ) -> None:
+    roomy_budget(monkeypatch)  # 5 tries on one email: only the IP limit is tested
     calls: list[str] = []
     real = env.store.check_password
 
@@ -431,35 +445,43 @@ async def test_password_attempts_limited_per_ip_without_check(
         return real(email, password)
 
     monkeypatch.setattr(env.store, "check_password", counting)
-    for _ in range(5):
+    # r6/c38: 3 per IP per 15 minutes on the app path (was 5).
+    for _ in range(3):
         await env.signin(ALICE, WRONG_PW, ip="10.4.0.1")
-    assert len(calls) == 5
+    assert len(calls) == 3
     before = await (await env.signin(ALICE, WRONG_PW, ip="10.4.0.2")).text()
-    r = await env.signin(ALICE, PW, ip="10.4.0.1")  # 6th from this IP
+    r = await env.signin(ALICE, PW, ip="10.4.0.1")  # 4th from this IP
     assert r.status == 200
     assert await r.text() == before  # same screen
-    assert len(calls) == 6  # only the other IP's attempt was checked
+    assert len(calls) == 4  # only the other IP's attempt was checked
     await env.drain()
     assert env.mail.sent == []
 
 
-async def test_no_per_email_lockout_and_code_cap(env: Env) -> None:
+async def test_distributed_attack_blocks_untrusted_but_not_trusted(env: Env) -> None:
+    # r6 replaces "no per-email lockout, 5 codes per 15 minutes": a trusted
+    # browser is never limited, untrusted ones share one per-email budget.
+    device = env.store.add_trusted_device(ALICE)
     # A distributed attack: 30 wrong passwords for the owner from 30 IPs.
     for i in range(30):
         await env.signin(ALICE, "guess", ip=f"10.5.{i}.1")
-    # The owner still gets codes with the right password -- up to 5.
+    # Untrusted browsers: the same screen, but no code is mailed.
     bodies = set()
-    for i in range(7):
+    for i in range(3):
         r = await env.signin(ALICE, PW, ip=f"10.6.{i}.1")
         assert r.status == 200
         bodies.add(await r.text())
     await env.drain()
-    assert len(env.mail.sent) == 5
+    assert env.mail.sent == []
     assert len(bodies) == 1
-    env.clock["t"] = T0 + 15 * 60 + 1
-    await env.signin(ALICE, PW, ip="10.7.0.1")
+    # The owner's trusted browser still gets a code every time.
+    for i in range(5):
+        r = await env.signin(
+            ALICE, PW, ip=f"10.7.{i}.1", cookie=f"{app_session.DEVICE_COOKIE_NAME}={device}"
+        )
+        assert await r.text() in bodies
     await env.drain()
-    assert len(env.mail.sent) == 6
+    assert len(env.mail.sent) == 5
 
 
 # ---------------------------------------------------------------------------
