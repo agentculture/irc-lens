@@ -2,7 +2,7 @@
   "plan_slug": "app-native-sign-in",
   "schema_version": 2,
   "created": "2026-10-10T15:04:29Z",
-  "updated": "2026-10-10T15:41:14Z",
+  "updated": "2026-10-10T16:40:36Z",
   "deviations": [
     {
       "id": "d1",
@@ -53,9 +53,22 @@
         "t9"
       ],
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "classification": "acceptable",
       "seq": 4
+    },
+    {
+      "id": "d5",
+      "what": "r6 decided by owner: replace the per-email code-entry limit (5/15min) and the 5-codes-per-15-min cap with trusted browsers (no limit) plus an escalating per-email budget for untrusted browsers (3/15min, then 2/30min), silent when blocked",
+      "task_ref": "t8",
+      "reason": "owner decision on risk r6: the old per-email limit let anyone who knows an approved email block its sign-in",
+      "affects": [
+        "t8"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 5
     }
   ],
   "evidence": [],

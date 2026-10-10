@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-10-10T14:30:58Z",
-  "updated": "2026-10-10T15:46:18Z",
+  "updated": "2026-10-10T16:51:20Z",
   "claims": [
     {
       "id": "c1",
@@ -598,6 +598,74 @@
       "id": "c35",
       "kind": "decision",
       "text": "After idle sign-off a guest's cookie still works: if the slot is free they rejoin their room, otherwise they see the busy message; no new code is emailed",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c36",
+      "kind": "decision",
+      "text": "r6 (owner): a browser that has completed the full sign-in (password, code, chat) for an email is trusted for that email and gets no attempt limit; untrusted browsers share one per-email budget of 3 attempts per 15 minutes, dropping to 2 per 30 minutes once it has been exhausted; a blocked attempt looks exactly like an unblocked one (same code screen, no code sent; same code error)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c37",
+      "kind": "requirement",
+      "text": "Trusted browser: completing code entry sets lens_device (random id, only its sha256 stored with the email; HttpOnly, Secure, SameSite=Lax, one year); it exempts that browser from all sign-in attempt limits for that email only; logout keeps it; setting or resetting the password revokes every trusted browser for that email",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h26",
+          "text": "a trusted browser signs in after 20 blocked attempts on its email from other browsers; the trust cookie of one email does not exempt another email; after set-password the old trust cookie gives no exemption",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c38",
+      "kind": "requirement",
+      "text": "Untrusted-browser budget per email counts password submissions and code entries together: 3 per 15 minutes; after it is first exhausted the email is strict at 2 per 30 minutes until 24 hours pass with no blocked attempt; untrusted browsers are also limited per IP to 3 attempts per 15 minutes (password and code entry)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h27",
+          "text": "the 4th untrusted attempt within 15 minutes is blocked silently (byte-identical responses, no code mail); after exhaustion only 2 per 30 minutes pass; 24 quiet hours restore 3 per 15 minutes",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "Untrusted-browser budget per email counts password submissions and code entries together: 3 per 15 minutes; after it is first exhausted the email is strict at 2 per 30 minutes until 24 hours pass with no blocked attempt; the per-IP password limit still applies to untrusted browsers",
+          "kind": "requirement",
+          "reason": "owner: per-IP limit is 3 attempts, not 5"
+        }
+      ]
+    },
+    {
+      "id": "c39",
+      "kind": "decision",
+      "text": "Owner: the sign-in code screen has a 'Trust this browser' checkbox; only when it is ticked does completing sign-in make the browser trusted (lens_device)",
       "origin": "user",
       "status": "confirmed",
       "honesty_conditions": [],

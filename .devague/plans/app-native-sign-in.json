@@ -5,7 +5,7 @@
   "schema_version": 5,
   "status": "exported",
   "created": "2026-10-10T14:49:26Z",
-  "updated": "2026-10-10T15:29:59Z",
+  "updated": "2026-10-10T16:40:29Z",
   "targets": [
     {
       "id": "c1",
@@ -628,8 +628,8 @@
       "text": "Code entry is limited per email (5 per 15 min, c11), so someone who knows only an approved email can burn its code tries and block sign-in for 15 minutes; password checks have no per-email lockout",
       "kind": "unknown_nonblocking",
       "task_id": "t8",
-      "resolved": false,
-      "resolution": ""
+      "resolved": true,
+      "resolution": "owner: trusted browsers unlimited; untrusted per-email 3/15min then 2/30min, silent (c36-c38, d5)"
     }
   ],
   "obligations": []
