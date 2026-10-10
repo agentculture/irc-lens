@@ -45,6 +45,14 @@ _DELETE_SUBJECT = "Your chat.culture.dev deletion code"
 #: ``purpose`` values accepted by :func:`render_token_email`.
 PURPOSE_GUEST = "guest"
 PURPOSE_DELETE = "delete"
+PURPOSE_SIGNIN = "signin"
+
+_SIGNIN_SUBJECT = "Your chat.culture.dev sign-in code"
+_SETPW_SUBJECT = "Set your chat.culture.dev password"
+
+#: Default lifetime of a sign-in code (10 minutes) and a set-password link.
+SIGNIN_TOKEN_TTL = 600
+SETPW_LINK_TTL = 1800
 
 
 def _human_duration(seconds: int) -> str:
@@ -57,7 +65,7 @@ def _human_duration(seconds: int) -> str:
 
 
 def render_token_email(
-    token: str, ttl_s: int = DEFAULT_TOKEN_TTL, *, purpose: str = PURPOSE_GUEST
+    token: str, ttl_s: int | None = None, *, purpose: str = PURPOSE_GUEST
 ) -> tuple[str, str]:
     """Render the fixed token template for *purpose* (guest seat or deletion).
 
@@ -68,11 +76,13 @@ def render_token_email(
     credential the guest types in) but is never written to any log by this
     module.
     """
-    if purpose not in (PURPOSE_GUEST, PURPOSE_DELETE):
+    if ttl_s is None:
+        ttl_s = SIGNIN_TOKEN_TTL if purpose == PURPOSE_SIGNIN else DEFAULT_TOKEN_TTL
+    if purpose not in (PURPOSE_GUEST, PURPOSE_DELETE, PURPOSE_SIGNIN):
         raise AfiError(
             code=EXIT_ENV_ERROR,
             message=f"unknown token email purpose: {purpose!r}",
-            remediation="use 'guest' or 'delete'",
+            remediation="use 'guest', 'delete' or 'signin'",
         )
     if not isinstance(token, str) or not token:
         raise AfiError(
@@ -80,6 +90,8 @@ def render_token_email(
             message="guest token must be a non-empty string",
             remediation="generate the token before rendering its email",
         )
+    if purpose == PURPOSE_SIGNIN:
+        return _SIGNIN_SUBJECT, _signin_body(token, ttl_s)
     body = (
         "Hello,\n\n"
         "You asked for a guest seat on chat.culture.dev. Enter the code "
@@ -94,6 +106,70 @@ def render_token_email(
     if purpose == PURPOSE_DELETE:
         return _DELETE_SUBJECT, _delete_body(token, ttl_s)
     return _SUBJECT, body
+
+
+def _signin_body(token: str, ttl_s: int) -> str:
+    return (
+        "Hello,\n\n"
+        "The correct password was just entered for this address on "
+        "chat.culture.dev. Enter the code below in the Code field to "
+        "finish signing in:\n\n"
+        f"    {token}\n\n"
+        f"The code works once and expires in {_human_duration(ttl_s)}.\n\n"
+        "If this wasn't you, someone may know your password: use "
+        "'Set or reset password' on the sign-in page to change it.\n\n"
+        "The Culture team\n"
+    )
+
+
+def _is_allowed_base(base_url: object) -> bool:
+    if not isinstance(base_url, str):
+        return False
+    if base_url.startswith("https://"):
+        return len(base_url) > len("https://") and not base_url.startswith("https:///")
+    for prefix in ("http://127.0.0.1", "http://localhost"):
+        if base_url.startswith(prefix) and base_url[len(prefix) :][:1] in (
+            "",
+            ":",
+            "/",
+        ):
+            return True
+    return False
+
+
+def render_link_email(
+    base_url: str, token: str, ttl_s: int = SETPW_LINK_TTL
+) -> tuple[str, str]:
+    """Render the set-password email: ``(subject, text_body)``.
+
+    The body carries ``<base_url>/password/<token>``; it is identical for
+    every address apart from the link. The link is the credential and is
+    never written to any log by this module.
+    """
+    if not _is_allowed_base(base_url):
+        raise AfiError(
+            code=EXIT_ENV_ERROR,
+            message="set-password base URL must be https (or loopback http)",
+            remediation="pass the public https base URL of the lens",
+        )
+    if not isinstance(token, str) or not token:
+        raise AfiError(
+            code=EXIT_ENV_ERROR,
+            message="set-password token must be a non-empty string",
+            remediation="generate the token before rendering its email",
+        )
+    link = f"{base_url.rstrip('/')}/password/{token}"
+    body = (
+        "Hello,\n\n"
+        "Someone asked to set or reset the password for this address on "
+        "chat.culture.dev. Open the link below to choose a new one:\n\n"
+        f"    {link}\n\n"
+        f"The link works once and expires in {_human_duration(ttl_s)}.\n\n"
+        "If you did not ask for this, you can ignore this email "
+        "— your password stays the same.\n\n"
+        "The Culture team\n"
+    )
+    return _SETPW_SUBJECT, body
 
 
 def _delete_body(token: str, ttl_s: int) -> str:
