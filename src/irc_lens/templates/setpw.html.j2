@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="referrer" content="no-referrer">
+    <title>culture</title>
+    <link rel="icon" href="{{ static_url('favicon.ico') }}">
+    <link rel="stylesheet" href="{{ css_url }}">
+  </head>
+  <body class="entry">
+    <main class="entry-layout">
+      <section class="entry-card" aria-label="Set or reset password">
+        {% if step == "request" %}
+        <form method="post" action="/password" class="entry-form">
+          <label for="setpw-email">Email</label>
+          <input id="setpw-email" name="email" type="email" autocomplete="email"
+                 inputmode="email" required autofocus maxlength="254">
+          <div class="entry-actions">
+            <button type="submit" class="btn btn-primary">Email me a link</button>
+          </div>
+        </form>
+        {% elif step == "sent" %}
+        <p class="entry-done" role="status">If this address can sign in here, we've emailed a link to set your password. It works once and expires in 30 minutes.</p>
+        <div class="entry-actions">
+          <a href="/" class="btn btn-outline">Back to sign in</a>
+        </div>
+        {% elif step == "form" %}
+        <form method="post" action="/password/{{ token }}" class="entry-form">
+          <label for="setpw-password">New password</label>
+          <input id="setpw-password" name="password" type="password"
+                 autocomplete="new-password" required autofocus
+                 minlength="{{ min_len }}" maxlength="{{ max_len }}"
+                 aria-describedby="setpw-hint">
+          <label for="setpw-confirm">Confirm new password</label>
+          <input id="setpw-confirm" name="confirm" type="password"
+                 autocomplete="new-password" required
+                 minlength="{{ min_len }}" maxlength="{{ max_len }}">
+          <p class="entry-consent" id="setpw-hint">At least {{ min_len }} characters. Setting it signs you out everywhere.</p>
+          {% if error %}
+          <p class="entry-error" role="alert">{{ error }}</p>
+          {% endif %}
+          <div class="entry-actions">
+            <button type="submit" class="btn btn-primary">Set password</button>
+          </div>
+        </form>
+        {% elif step == "invalid" %}
+        <p class="entry-error" role="alert">This link has expired or was already used. Request a new one.</p>
+        <div class="entry-actions">
+          <a href="/password" class="btn btn-primary">Request a new link</a>
+        </div>
+        {% else %}
+        <p class="entry-done" role="status">Password set. Sign in with your new password.</p>
+        <div class="entry-actions">
+          <a href="/" class="btn btn-primary">Sign in</a>
+        </div>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

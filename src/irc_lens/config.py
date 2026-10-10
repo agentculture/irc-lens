@@ -70,6 +70,9 @@ class LensConfig:
     guest_max_guests: int = 1
     # auth.app_signin.enabled: False restores password -> /login behavior.
     app_signin_enabled: bool = True
+    # auth.app_signin.base_url: public base of set-password links (https;
+    # http only for loopback). None falls back to media_public_base_url.
+    app_signin_base_url: str | None = None
     guest_rate_entry_per_min: int = 10
     guest_rate_messages_per_min: int = 20
     guest_rate_password_attempts_per_15min: int = 5
@@ -454,7 +457,7 @@ _GUEST_RATE_KEYS = frozenset(
 )
 
 
-_APP_SIGNIN_KEYS = frozenset({"enabled"})
+_APP_SIGNIN_KEYS = frozenset({"enabled", "base_url"})
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost"})
 
 
@@ -464,6 +467,38 @@ def _validate_app_signin(auth: dict) -> bool:
         auth.get("app_signin"), "auth.app_signin", _APP_SIGNIN_KEYS
     )
     return _coerce_bool(sect.get("enabled", True), "auth.app_signin.enabled")
+
+
+def _app_signin_base_url(auth: dict) -> str | None:
+    """auth.app_signin.base_url: https URL (http only for loopback), or None.
+
+    The base of emailed set-password links; links are never built from a
+    request's Host header.
+    """
+    sect = _optional_mapping(
+        auth.get("app_signin"), "auth.app_signin", _APP_SIGNIN_KEYS
+    )
+    value = sect.get("base_url")
+    if value is None:
+        return None
+    url = _coerce_str(value, "auth.app_signin.base_url")
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+    except ValueError:
+        parsed, host = None, None
+    ok = bool(host) and (
+        parsed.scheme == "https"
+        or (parsed.scheme == "http" and host in _LOOPBACK_HOSTS)
+    )
+    if not ok:
+        raise _err(
+            f"auth.app_signin.base_url must be an https:// URL "
+            f"(http:// only for 127.0.0.1/localhost), got {url!r}",
+            "set `auth.app_signin.base_url:` to the lens's public https URL, "
+            "e.g. https://chat.culture.dev",
+        )
+    return url
 
 
 def _alert_url(value: object) -> str | None:
@@ -678,6 +713,7 @@ def load_config(path: Path) -> LensConfig:
     culture_residents_url, culture_overview_name = _validate_culture_section(raw)
     guest_fields = _validate_guest_mode_section(raw)
     app_signin_enabled = _validate_app_signin(auth)
+    app_signin_base_url = _app_signin_base_url(auth)
 
     return LensConfig(
         auth_mode=mode,
@@ -702,6 +738,7 @@ def load_config(path: Path) -> LensConfig:
         culture_residents_url=culture_residents_url,
         culture_overview_name=culture_overview_name,
         app_signin_enabled=app_signin_enabled,
+        app_signin_base_url=app_signin_base_url,
         **guest_fields,
     )
 

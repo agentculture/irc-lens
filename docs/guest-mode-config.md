@@ -72,6 +72,39 @@ auth:
 Maps to `LensConfig.app_signin_enabled`. Unknown keys under `auth.app_signin`
 and non-boolean values are rejected at load.
 
+```yaml
+auth:
+  app_signin:
+    base_url: https://chat.culture.dev   # base of emailed set-password links
+```
+
+`auth.app_signin.base_url` (`LensConfig.app_signin_base_url`, default unset)
+must be an `https` URL (plain `http` only for `127.0.0.1` / `localhost`). It is
+the base of the links mailed by the set-password flow; when unset,
+`media.public_base_url` is used. Links are never built from a request's `Host`
+header. If neither key is set, `POST /password` still answers with the same
+"check your email" page but sends nothing and logs one error.
+
+## Set or reset password
+
+With guest mode and app sign-in on, `src/irc_lens/web/setpw.py`
+(`templates/setpw.html.j2`) adds, all anonymous-allowed:
+
+| Route | Step |
+| --- | --- |
+| `GET /password` | Email form (linked from the entry card's password step as "Set or reset password") |
+| `POST /password` | Always the same "If this address can sign in here, we've emailed a link…" page. Only an address in `auth.allowed_emails` gets a single-use link `<base_url>/password/<token>` (token purpose `setpw`, 30 minutes); the token is issued and mailed in a background task so timing reveals nothing. Limited per email and per IP by `rate_limits.entry_per_min` (429, same page) |
+| `GET /password/<token>` | New-password form for a live token; never consumes it (mail scanners prefetch links). Otherwise one neutral "This link has expired or was already used" page (400) linking back to `/password` |
+| `POST /password/<token>` | CSRF/Origin-checked like every POST; limited per IP by `rate_limits.password_attempts_per_15min`. Passwords under 12 characters (or over 1024) or a mismatched confirmation re-show the form and leave the token valid; otherwise the token is consumed, an argon2id hash stored, and every app session of that email ended (their live IRC sessions closed) |
+
+The 12-character minimum applies only when a password is set here; an older,
+shorter password still signs in until it is replaced through this flow. Store
+helpers: `GuestStore.peek_token(token, purpose=...)` (non-consuming) and
+`GuestStore.consume_token(token, purpose=...)` (single use), both keyed by the
+token alone. Tokens, links and passwords are never logged: a filter on the
+loggers that write request paths (`aiohttp.access`, auth, CSRF, routes)
+replaces `/password/<token>` with `/password/[redacted]`.
+
 ## Owner metrics counters
 
 `/owner/metrics` also reports `signin_codes_sent`, `sessions_started`,
