@@ -424,6 +424,7 @@ async def test_second_browser_on_the_same_ip_signs_in(env: TEnv) -> None:
         assert (await env.enter(ALICE, "typo", pending, ip)).status == 401
     ok = await env.enter(ALICE, code, pending, ip)
     assert ok.status == 303
+    await env.drain()  # the new-browser notice (c40)
 
 
 async def _passes(env: TEnv, n: int, start: int) -> list[bool]:
@@ -490,6 +491,7 @@ async def test_per_ip_limit_counts_passwords_only(env: TEnv) -> None:
     for i in range(5):  # code entries: not counted
         await env.enter(f"z{i}@example.org", "nope", pending, ip)
     assert (await env.enter(ALICE, code, pending, ip)).status == 303
+    await env.drain()  # the new-browser notice (c40)
     await env.pw(UNKNOWN, WRONG_PW, ip)  # 2
     await env.pw(BOB, WRONG_PW, ip)  # 3
     assert await env.mails_after(env.pw(BOB, BOB_PW, ip)) == 0  # 4th: blocked
