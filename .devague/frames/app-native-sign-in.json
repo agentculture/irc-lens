@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-10-10T14:30:58Z",
-  "updated": "2026-10-10T14:48:55Z",
+  "updated": "2026-10-10T14:49:18Z",
   "claims": [
     {
       "id": "c1",
@@ -589,6 +589,18 @@
           "instruction": ""
         }
       ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c35",
+      "kind": "decision",
+      "text": "After idle sign-off a guest's cookie still works: if the slot is free they rejoin their room, otherwise they see the busy message; no new code is emailed",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
       "hard_questions": [],
       "links": [],
       "instruction": "",

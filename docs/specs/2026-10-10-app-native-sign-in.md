@@ -103,6 +103,7 @@
 - Only 1 guest may use the sandbox at a time for now; a guest with no action for 15 minutes is signed off; the limit rises after the move to AWS
 - An email-delivery outage needs no extra sign-in fallback for now (break-glass /login covers the trial)
 - When Resend can't send (the 3000-email quota is used up, or Resend returns an error) the approved users get an alert email sent through Cloudflare email
+- After idle sign-off a guest's cookie still works: if the slot is free they rejoin their room, otherwise they see the busy message; no new code is emailed
 
 ## Open parks
 
