@@ -125,6 +125,12 @@
           <label for="entry-code">Code</label>
           <input id="entry-code" name="code" type="text" autocomplete="one-time-code"
                  autocapitalize="none" spellcheck="false" required autofocus maxlength="128">
+          {% if signin %}
+          <label class="entry-consent">
+            <input type="checkbox" name="trust" value="on">
+            <span>Trust this browser (not on a shared computer)</span>
+          </label>
+          {% endif %}
           {% if error %}
           <p class="entry-error" role="alert">{{ error }}</p>
           {% endif %}

@@ -25,7 +25,8 @@ cookie: ``Origin`` must be present and match, or -- when absent -- the
 browser's ``Sec-Fetch-Site`` must say ``same-origin``/``none``. A
 ``cross-site``/``same-site`` fetch with a cookie is refused. The same rule
 covers the approved app-session cookie ``lens_session`` and the pending
-sign-in cookie ``lens_signin`` (:data:`PROOF_COOKIE_NAMES`). Requests without
+sign-in cookie ``lens_signin`` and the trusted-browser cookie ``lens_device``
+(:data:`PROOF_COOKIE_NAMES`). Requests without
 any of them keep the original lenient behaviour (Origin-absent allowed).
 """
 
@@ -42,15 +43,24 @@ import time
 
 from aiohttp import web
 
-from irc_lens.web.app_session import SESSION_COOKIE_NAME, SIGNIN_COOKIE_NAME
+from irc_lens.web.app_session import (
+    DEVICE_COOKIE_NAME,
+    SESSION_COOKIE_NAME,
+    SIGNIN_COOKIE_NAME,
+)
 
 logger = logging.getLogger("irc_lens.web.csrf")
 
 GUEST_COOKIE_NAME = "lens_guest"
 #: Cookies whose presence demands same-origin proof on an Origin-less
-#: state-changing request: the guest cookie, the approved app session and
-#: the pending sign-in cookie (``web/app_session.py``).
-PROOF_COOKIE_NAMES = (GUEST_COOKIE_NAME, SESSION_COOKIE_NAME, SIGNIN_COOKIE_NAME)
+#: state-changing request: the guest cookie, the approved app session, the
+#: pending sign-in cookie and the trusted-browser cookie (``web/app_session.py``).
+PROOF_COOKIE_NAMES = (
+    GUEST_COOKIE_NAME,
+    SESSION_COOKIE_NAME,
+    SIGNIN_COOKIE_NAME,
+    DEVICE_COOKIE_NAME,
+)
 SECRET_ENV = "IRC_LENS_GUEST_COOKIE_SECRET"
 DEFAULT_TTL_SECONDS = 3600
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})

@@ -27,6 +27,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a busy page and no code is mailed.
 - Owner metrics: `signin_codes_sent`, `sessions_started`, `sessions_ended`,
   `guest_busy`, `delivery_alerts`.
+- **Trusted browsers and an escalating sign-in budget** (owner decision
+  r6). A **Trust this browser** checkbox on the code screen (unchecked by
+  default) sets `lens_device` (one year, only its sha256 stored per email);
+  that browser has no sign-in attempt limit for that email; logout keeps it,
+  setting a password revokes it. Untrusted browsers share one per-email
+  budget of password and code attempts: 3 per 15 minutes, 2 per 30 minutes
+  after exhaustion until 24 quiet hours, plus 3 attempts per 15 minutes
+  per IP (password and code together); blocked attempts look exactly like
+  unblocked ones. Replaces the per-email 5 code tries, the 5 codes per 15
+  minutes and the per-IP 5 password checks on the app sign-in path.
 - `auth.app_signin.enabled` (default true) and `auth.app_signin.base_url`.
 - `tests/test_log_hygiene.py`: end-to-end check that no log record contains a
   password, code, token, session id or cookie value.

@@ -96,11 +96,11 @@ user signs in inside the app, without Cloudflare Access:
    mails a code (from a background task); the response never depends on the
    password, and is padded to a 0.5 s floor.
 2. `POST /entry/code` takes the code. It must come from the same browser as
-   step 1, is single use and valid for 10 minutes; 5 tries per 15 minutes per
-   email and per IP (`rate_limits.password_attempts_per_15min`) and at most 5
-   codes per window per email. Success creates a fresh session id, clears
-   `lens_signin`, sets `lens_session` (`HttpOnly; Secure; SameSite=Lax;
-   Path=/`) and redirects to `/`.
+   step 1, is single use and valid for 10 minutes. Success creates a fresh
+   session id, clears `lens_signin`, sets `lens_session` (`HttpOnly; Secure;
+   SameSite=Lax; Path=/`) and redirects to `/`. The code screen has a
+   **Trust this browser** checkbox (unchecked by default, always shown); see
+   [Trusted browsers and attempt limits](#trusted-browsers-and-attempt-limits).
 3. The session is server-side: the guest store keeps only `sha256(id)`. It
    expires after 7 days idle or 30 days total, and the email is re-checked
    against `allowed_emails` on every request. The resulting identity is the
@@ -110,6 +110,31 @@ user signs in inside the app, without Cloudflare Access:
    for htmx). Setting a new password, removing the address from
    `allowed_emails` and expiry end sessions the same way (swept on the ban
    sweeper's interval).
+
+### Trusted browsers and attempt limits
+
+- **Trusted browser.** When the code is entered with **Trust this browser**
+  ticked, the browser also gets `lens_device` (a fresh random id;
+  `HttpOnly; Secure; SameSite=Lax; Path=/`, one year). The guest store keeps
+  only `sha256(id)` with the email (table `trusted_devices`). That browser is
+  exempt from every sign-in attempt limit, for that email only (one browser
+  can be trusted for several emails). Unticked, sign-in works the same but
+  the browser stays untrusted; an already trusted browser that signs in
+  unticked keeps its trust. Logout keeps `lens_device`; setting or resetting
+  the password (web link or `irc-lens guests passwd`) revokes every trusted
+  browser of that email. The sweep drops trust rows after 365 days.
+- **Untrusted browsers** share one budget per email that counts password
+  submissions (`POST /entry/signin`) and code entries (`POST /entry/code`)
+  together: 3 per 15 minutes. Once it is exhausted the email is strict, 2 per
+  30 minutes, until 24 hours pass with no blocked attempt (table
+  `signin_budget`). Untrusted browsers are also limited per IP to 3
+  attempts per 15 minutes, password submissions and code entries counted
+  together (fixed; `rate_limits.password_attempts_per_15min` stays the guest
+  and rollback-path limit).
+- **A blocked attempt looks exactly like an unblocked one.** A blocked
+  password step gets the same code screen (same status, body and floor) and
+  no code is mailed; a blocked code entry gets the one `Wrong or expired
+  code` error without checking or using up the code.
 
 Approved users are still exactly the `allowed_emails` list: there is no
 sign-up and no account creation. The Cloudflare Access `/login` path keeps
@@ -202,8 +227,11 @@ With guest mode on, anonymous visitors get the entry card
 
 The `/entry*` routes answer 404 while `guest_mode.enabled` is false. Sign-in failures are
 indistinguishable: an unknown email still pays one (dummy) argon2id verify, and
-every sign-in response is padded to a fixed floor (0.5 s). Sign-in and token
-verification are limited per email and per IP by
+every sign-in response is padded to a fixed floor (0.5 s). App sign-in is
+limited as described in
+[Trusted browsers and attempt limits](#trusted-browsers-and-attempt-limits);
+with the rollback switch off, sign-in and guest token verification are
+limited per email and per IP by
 `rate_limits.password_attempts_per_15min`; token requests by
 `rate_limits.entry_per_min` — over the limit the same body returns as 429. The
 visitor IP is `CF-Connecting-IP` (cloudflared) when present.
