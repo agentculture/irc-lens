@@ -87,19 +87,22 @@ def test_alert_url_http_allowed_for_loopback(tmp_path: Path, url: str) -> None:
     "url", ["http://example.com/x", "ftp://example.com/x", "https://", "nonsense"]
 )
 def test_alert_url_invalid(tmp_path: Path, url: str) -> None:
+    block = _guest(f"mail:\n  alert_url: {url}")
     with pytest.raises(AfiError, match="alert_url"):
-        _load(tmp_path, guest_block=_guest(f"mail:\n  alert_url: {url}"))
+        _load(tmp_path, guest_block=block)
 
 
 @pytest.mark.parametrize("val", ["0", "-1", "'x'", "1.5"])
 def test_max_guests_invalid(tmp_path: Path, val: str) -> None:
+    block = _guest(f"max_guests: {val}")
     with pytest.raises(AfiError, match="max_guests"):
-        _load(tmp_path, guest_block=_guest(f"max_guests: {val}"))
+        _load(tmp_path, guest_block=block)
 
 
 def test_alert_secret_env_must_be_string(tmp_path: Path) -> None:
+    block = _guest("mail:\n  alert_secret_env: 5")
     with pytest.raises(AfiError, match="alert_secret_env"):
-        _load(tmp_path, guest_block=_guest("mail:\n  alert_secret_env: 5"))
+        _load(tmp_path, guest_block=block)
 
 
 def test_new_counters() -> None:

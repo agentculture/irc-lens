@@ -214,7 +214,7 @@ async def sweep_once(app: web.Application) -> list[tuple[str, str]]:
     registry = app["registry"]
     allowed = set(app["config"].allowed_emails)
     ended: list[tuple[str, str]] = []
-    for key, id_hash in list(links.items()):
+    for key, id_hash in tuple(links.items()):  # snapshot: links.pop below
         if not registry.has(*key):
             links.pop(key, None)  # closed elsewhere (idle reap, shutdown)
             continue
@@ -235,7 +235,7 @@ async def end_session(app: web.Application, raw_id: str) -> bool:
     id_hash = session_id_hash(raw_id)
     removed = await asyncio.to_thread(store.delete_session, raw_id)
     links = app.get(LINKS) or {}
-    await _close_links(app, [k for k, h in list(links.items()) if h == id_hash])
+    await _close_links(app, [k for k, h in links.items() if h == id_hash])
     if removed:
         metrics.get_metrics().session_ended()
     return bool(removed)
@@ -251,7 +251,7 @@ async def end_sessions_for_email(app: web.Application, email: str) -> int:
         return 0
     removed = await asyncio.to_thread(store.delete_sessions_for_email, email)
     links = app.get(LINKS) or {}
-    await _close_links(app, [k for k in list(links) if k[0] == email])
+    await _close_links(app, [k for k in links if k[0] == email])
     for _ in range(removed):
         metrics.get_metrics().session_ended()
     return removed

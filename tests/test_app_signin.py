@@ -61,6 +61,8 @@ from test_session_routing import _config
 ALICE = "alice@example.com"
 UNKNOWN = "zed@example.org"
 PW = secrets.token_urlsafe(16)  # generated per run: no literal secret
+WRONG_PW = secrets.token_urlsafe(16)
+SHORT_PW = secrets.token_urlsafe(6)[:7]  # < 12 chars
 SECRET = b"s" * 32
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 T0 = 1_800_000_000.0
@@ -235,7 +237,7 @@ async def test_signin_four_cases_identical_and_floored(env: Env) -> None:
     env.mail.sent.clear()
     cases = [
         ("unknown", UNKNOWN, PW, "198.51.100.1"),
-        ("wrong", ALICE, "not-the-password", "198.51.100.2"),
+        ("wrong", ALICE, WRONG_PW, "198.51.100.2"),
         ("right", ALICE, PW, "198.51.100.3"),
         ("rate-limited", ALICE, PW, "198.51.100.99"),
     ]
@@ -270,12 +272,13 @@ async def test_signin_mail_is_sent_off_the_request_path(env: Env) -> None:
     assert len(env.state.mail_tasks) == 1
     gated.release.set()
     await env.drain()
-    assert len(gated.sent) == 1 and gated.sent[0][0] == ALICE
+    assert len(gated.sent) == 1
+    assert gated.sent[0][0] == ALICE
 
 
 async def test_code_screen_copy_and_form(env: Env) -> None:
-    for email, pw in ((ALICE, PW), (ALICE, "nope"), (UNKNOWN, "nope")):
-        r = await env.signin(email, pw, ip=f"192.0.2.{len(pw)}")
+    for i, (email, pw) in enumerate(((ALICE, PW), (ALICE, WRONG_PW), (UNKNOWN, WRONG_PW))):
+        r = await env.signin(email, pw, ip=f"192.0.2.{20 + i}")
         html = await r.text()
         assert COPY in html
         assert 'action="/entry/code"' in html
@@ -289,7 +292,8 @@ def test_signin_cookie_is_strict_pending_cookie() -> None:
     resp = web.Response()
     app_session.set_signin_cookie(resp, "v")
     header = resp.cookies["lens_signin"].OutputString()
-    assert "SameSite=Strict" in header and "Path=/entry" in header
+    assert "SameSite=Strict" in header
+    assert "Path=/entry" in header
 
 
 # ---------------------------------------------------------------------------
@@ -309,7 +313,8 @@ async def test_full_signin_reaches_real_mesh(env: Env) -> None:
     assert env.store.get_session(raw)[0] == ALICE
     assert env.store.get_session(fixation) is None  # never promoted
     cleared = r.cookies[app_session.SIGNIN_COOKIE_NAME]
-    assert cleared.value == "" and cleared["max-age"] == "0"
+    assert cleared.value == ""
+    assert cleared["max-age"] == "0"
     assert metrics.get_metrics().snapshot()["sessions_started"] == started + 1
     # The session is the approved tier, with no Cloudflare Access JWT at all...
     cookie = {"Cookie": f"lens_session={raw}", **SAME_ORIGIN}
@@ -427,9 +432,9 @@ async def test_password_attempts_limited_per_ip_without_check(
 
     monkeypatch.setattr(env.store, "check_password", counting)
     for _ in range(5):
-        await env.signin(ALICE, "wrong", ip="10.4.0.1")
+        await env.signin(ALICE, WRONG_PW, ip="10.4.0.1")
     assert len(calls) == 5
-    before = await (await env.signin(ALICE, "wrong", ip="10.4.0.2")).text()
+    before = await (await env.signin(ALICE, WRONG_PW, ip="10.4.0.2")).text()
     r = await env.signin(ALICE, PW, ip="10.4.0.1")  # 6th from this IP
     assert r.status == 200
     assert await r.text() == before  # same screen
@@ -463,8 +468,8 @@ async def test_no_per_email_lockout_and_code_cap(env: Env) -> None:
 
 
 async def test_short_legacy_password_still_signs_in(env: Env) -> None:
-    env.store.set_password(ALICE, "short7!")  # < 12 chars, set before the rule
-    r = await env.signin(ALICE, "short7!")
+    env.store.set_password(ALICE, SHORT_PW)  # < 12 chars, set before the rule
+    r = await env.signin(ALICE, SHORT_PW)
     await env.drain()
     assert len(env.mail.sent) == 1
     assert (await env.code(ALICE, env.last_code(), pending_of(r))).status == 303
@@ -485,7 +490,7 @@ async def test_switch_off_restores_login_redirect(env_off: Env) -> None:
     assert r.status == 303
     assert r.headers["Location"] == "/login"
     assert app_session.SIGNIN_COOKIE_NAME not in r.cookies
-    r = await env_off.signin(ALICE, "wrong", ip="10.8.0.2")
+    r = await env_off.signin(ALICE, WRONG_PW, ip="10.8.0.2")
     assert r.status == 401
     assert entry.ERR_SIGNIN in await r.text()
     assert env_off.mail.sent == []

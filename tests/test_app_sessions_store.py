@@ -43,7 +43,8 @@ def test_session_roundtrip_and_raw_id_never_stored(tmp_path) -> None:
     assert s.get_session("nope") is None
     for cell in _all_cells(s.path):
         assert raw not in str(cell)
-    assert raw != "" and len(raw) >= 32
+    assert raw != ""
+    assert len(raw) >= 32
 
 
 def test_touch_and_delete(tmp_path) -> None:
@@ -60,7 +61,8 @@ def test_delete_sessions_for_email(tmp_path) -> None:
     a1, a2 = s.create_session("a@x.org"), s.create_session("a@x.org")
     b = s.create_session("b@x.org")
     assert s.delete_sessions_for_email("a@x.org") == 2
-    assert s.get_session(a1) is None and s.get_session(a2) is None
+    assert s.get_session(a1) is None
+    assert s.get_session(a2) is None
     assert s.get_session(b) is not None
     assert s.delete_sessions_for_email("a@x.org") == 0
 
@@ -134,7 +136,8 @@ def test_sweep_keeps_live_sessions_and_recent_tokens(tmp_path) -> None:
     raw = s.create_session("a@x.org")
     s.issue_token("a@x.org", purpose="signin")
     counts = s.sweep(now=clock[0] + 3600)
-    assert counts["sessions"] == 0 and counts["tokens"] == 0
+    assert counts["sessions"] == 0
+    assert counts["tokens"] == 0
     assert s.get_session(raw) is not None
 
 

@@ -375,6 +375,22 @@ def _is_public_path(request: web.Request) -> bool:
     )
 
 
+def _adopt_app_session(request: web.Request) -> bool:
+    """Stash the identity of a live app session on *request*; True if adopted."""
+    app_identity = app_session.identity_for(request)
+    if app_identity is None:
+        return False
+    request["identity"] = app_identity
+    logger.info(
+        "auth=ok via=app-session principal=%s nick=%s method=%s path=%s",
+        app_identity.principal,
+        app_identity.nick,
+        request.method,
+        request.path,
+    )
+    return True
+
+
 def build_cloudflare_middleware(config: LensConfig):
     """Build the @web.middleware coroutine for cloudflare-access mode.
 
@@ -429,16 +445,7 @@ def build_cloudflare_middleware(config: LensConfig):
         # App-native sign-in: a valid lens_session cookie is checked before
         # the Access JWT. Anything short of a live, still-allowlisted
         # session yields None and falls through unchanged (break-glass).
-        app_identity = app_session.identity_for(request)
-        if app_identity is not None:
-            request["identity"] = app_identity
-            logger.info(
-                "auth=ok via=app-session principal=%s nick=%s method=%s path=%s",
-                app_identity.principal,
-                app_identity.nick,
-                request.method,
-                request.path,
-            )
+        if _adopt_app_session(request):
             return await handler(request)
         token = _extract_token(request)
         if not token:
