@@ -68,9 +68,7 @@ def purge_flag_log(cfg, nicks: set[str]) -> None:
     erased by :meth:`GuestStore.delete_guest_inputs`.
     """
     if not cfg.guest_sandbox_flag_log:
-        logger.warning(
-            "guest deletion: guest_mode.sandbox.flag_log unset; flag lines kept"
-        )
+        logger.warning("guest deletion: guest_mode.sandbox.flag_log unset; flag lines kept")
         return
     path = _flag_log_path(cfg.guest_sandbox_flag_log)
     if path is None:

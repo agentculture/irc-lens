@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-10-10T14:30:58Z",
-  "updated": "2026-10-10T14:49:18Z",
+  "updated": "2026-10-10T15:07:16Z",
   "claims": [
     {
       "id": "c1",
@@ -713,7 +713,63 @@
       "seeds": []
     }
   ],
-  "lapses": [],
+  "lapses": [
+    {
+      "id": "l1",
+      "code": "provenance-missing",
+      "what": "t4 wrote the send_email binding upload shape ({type:send_email,name:ALERT_EMAIL}) from memory, unchecked against Cloudflare docs; no end-to-end send",
+      "skipped_check": "verify binding metadata against Cloudflare docs / a real deploy",
+      "refs": [
+        "t4 cultureflare cf-delivery-alert-deploy.sh"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l2",
+      "code": "grader-unverified",
+      "what": "t3 test_guest_and_delete_outputs_unchanged checks prefixes and its first assertion compares the guest email to itself, so 'templates unchanged' is not really asserted",
+      "skipped_check": "golden-string comparison against the pre-change templates",
+      "refs": [
+        "t3 tests/test_mail_signin.py"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l3",
+      "code": "control-absent",
+      "what": "t2 and t3 wrote tests and implementation in one step without watching the new tests fail first",
+      "skipped_check": "red run of the new tests before implementing",
+      "refs": [
+        "t2 tests/test_config_app_signin.py; t3 tests/test_mail_signin.py"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l4",
+      "code": "control-absent",
+      "what": "t1 wrote tests first but did not run them red before implementing",
+      "skipped_check": "red run of new tests",
+      "refs": [
+        "t1 tests/test_app_sessions_store.py"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l5",
+      "code": "control-absent",
+      "what": "t7 wrote implementation before tests; full suite not re-run after its black pass; no HTTP-level test of the default urllib poster and no end-to-end route->alert test",
+      "skipped_check": "red run; post-format full suite; real HTTP poster test",
+      "refs": [
+        "t7 src/irc_lens/alerts.py"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    }
+  ],
   "obligations": [
     {
       "id": "o1",
