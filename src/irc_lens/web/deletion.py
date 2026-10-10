@@ -25,7 +25,7 @@ from pathlib import Path
 from aiohttp import web
 
 from irc_lens import metrics
-from irc_lens.mail import PURPOSE_DELETE, render_token_email
+from irc_lens.mail import PURPOSE_DELETE, render_token_email, send_with_alert
 from irc_lens.web import csrf
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import (
@@ -68,7 +68,9 @@ def purge_flag_log(cfg, nicks: set[str]) -> None:
     erased by :meth:`GuestStore.delete_guest_inputs`.
     """
     if not cfg.guest_sandbox_flag_log:
-        logger.warning("guest deletion: guest_mode.sandbox.flag_log unset; flag lines kept")
+        logger.warning(
+            "guest deletion: guest_mode.sandbox.flag_log unset; flag lines kept"
+        )
         return
     path = _flag_log_path(cfg.guest_sandbox_flag_log)
     if path is None:
@@ -152,7 +154,9 @@ async def post_request(request: web.Request) -> web.Response:
         token = store.issue_token(email, purpose=TOKEN_PURPOSE)
         subject, body = render_token_email(token, purpose=PURPOSE_DELETE)
         try:
-            await asyncio.to_thread(state.get_mailer().send, email, subject, body)
+            await asyncio.to_thread(
+                send_with_alert, state.get_mailer(), state.alerter, email, subject, body
+            )
         except Exception as exc:  # noqa: BLE001 -- same page either way
             logger.warning("deletion token mail not sent: %s", type(exc).__name__)
     return _page("code", status=429 if limited else 200, email=email)

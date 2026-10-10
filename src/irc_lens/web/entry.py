@@ -62,7 +62,8 @@ from argon2.exceptions import InvalidHashError, VerificationError
 from irc_lens import legal, metrics
 from irc_lens.config import LensConfig, _default_guest_store_path
 from irc_lens.guest_store import GuestStore
-from irc_lens.mail import MailAdapter, make_adapter, render_token_email
+from irc_lens.alerts import Alerter, make_alerter
+from irc_lens.mail import MailAdapter, make_adapter, render_token_email, send_with_alert
 from irc_lens.web import csrf
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.render import render_fragment, static_url
@@ -188,6 +189,7 @@ class EntryState:
     config: LensConfig
     store: GuestStore | None = None
     mailer: MailAdapter | None = None
+    alerter: Alerter | None = None
     verifier: BotVerifier = field(default_factory=NoopVerifier)
     signin_floor_s: float = SIGNIN_FLOOR_S
 
@@ -209,7 +211,10 @@ def install(app: web.Application, config: LensConfig) -> None:
     # entry routes, the guest tier in auth and the routing consent gate all
     # read and write one store.
     app[ENTRY_STATE] = EntryState(
-        config=config, store=app.get("guest_store"), verifier=make_bot_verifier()
+        config=config,
+        store=app.get("guest_store"),
+        alerter=make_alerter(config),
+        verifier=make_bot_verifier(),
     )
     app.router.add_get("/entry", get_entry)
     # Post-SSO landing: Cloudflare Access forwards the user back here.
@@ -487,7 +492,7 @@ async def post_guest_start(request: web.Request) -> web.Response:
         token = store.issue_token(email, purpose=TOKEN_PURPOSE)
         subject, body = render_token_email(token)
         try:
-            await asyncio.to_thread(state.get_mailer().send, email, subject, body)
+            await asyncio.to_thread(send_with_alert, state.get_mailer(), state.alerter, email, subject, body)
         except Exception as exc:  # noqa: BLE001 -- same page either way (o4/o5)
             logger.warning("guest token mail not sent: %s", type(exc).__name__)
     return _page(
