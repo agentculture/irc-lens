@@ -27,7 +27,7 @@ from pathlib import Path
 
 import pytest
 
-from irc_lens.guest_store import GuestStore
+from irc_lens.guest_store import GuestStore, email_hash
 
 
 def _db_bytes(db_path: Path) -> bytes:
@@ -228,7 +228,7 @@ def test_delete_guest_inputs_removes_row_and_records_deletion(
         con.close()
     assert inputs == []
     assert len(deletions) == 1
-    assert deletions[0][0] == "a@example.com"
+    assert deletions[0][0] == email_hash("a@example.com")  # d9: hash only
     # Nothing sensitive lingers in the file.
     assert b"hello there" not in _db_bytes(store.path)
 

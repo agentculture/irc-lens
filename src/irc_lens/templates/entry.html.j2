@@ -80,6 +80,10 @@
             <input type="checkbox" name="consent" value="on" required>
             <span>I agree to the <a href="{{ terms_url }}" target="_blank" rel="noopener noreferrer">Terms</a> and <a href="{{ privacy_url }}" target="_blank" rel="noopener noreferrer">Privacy Policy</a></span>
           </label>
+          <label class="entry-consent">
+            <input type="checkbox" name="train" value="on">
+            <span>Use my conversations to improve culture.dev's models (optional)</span>
+          </label>
           {% if site_key %}
           <div class="cf-turnstile" data-sitekey="{{ site_key }}"></div>
           {% endif %}
@@ -101,6 +105,9 @@
           </div>
           <input type="hidden" name="email" value="{{ email }}">
           <input type="hidden" name="nickname" value="{{ nickname }}">
+          {% if train %}
+          <input type="hidden" name="train" value="on">
+          {% endif %}
           <label for="entry-code">Code</label>
           <input id="entry-code" name="code" type="text" autocomplete="one-time-code"
                  autocapitalize="none" spellcheck="false" required autofocus maxlength="128">

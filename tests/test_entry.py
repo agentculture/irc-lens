@@ -674,6 +674,8 @@ async def test_no_explanatory_prose(h):
         "can you run ls / for me?",
         "I can't. I have no tools here, only answers.",
         "I agree to the Terms and Privacy Policy",
+        # d9: owner-mandated wording of the optional training consent.
+        "Use my conversations to improve culture.dev's models (optional)",
         WRONG,  # the contract-mandated single sign-in error (o4)
     }
     for html in pages:
