@@ -47,6 +47,7 @@ from irc_lens.commands import (
     parse_command,
 )
 from irc_lens.session import LensConnectionLost
+from irc_lens.web import app_session
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import client_ip
 from irc_lens.web.events import format_sse
@@ -186,7 +187,12 @@ def _sandbox_state(session) -> dict:
 async def _resolve_session(request: web.Request):
     """Look up (or lazily open) the Session for this request's verified tier."""
     identity, backend = _backend_for(request)
-    session = await request.app["registry"].get_or_open(identity, backend)
+    registry = request.app["registry"]
+    existed = registry.has(identity.principal, backend)
+    session = await registry.get_or_open(identity, backend)
+    # Remember which app session (if any) opened it, so ending that app
+    # session closes this IRC session too (app_session.sweep_once).
+    app_session.note_registry_open(request, identity.principal, backend, existed)
     # UI context for the header / palette, from the verified tier only.
     session.sandbox_available = (
         backend == BACKEND_MESH
@@ -502,7 +508,14 @@ async def get_index(request: web.Request) -> web.Response:
             )
     _, backend = _backend_for(request)
     presence = _sandbox_state(session) if backend == BACKEND_SANDBOX else None
-    body = render_index(session, chat_log_html=chat_log_html, presence=presence)
+    body = render_index(
+        session,
+        chat_log_html=chat_log_html,
+        presence=presence,
+        # Log out only means something for an app-session sign-in.
+        show_logout=request["identity"].is_approved
+        and app_session.via_app_session(request),
+    )
     return web.Response(text=body, content_type=_HTML)
 
 

@@ -84,6 +84,11 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def session_id_hash(raw_id: str) -> str:
+    """sha256 hexdigest of a raw app-session id (the ``sessions.id_hash``)."""
+    return _hash_token(raw_id)
+
+
 def email_hash(email: str) -> str:
     """SHA-256 hexdigest of the lower-cased email: the deletion log's key.
 
@@ -133,6 +138,10 @@ class GuestStore:
 
     def _now(self) -> int:
         return int(self._clock())
+
+    def now(self) -> int:
+        """The store's clock (unix seconds), injectable for tests."""
+        return self._now()
 
     def _connect(self) -> sqlite3.Connection:
         con = sqlite3.connect(self.path)
@@ -285,6 +294,20 @@ class GuestStore:
             (_hash_token(raw_id), now - SESSION_IDLE_S, now - SESSION_MAX_S),
         )
         return rows[0] if rows else None
+
+    def session_email_by_hash(self, id_hash: str) -> str | None:
+        """Email of the live session whose sha256 id is *id_hash*, else None.
+
+        Same idle/max-age rules as :meth:`get_session`; used by the web
+        app's revocation sweep, which only ever holds the hash.
+        """
+        now = self._now()
+        rows = self._all(
+            "SELECT email FROM sessions WHERE id_hash=? "
+            "AND last_seen >= ? AND created >= ?",
+            (id_hash, now - SESSION_IDLE_S, now - SESSION_MAX_S),
+        )
+        return rows[0][0] if rows else None
 
     def touch_session(self, raw_id: str, now: int | None = None) -> None:
         self._run(

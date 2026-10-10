@@ -450,6 +450,7 @@ def render_index(
     *,
     chat_log_html: str | None = None,
     presence: dict | None = None,
+    show_logout: bool = False,
 ) -> str:
     """Render the full three-pane page from current Session state.
 
@@ -463,6 +464,9 @@ def render_index(
     `presence` is the sandbox agent's ``metrics.AgentPresence.state()``
     dict, passed only for sandbox-backed sessions (guest / sandbox
     preview) so the room header can render the agent-offline line.
+
+    `show_logout` renders the header's Log out button (approved users
+    signed in through an app session; never for guests).
     """
     if chat_log_html is None:
         if session.current_channel:
@@ -478,4 +482,5 @@ def render_index(
         session=session,
         chat_log_html=chat_log_html,
         presence=presence,
+        show_logout=show_logout,
     )
