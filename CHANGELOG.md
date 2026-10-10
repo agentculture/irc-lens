@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`culture.yaml` with a `gate:` section only** (no `agents:`): the test
+  gate the culture-rules PR fixer runs (`uv sync --extra dev`, then
+  `uv run pytest -q`, same selection as the CI `test` job without coverage
+  or Sonar) before it pushes a fix. irc-lens still declares no mesh agent.
+  No version bump: nothing shipped changes.
+
 ## [0.11.0] - 2026-10-09
 
 ### Added
