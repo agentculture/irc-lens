@@ -713,6 +713,10 @@ def load_config(path: Path) -> LensConfig:
     culture_residents_url, culture_overview_name = _validate_culture_section(raw)
     guest_fields = _validate_guest_mode_section(raw)
     app_signin_enabled = _validate_app_signin(auth)
+    if guest_fields.get("guest_mail_provider", "none") == "none":
+        # Codes can't be mailed: keep the 0.12.2 path (303 /login) instead of
+        # a code screen whose code never arrives. make_app logs why.
+        app_signin_enabled = False
     app_signin_base_url = _app_signin_base_url(auth)
 
     return LensConfig(

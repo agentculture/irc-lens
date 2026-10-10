@@ -258,6 +258,11 @@ def make_app(
             "guest_mode on but guest_mode.sandbox.flag_log unset: guest deletion "
             "will not erase the guest's sbx-ask flag lines"
         )
+    if config.guest_enabled and config.guest_mail_provider == "none":
+        logging.getLogger(__name__).warning(
+            "app sign-in off: guest_mode.mail.provider is 'none', so sign-in "
+            "codes can't be mailed (approved users use /login); set a provider"
+        )
     _install_guest_state(app, config)
     _install_media_state(app, config)
 

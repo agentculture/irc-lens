@@ -32,10 +32,9 @@ import re
 from aiohttp import web
 
 from irc_lens import metrics
-from irc_lens._errors import AfiError
 from irc_lens.guest_store import TOKEN_TTLS
-from irc_lens.mail import render_link_email, send_with_alert
-from irc_lens.web.app_session import end_sessions_for_email
+from irc_lens.mail import is_allowed_base_url, render_link_email, send_with_alert
+from irc_lens.web.app_session import allowed_lower, end_sessions_for_email
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import (
     ENTRY_PAGE_MARKER,
@@ -150,16 +149,17 @@ async def _send_link(state, email: str) -> None:
             "nor media.public_base_url is configured"
         )
         return
-    store = state.get_store()
-    try:
-        token = await asyncio.to_thread(store.issue_token, email, purpose=TOKEN_PURPOSE)
-        subject, body = render_link_email(base, token, ttl_s=TOKEN_TTL_S)
-    except AfiError:
+    if not is_allowed_base_url(base):
+        # Checked before a token exists, so a misconfigured base never
+        # leaves a live credential behind.
         logger.error(
             "set-password link not sent: the configured base_url is not "
             "https (http only for 127.0.0.1/localhost)"
         )
         return
+    store = state.get_store()
+    token = await asyncio.to_thread(store.issue_token, email, purpose=TOKEN_PURPOSE)
+    subject, body = render_link_email(base, token, ttl_s=TOKEN_TTL_S)
     try:
         await asyncio.to_thread(
             send_with_alert, state.get_mailer(), state.alerter, email, subject, body
@@ -192,7 +192,7 @@ async def post_password(request: web.Request) -> web.Response:
     )
     if limited:
         metrics.get_metrics().rate_limited()
-    elif _plausible_email(email) and email in request.app["config"].allowed_emails:
+    elif _plausible_email(email) and email in allowed_lower(request.app["config"]):
         tasks = request.app[MAIL_TASKS]
         task = asyncio.create_task(_send_link(state, email))
         tasks.add(task)
@@ -205,7 +205,7 @@ def _live_email(request: web.Request, store, token: str) -> str | None:
     if not _TOKEN_RE.fullmatch(token):
         return None
     email = store.peek_token(token, purpose=TOKEN_PURPOSE)
-    if email is None or email not in request.app["config"].allowed_emails:
+    if email is None or email not in allowed_lower(request.app["config"]):
         return None
     return email
 

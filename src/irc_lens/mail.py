@@ -124,7 +124,7 @@ def _signin_body(token: str, ttl_s: int) -> str:
     )
 
 
-def _is_allowed_base(base_url: object) -> bool:
+def is_allowed_base_url(base_url: object) -> bool:
     if not isinstance(base_url, str):
         return False
     if base_url.startswith("https://"):
@@ -148,7 +148,7 @@ def render_link_email(
     every address apart from the link. The link is the credential and is
     never written to any log by this module.
     """
-    if not _is_allowed_base(base_url):
+    if not is_allowed_base_url(base_url):
         raise AfiError(
             code=EXIT_ENV_ERROR,
             message="set-password base URL must be https (or loopback http)",

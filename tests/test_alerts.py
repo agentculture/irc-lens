@@ -68,7 +68,8 @@ def test_429_is_quota_and_payload_is_clean():
     assert (url, secret) == ("https://w.example/a", SECRET)
     assert set(payload) == {"kind", "message"}
     assert payload["kind"] == "quota"
-    assert payload["message"].startswith("Resend quota used up")
+    # 429 is also Resend's short per-second rate limit: say both (review fix).
+    assert payload["message"].startswith("Resend quota used up or rate-limited")
     assert "/login" in payload["message"]
     assert "not being delivered" in payload["message"]
     blob = json.dumps(payload)
@@ -177,3 +178,15 @@ def test_make_alerter_reads_secret_from_env(monkeypatch):
     assert alerts.make_alerter(cfg).enabled
     monkeypatch.delenv("ALERT_S")
     assert not alerts.make_alerter(cfg).enabled
+
+
+def test_finished_alert_threads_are_not_kept():
+    """notify() drops finished threads, so a long-running lens doesn't grow."""
+    a, rec, clock = _alerter()
+    for i in range(20):
+        clock.t += alerts.ALERT_INTERVAL_S
+        assert a.notify(alerts.KIND_SEND_FAILED, f"m{i}")
+        for t in tuple(a._threads):
+            t.join(5)
+    assert len(rec.posts) == 20
+    assert len(a._threads) <= 1

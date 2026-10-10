@@ -38,7 +38,9 @@ Poster = Callable[[str, str, dict], None]
 def message_for(kind: str, status: int | None) -> str:
     """The fixed alert text for *kind* (no address, no code, no body)."""
     if kind == KIND_QUOTA:
-        return f"Resend quota used up: {_TAIL}"
+        # Resend answers 429 both for a used-up quota and for its short
+        # per-second rate limit; the status alone can't tell them apart.
+        return f"Resend quota used up or rate-limited (HTTP 429): {_TAIL}"
     what = f"HTTP {status}" if status is not None else "network error"
     return f"Resend send failed ({what}): {_TAIL}"
 
@@ -115,7 +117,9 @@ class Alerter:
                 daemon=True,
                 name="delivery-alert",
             )
-            self._threads.append(t)
+            with self._lock:
+                self._threads = [x for x in self._threads if x.is_alive()]
+                self._threads.append(t)
             t.start()
             return True
         except Exception as exc:  # noqa: BLE001 -- alerting must never break a request
@@ -130,9 +134,12 @@ class Alerter:
 
     def wait(self, timeout: float = 5.0) -> None:
         """Join in-flight posts (tests / shutdown)."""
-        for t in tuple(self._threads):  # snapshot: other threads may append
+        with self._lock:
+            threads = tuple(self._threads)  # snapshot: notify() may append
+        for t in threads:
             t.join(timeout)
-        self._threads = [t for t in self._threads if t.is_alive()]
+        with self._lock:
+            self._threads = [t for t in self._threads if t.is_alive()]
 
 
 def make_alerter(cfg: LensConfig) -> Alerter:

@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unblocked ones. Replaces the per-email 5 code tries, the 5 codes per 15
   minutes and the per-IP 5 password checks on the app sign-in path.
 - `auth.app_signin.enabled` (default true) and `auth.app_signin.base_url`.
+  App sign-in needs a mail provider: with `guest_mode.mail.provider: none`
+  it stays off (approved users use `/login`) and the console logs why.
 - `tests/test_log_hygiene.py`: end-to-end check that no log record contains a
   password, code, token, session id or cookie value.
 
@@ -55,6 +57,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Set-password tokens are redacted from request-path logs; no log line
   contains a code, session id or password. The Cloudflare tunnel and cache
   configuration are unchanged.
+- `auth.allowed_emails` is compared without case on every app sign-in path
+  (session check, revocation sweep, set-password), as it already was at the
+  password step.
+- A set-password request with a non-https base URL issues no token.
+- Delivery alerts for HTTP 429 say "quota used up or rate-limited" (Resend
+  uses 429 for both); finished alert threads are no longer kept.
 
 ## [0.12.2] - 2026-10-10
 

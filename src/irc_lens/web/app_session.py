@@ -163,6 +163,11 @@ def clear_device_cookie(response: web.StreamResponse) -> None:
 # -- identity (called by the auth middleware) ----------------------------------
 
 
+def allowed_lower(config) -> frozenset[str]:
+    """``auth.allowed_emails`` lowercased: app sign-in compares emails without case."""
+    return frozenset(e.lower() for e in getattr(config, "allowed_emails", ()))
+
+
 def _store(app: web.Application):
     return app.get("guest_store")
 
@@ -186,7 +191,7 @@ def identity_for(request: web.Request) -> Identity | None:
     if row is None:
         return None
     email, _created, last_seen = row
-    if email not in config.allowed_emails:
+    if email not in allowed_lower(config):
         return None
     try:
         nick = derive_nick(config.server_name, email)
@@ -247,7 +252,7 @@ async def sweep_once(app: web.Application) -> list[tuple[str, str]]:
     if not links or store is None:
         return []
     registry = app["registry"]
-    allowed = set(app["config"].allowed_emails)
+    allowed = allowed_lower(app["config"])
     ended: list[tuple[str, str]] = []
     for key, id_hash in tuple(links.items()):  # snapshot: links.pop below
         if not registry.has(*key):

@@ -34,7 +34,8 @@ def _guest(body: str) -> str:
 
 def test_defaults(tmp_path: Path) -> None:
     cfg = _load(tmp_path)
-    assert cfg.app_signin_enabled is True
+    # No mail provider configured, so app sign-in stays off (review fix).
+    assert cfg.app_signin_enabled is False
     assert cfg.guest_max_guests == 1
     assert cfg.guest_idle_close_s == 900
     assert cfg.guest_mail_alert_url is None
