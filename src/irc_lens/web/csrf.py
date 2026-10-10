@@ -23,8 +23,11 @@ middleware applies that same check first (a present, mismatching ``Origin``
 is always 403). It adds a stricter rule for requests that carry a guest
 cookie: ``Origin`` must be present and match, or -- when absent -- the
 browser's ``Sec-Fetch-Site`` must say ``same-origin``/``none``. A
-``cross-site``/``same-site`` fetch with a cookie is refused. Requests without
-a guest cookie keep the original lenient behaviour (Origin-absent allowed).
+``cross-site``/``same-site`` fetch with a cookie is refused. The same rule
+covers the approved app-session cookie ``lens_session`` and the pending
+sign-in cookie ``lens_signin`` and the trusted-browser cookie ``lens_device``
+(:data:`PROOF_COOKIE_NAMES`). Requests without
+any of them keep the original lenient behaviour (Origin-absent allowed).
 """
 
 from __future__ import annotations
@@ -40,9 +43,24 @@ import time
 
 from aiohttp import web
 
+from irc_lens.web.app_session import (
+    DEVICE_COOKIE_NAME,
+    SESSION_COOKIE_NAME,
+    SIGNIN_COOKIE_NAME,
+)
+
 logger = logging.getLogger("irc_lens.web.csrf")
 
 GUEST_COOKIE_NAME = "lens_guest"
+#: Cookies whose presence demands same-origin proof on an Origin-less
+#: state-changing request: the guest cookie, the approved app session, the
+#: pending sign-in cookie and the trusted-browser cookie (``web/app_session.py``).
+PROOF_COOKIE_NAMES = (
+    GUEST_COOKIE_NAME,
+    SESSION_COOKIE_NAME,
+    SIGNIN_COOKIE_NAME,
+    DEVICE_COOKIE_NAME,
+)
 SECRET_ENV = "IRC_LENS_GUEST_COOKIE_SECRET"
 DEFAULT_TTL_SECONDS = 3600
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
@@ -185,10 +203,12 @@ async def csrf_middleware(request: web.Request, handler):
 
     if not routes._origin_ok(request):
         return routes._origin_denied_response(request)  # same body + log as /input
-    if request.cookies.get(GUEST_COOKIE_NAME) and request.headers.get("Origin") is None:
-        if request.headers.get("Sec-Fetch-Site", "").lower() not in (
-            "same-origin",
-            "none",
-        ):
-            return _denied(request, "cookie_without_same_origin_proof")
+    has_cookie = any(request.cookies.get(name) for name in PROOF_COOKIE_NAMES)
+    if (
+        has_cookie
+        and request.headers.get("Origin") is None
+        and request.headers.get("Sec-Fetch-Site", "").lower()
+        not in ("same-origin", "none")
+    ):
+        return _denied(request, "cookie_without_same_origin_proof")
     return await handler(request)

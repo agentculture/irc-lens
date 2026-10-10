@@ -47,6 +47,7 @@ from irc_lens.commands import (
     parse_command,
 )
 from irc_lens.session import LensConnectionLost
+from irc_lens.web import app_session
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import client_ip
 from irc_lens.web.events import format_sse
@@ -103,8 +104,12 @@ CONSENT_PATH = "/consent"
 SANDBOX_NICK_PREFIX = "sbx-"
 
 
-def _json_error(status: int, error: str, hint: str, **extra) -> web.Response:
-    return web.json_response({"error": error, "hint": hint, **extra}, status=status)
+def _json_error(
+    status: int, error: str, hint: str, headers: dict | None = None, **extra
+) -> web.Response:
+    return web.json_response(
+        {"error": error, "hint": hint, **extra}, status=status, headers=headers
+    )
 
 
 #: Approved users' sandbox nicks live under ``sbx-op-``; guest nicknames
@@ -183,10 +188,56 @@ def _sandbox_state(session) -> dict:
     return sandbox_presence(session, metrics.get_presence().nick)
 
 
-async def _resolve_session(request: web.Request):
-    """Look up (or lazily open) the Session for this request's verified tier."""
+class GuestBusy(Exception):
+    """A guest without an open session found every guest slot taken (c35)."""
+
+
+class GuestSignedOff(Exception):
+    """A guest's session is closed and this route may not reopen it."""
+
+
+async def _open_guest(registry, identity: Identity, limit: int, *, may_open: bool):
+    """Open (or return) a guest's sandbox session within the guest limit.
+
+    Count + reserve + open run under the registry's guest lock, so a
+    returning guest can never push the sandbox past ``max_guests``
+    (c24/c35). Only an action (``GET /``, ``POST /input``) may reopen a
+    signed-off guest's session; polls and event streams may not, or an
+    idle tab would hold the slot forever (c28).
+    """
+    async with registry.guest_lock:
+        if not registry.has(identity.principal, BACKEND_SANDBOX):
+            if not may_open:
+                raise GuestSignedOff()
+            if not registry.try_reserve_guest(identity.principal, limit):
+                raise GuestBusy()
+        try:
+            return await registry.get_or_open(identity, BACKEND_SANDBOX)
+        except BaseException:
+            registry.release_guest(identity.principal)
+            raise
+
+
+async def _resolve_session(request: web.Request, *, may_open_guest: bool = True):
+    """Look up (or lazily open) the Session for this request's verified tier.
+
+    Guests (never an approved user's Guest view) go through the guest
+    limit: :class:`GuestBusy` when no slot is free, :class:`GuestSignedOff`
+    when *may_open_guest* is false and their session is closed.
+    """
     identity, backend = _backend_for(request)
-    session = await request.app["registry"].get_or_open(identity, backend)
+    registry = request.app["registry"]
+    existed = registry.has(identity.principal, backend)
+    if backend == BACKEND_SANDBOX and identity.principal.startswith(
+        GUEST_PRINCIPAL_PREFIX
+    ):
+        limit = request.app["config"].guest_max_guests
+        session = await _open_guest(registry, identity, limit, may_open=may_open_guest)
+    else:
+        session = await registry.get_or_open(identity, backend)
+    # Remember which app session (if any) opened it, so ending that app
+    # session closes this IRC session too (app_session.sweep_once).
+    app_session.note_registry_open(request, identity.principal, backend, existed)
     # UI context for the header / palette, from the verified tier only.
     session.sandbox_available = (
         backend == BACKEND_MESH
@@ -462,7 +513,14 @@ async def get_index(request: web.Request) -> web.Response:
     gated = await _guest_consent_gate(request, redirect=True)
     if gated is not None:
         return gated
-    session = await _resolve_session(request)
+    try:
+        # A returning guest (valid cookie, session signed off) rejoins here
+        # if a slot is free; opening counts as their action (c35).
+        session = await _resolve_session(request)
+    except GuestBusy:
+        from irc_lens.web import entry
+
+        return entry.busy_page(request.app[entry.ENTRY_STATE])
     # `chat_log_html=None` lets `render_index` fall back to the
     # `MessageBuffer` — which is the seed-loader path. We only override
     # to a string when the live IRCd query actually ran, so `--seed`
@@ -502,7 +560,14 @@ async def get_index(request: web.Request) -> web.Response:
             )
     _, backend = _backend_for(request)
     presence = _sandbox_state(session) if backend == BACKEND_SANDBOX else None
-    body = render_index(session, chat_log_html=chat_log_html, presence=presence)
+    body = render_index(
+        session,
+        chat_log_html=chat_log_html,
+        presence=presence,
+        # Log out only means something for an app-session sign-in.
+        show_logout=request["identity"].is_approved
+        and app_session.via_app_session(request),
+    )
     return web.Response(text=body, content_type=_HTML)
 
 
@@ -521,7 +586,8 @@ async def get_presence(request: web.Request) -> web.Response:
     presence = None
     if backend == BACKEND_SANDBOX:
         try:
-            session = await _resolve_session(request)
+            # A poll is not an action: never reopen a signed-off guest.
+            session = await _resolve_session(request, may_open_guest=False)
             # Re-read the room from the server on every poll: AgentIRC sends
             # no QUIT for a bot-capability client (sbx-ask) or an abrupt
             # disconnect, so a stopped agent is only visible via WHO.
@@ -593,7 +659,16 @@ async def post_input(request: web.Request) -> web.Response:
     if gated is not None:
         return gated
 
-    session = await _resolve_session(request)
+    try:
+        session = await _resolve_session(request)
+    except GuestBusy:
+        # The page reloads into the busy message (c35).
+        return _json_error(
+            503,
+            "sandbox busy",
+            "The sandbox is busy. Try again in a few minutes.",
+            headers={"HX-Redirect": "/"},
+        )
     # Health gate before parsing: once the AgentIRC pipe is gone, the
     # spec mandates 503 on subsequent input rather than silently
     # no-oping (which is what `IRCTransport.send_raw` would do — its
@@ -606,6 +681,8 @@ async def post_input(request: web.Request) -> web.Response:
         return err
     if not text:
         return web.Response(status=204)
+    # c28: a message or command sent is what keeps a guest signed in.
+    _touch(request)
 
     parsed = parse_command(text)
     refused = _sandbox_policy(request, text, parsed)
@@ -625,6 +702,15 @@ async def post_input(request: web.Request) -> web.Response:
             identity.principal, kind="message", payload=text
         )
     return web.Response(status=204)
+
+
+def _touch(request: web.Request) -> None:
+    """Record a guest's action for the idle sign-off (c28)."""
+    identity, backend = _backend_for(request)
+    if backend == BACKEND_SANDBOX and identity.principal.startswith(
+        GUEST_PRINCIPAL_PREFIX
+    ):
+        request.app["registry"].touch(identity.principal, backend)
 
 
 #: Rate-limit bucket / window for guest chat input (config:
@@ -830,7 +916,12 @@ async def get_events(request: web.Request) -> web.StreamResponse:
     gated = await _anonymous_or_gate(request, redirect=False)
     if gated is not None:
         return gated
-    session = await _resolve_session(request)
+    try:
+        # An event stream is not an action: it never reopens a signed-off
+        # guest's session. 204 tells EventSource to stop reconnecting.
+        session = await _resolve_session(request, may_open_guest=False)
+    except (GuestBusy, GuestSignedOff):
+        return web.Response(status=204)
     sub = session.event_bus.subscribe()
     # Re-send the member list once this stream is live: a roster update
     # published before the browser connected (e.g. the agent joining a

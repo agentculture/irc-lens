@@ -17,6 +17,7 @@ import logging
 
 from aiohttp import web
 
+from irc_lens.web import app_session
 from irc_lens.web.sessions import (
     BACKEND_SANDBOX,
     GUEST_PRINCIPAL_PREFIX,
@@ -54,8 +55,16 @@ async def _loop(app: web.Application, interval: float) -> None:
         except Exception:  # noqa: BLE001 -- the sweeper must never die
             logger.exception("ban sweep failed")
         try:
-            # Same cadence: close sandbox sessions nobody has had open for
-            # guest_idle_close_s (closed tabs send no goodbye) (d7).
+            # Same cadence: close IRC sessions opened through an app session
+            # that has since ended (logout, password change, expiry, removal
+            # from auth.allowed_emails) (c29).
+            await app_session.sweep_once(app)
+        except Exception:  # noqa: BLE001 -- the sweeper must never die
+            logger.exception("app session sweep failed")
+        try:
+            # Same cadence: sign off guests with no action (message or
+            # command) for guest_idle_close_s, open tab or not (c28), and
+            # close Guest-view sessions with no open tab that long (d7).
             await app["registry"].reap_idle(
                 now=time.monotonic(), idle_s=app["config"].guest_idle_close_s
             )

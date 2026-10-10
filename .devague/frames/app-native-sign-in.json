@@ -1,0 +1,1077 @@
+{
+  "slug": "app-native-sign-in",
+  "title": "app-native sign-in",
+  "schema_version": 6,
+  "status": "exported",
+  "created": "2026-10-10T14:30:58Z",
+  "updated": "2026-10-10T17:45:34Z",
+  "claims": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "chat.culture.dev approved users sign in inside the app with a password and an emailed code, and a wrong password looks exactly like a right one",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h1",
+          "text": "an approved user reaches the real mesh at chat.culture.dev with password plus emailed code, without passing through Cloudflare Access",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c2",
+      "kind": "decision",
+      "text": "Approved-user session lasts 7 days sliding (renewed while used), with a 30-day absolute cap",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c3",
+      "kind": "decision",
+      "text": "Cloudflare Access /login stays as a break-glass way in during a trial; deleting the Access app is a follow-up after the trial",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c4",
+      "kind": "decision",
+      "text": "Approved users without a password set one through an emailed set-password link (folds in irc-lens #66)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c5",
+      "kind": "decision",
+      "text": "Process: short devague spec, owner approves, then one irc-lens PR built test-first with a real-browser pass and a staged cutover",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c6",
+      "kind": "audience",
+      "text": "Approved users of chat.culture.dev (the owner and one collaborator), and anyone trying to guess their passwords",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h2",
+          "text": "the only approved users are the emails in auth.allowed_emails; nothing else grants the approved tier besides a verified Access JWT during the trial",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c7",
+      "kind": "before_state",
+      "text": "A correct password answers 303 to /login (Cloudflare Access) and a wrong one 401 'Email or password is wrong', so an attacker spreading guesses over many IPs learns the moment a guess is right; the 5-per-15-minutes per-email limit lets an attacker lock the owner out; the collaborator has no password and relies on the Access email PIN",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h3",
+          "text": "the before-state is what 0.12.2 does: post_signin returns 303 /login on success and 401 otherwise, with _over_limit counting per email and per IP",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c8",
+      "kind": "after_state",
+      "text": "Email, then password, then always the same code screen; a sign-in code is emailed only when the email is approved and the password is correct; the right code in the same browser starts a server-side, revocable app session that reaches the real mesh; Cloudflare Access is not on the normal path",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h4",
+          "text": "after the change no response of /entry/signin depends on whether the password was correct; only the mailbox learns it",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c9",
+      "kind": "why_it_matters",
+      "text": "Guessing passwords teaches an attacker nothing, a stolen password alone is not enough (password plus mailbox, where Access checked only the mailbox), and a correct guess emails the owner",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h5",
+          "text": "a correct password with no access to the mailbox never yields a session",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c10",
+      "kind": "requirement",
+      "text": "POST /entry/signin answers identically (same status, same body apart from the echoed email, padded to the same floor) for an unknown email, an approved email with a wrong password, an approved email with the right password, and a rate-limited attempt; the code email is sent off the request path so it adds no timing difference",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h6",
+          "text": "a test posts the 4 cases and asserts equal status, equal body after replacing the email, and that each took at least the floor; the mail send runs in a background task",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "tests/test_app_signin.py: parametrize unknown / wrong / right / limited; compare bodies with the email masked; assert RecordingAdapter got exactly 1 mail only in the right case",
+      "revisions": []
+    },
+    {
+      "id": "c11",
+      "kind": "requirement",
+      "text": "Sign-in codes are single-use, expire after 10 minutes, carry purpose 'signin', and work only together with the pending-sign-in cookie set by the code screen (same browser); code entry is limited to 5 tries per 15 minutes per email and per IP; a wrong, expired, reused or rate-limited code all show the one error",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h7",
+          "text": "a code from browser A fails in browser B, a used code fails the second time, an 11-minute-old code fails, and the 6th try in 15 minutes fails even with the right code",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c12",
+      "kind": "requirement",
+      "text": "Approved sessions are server-side: a sessions table holds sha256 of the session id, the email, created and last-seen times; the cookie lens_session is HttpOnly, Secure, SameSite=Lax; 7 days idle or 30 days total ends it; logout ends it; setting a password ends every session for that email; the email is re-checked against allowed_emails on every request",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h8",
+          "text": "the database never holds a raw session id; a session idle 7 days or older than 30 days is refused; logout and password change make the old cookie fail; removing the email from allowed_emails makes the next request anonymous",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c13",
+      "kind": "requirement",
+      "text": "The sign-in email says the correct password was just entered and tells the reader to change it if it wasn't them",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h9",
+          "text": "the rendered sign-in email contains the change-your-password line and the email is identical for every approved address apart from the code",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c14",
+      "kind": "requirement",
+      "text": "Rate limits (superseded in detail by r6/c36-c38): password checks and code entries from untrusted browsers are limited per IP (3 per 15 minutes, counted together; over the limit, no check, same screen) and by the email's untrusted budget (c38); a trusted browser (c37) is not limited, so an attack on an email cannot lock out its owner's trusted browser",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h10",
+          "text": "the 6th password attempt from one IP in 15 minutes is not checked yet shows the same screen; an approved email under a distributed attack still gets codes when the right password is entered, up to 5 per 15 minutes",
+          "status": "rejected",
+          "instruction": ""
+        },
+        {
+          "id": "h28",
+          "text": "the 4th untrusted attempt (password or code) from one IP within 15 minutes is not checked yet answers exactly like a checked one; a trusted browser from that same IP still signs in",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "Rate limits: password checks stay limited per IP (5 per 15 minutes; over the limit, no check, same screen); per email there is no lockout, only a cap of 5 sign-in codes sent per 15 minutes",
+          "kind": "requirement",
+          "reason": "r6 replaced the 5-per-15 per-IP limit and the 5-codes-per-email cap"
+        }
+      ]
+    },
+    {
+      "id": "c15",
+      "kind": "requirement",
+      "text": "Set or reset password: a link on the entry card asks for an email and always shows the same 'check your email' screen; only an approved email gets a single-use link (purpose 'setpw', 30-minute expiry) to a page that sets an argon2id password of at least 12 characters and ends all of that email's sessions",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h11",
+          "text": "the set-password screen is identical for approved and unknown emails; a link works once, expires in 30 minutes, rejects passwords under 12 characters, and setting a password ends that email's sessions",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c16",
+      "kind": "requirement",
+      "text": "During the trial a verified Cloudflare Access JWT still yields the approved tier, so /login keeps working as break-glass",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h12",
+          "text": "with a valid Access JWT the approved tier is granted exactly as in 0.12.2, so /login still works",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c17",
+      "kind": "boundary",
+      "text": "irc-lens plus one small Cloudflare email Worker for delivery alerts; the guest flow changes only by the one-guest limit and the 15-minute idle sign-off; the Cloudflare tunnel and CDN cache rules are unchanged; approved users stay defined by allowed_emails in config (no sign-up, no account creation)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h13",
+          "text": "the PR diff touches no guest-flow behavior and no Cloudflare configuration; guest-mode tests pass unchanged",
+          "status": "rejected",
+          "instruction": ""
+        },
+        {
+          "id": "h15",
+          "text": "outside the guest limit and idle sign-off, guest-mode tests pass unchanged; the PR changes no Cloudflare tunnel or cache configuration",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "irc-lens only; the guest flow, the Cloudflare tunnel and CDN cache rules are unchanged; approved users stay defined by allowed_emails in config (no sign-up, no account creation)",
+          "kind": "boundary",
+          "reason": "owner added the guest limit and the Cloudflare email alert to this change"
+        }
+      ]
+    },
+    {
+      "id": "c18",
+      "kind": "non_goal",
+      "text": "No TOTP or WebAuthn, and no code-only (passwordless) sign-in in this change",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c19",
+      "kind": "success_signal",
+      "text": "Tests show the 4 sign-in cases give byte-identical responses apart from the email with 0 codes sent for 3 of them; a correct password without the code gives 0 access; a real-browser pass on staging signs the owner in with password plus code in under 2 minutes; the live owner sign-in works with Cloudflare Access bypassed",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h14",
+          "text": "each success signal maps to a named test or a recorded browser/live check in the delivery record",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c20",
+      "kind": "decision",
+      "text": "A password set before this change that is shorter than 12 characters still signs in; the set-or-reset password flow is how it gets replaced with one of at least 12",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c21",
+      "kind": "decision",
+      "text": "Only 1 guest may use the sandbox at a time for now; a guest with no action for 15 minutes is signed off; the limit rises after the move to AWS",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c22",
+      "kind": "decision",
+      "text": "An email-delivery outage needs no extra sign-in fallback for now (break-glass /login covers the trial)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c23",
+      "kind": "decision",
+      "text": "When Resend can't send (the 3000-email quota is used up, or Resend returns an error) the approved users get an alert email sent through Cloudflare email",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c24",
+      "kind": "requirement",
+      "text": "Guest limit: while guest_mode.max_guests (default 1) guests are active, a new visitor who picks Guest mode sees 'The sandbox is busy. Try again in a few minutes.' before any code is emailed, and code verification re-checks the limit so two guests can't slip in together; a slot frees when the guest deletes their data, or after 15 minutes with no action (idle close 900 s); an approved user's Guest view does not count",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h16",
+          "text": "with one guest active, a second visitor gets the busy message and 0 codes are emailed; two guests verifying codes at the same moment yield exactly one active guest; after the first guest's 15 idle minutes or deletion, the next visitor gets in; approved users in Guest view are never refused",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c25",
+      "kind": "requirement",
+      "text": "Delivery alert: when a Resend send fails (HTTP error, including quota exhaustion, or a network error), the lens posts at most one alert per hour per failure kind to a Cloudflare Worker over HTTPS with a shared secret; the Worker emails each approved user through Cloudflare Email Routing; the alert names what failed, says sign-in and guest codes are not being delivered, and points to /login; it never contains a guest's email address or a code",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h17",
+          "text": "a forced Resend failure sends exactly one alert per failure kind within an hour, the alert body holds no guest email address or code, and the Worker rejects a request without the shared secret",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c26",
+      "kind": "assumption",
+      "text": "Cloudflare Email Routing can send only to verified destination addresses, so every approved user's address must be verified as a destination before alerts reach them",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c27",
+      "kind": "requirement",
+      "text": "The CSRF guard that today demands same-origin proof for cookie-bearing POSTs without an Origin header (csrf.py: only when lens_guest is present) also applies to the lens_session and pending-sign-in cookies",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h18",
+          "text": "a cross-site POST carrying lens_session or the pending cookie, with no Origin and Sec-Fetch-Site cross-site, gets 403 before any handler runs",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c28",
+      "kind": "requirement",
+      "text": "Guest idle sign-off counts actions, not open tabs: 15 minutes with no message or command sent closes the guest's session even if the tab stays open (today's reap_idle only closes sessions with no open event stream)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h19",
+          "text": "a guest with the tab open who sends nothing for 15 minutes is signed off and frees the slot; a guest who keeps chatting is not",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c29",
+      "kind": "requirement",
+      "text": "Ending an approved session (logout, password change, expiry, removal from allowed_emails) also closes that user's open IRC session and event stream, as the ban sweeper does for guests, so an open tab doesn't keep working",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h20",
+          "text": "after logout or password change, the user's already-open tab stops receiving events and its next POST is refused within one sweep interval",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c30",
+      "kind": "requirement",
+      "text": "Opening a set-password link (GET) never uses it up; only submitting the new password (POST) consumes the token, so mail scanners that prefetch links can't burn it",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h21",
+          "text": "a GET of a set-password link leaves the token usable; only the POST that sets the password consumes it",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c31",
+      "kind": "requirement",
+      "text": "A new random session id is minted at each successful code entry and the pending-sign-in cookie is cleared; a session id from before sign-in is never promoted",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h22",
+          "text": "the session cookie after sign-in differs from any cookie the browser held before, and the pending-sign-in cookie is gone",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c32",
+      "kind": "requirement",
+      "text": "A config switch (auth.app_signin.enabled, default on) turns app sign-in off and restores the 0.12.2 behavior (correct password -> /login), as the rollback if something goes wrong at cutover",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h23",
+          "text": "with auth.app_signin.enabled false, a correct password answers 303 /login exactly as 0.12.2 did",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c33",
+      "kind": "requirement",
+      "text": "Owner metrics count sign-in codes sent, sessions started and ended, guest-busy refusals and delivery alerts; no log line contains a code, a session id or a password",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h24",
+          "text": "metrics expose the five counters; a grep of logs from a full test run finds no code, session id or password value",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c34",
+      "kind": "requirement",
+      "text": "The retention sweep deletes expired sessions and used or expired sign-in and set-password tokens after a day, the same as guest codes",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h25",
+          "text": "a sweep at day+1 leaves no expired session row and no used or expired signin/setpw token",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c35",
+      "kind": "decision",
+      "text": "After idle sign-off a guest's cookie still works: if the slot is free they rejoin their room, otherwise they see the busy message; no new code is emailed",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c36",
+      "kind": "decision",
+      "text": "r6 (owner): a browser that has completed the full sign-in (password, code, chat) for an email is trusted for that email and gets no attempt limit; untrusted browsers share one per-email budget of 3 attempts per 15 minutes, dropping to 2 per 30 minutes once it has been exhausted; a blocked attempt looks exactly like an unblocked one (same code screen, no code sent; same code error)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c37",
+      "kind": "requirement",
+      "text": "Trusted browser: completing code entry with 'Trust this browser' ticked (c39) sets lens_device (random id, only its sha256 stored with the email; HttpOnly, Secure, SameSite=Lax, one year from the trusting sign-in, never extended by later moves); it exempts that browser from all sign-in attempt limits for that email only; logout keeps it; setting or resetting the password revokes every trusted browser for that email",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h26",
+          "text": "a trusted browser signs in after 20 blocked attempts on its email from other browsers; the trust cookie of one email does not exempt another email; after set-password the old trust cookie gives no exemption",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "Trusted browser: completing code entry sets lens_device (random id, only its sha256 stored with the email; HttpOnly, Secure, SameSite=Lax, one year); it exempts that browser from all sign-in attempt limits for that email only; logout keeps it; setting or resetting the password revokes every trusted browser for that email",
+          "kind": "requirement",
+          "reason": "c39 made trust opt-in; review fix 9b908ef keeps the original year"
+        }
+      ]
+    },
+    {
+      "id": "c38",
+      "kind": "requirement",
+      "text": "Untrusted-browser budget per email counts password submissions and code entries together: 3 per 15 minutes; after it is first exhausted the email is strict at 2 per 30 minutes until 24 hours pass with no blocked attempt; untrusted browsers are also limited per IP to 3 attempts per 15 minutes (password and code entry)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h27",
+          "text": "the 4th untrusted attempt within 15 minutes is blocked silently (byte-identical responses, no code mail); after exhaustion only 2 per 30 minutes pass; 24 quiet hours restore 3 per 15 minutes",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "Untrusted-browser budget per email counts password submissions and code entries together: 3 per 15 minutes; after it is first exhausted the email is strict at 2 per 30 minutes until 24 hours pass with no blocked attempt; the per-IP password limit still applies to untrusted browsers",
+          "kind": "requirement",
+          "reason": "owner: per-IP limit is 3 attempts, not 5"
+        }
+      ]
+    },
+    {
+      "id": "c39",
+      "kind": "decision",
+      "text": "Owner: the sign-in code screen has a 'Trust this browser' checkbox; only when it is ticked does completing sign-in make the browser trusted (lens_device)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c40",
+      "kind": "decision",
+      "text": "Owner: email the user when a sign-in completes from a new browser so they are aware; a browser already trusted for that email is not new, even from a changed IP (no email); a browser without trust has nothing that identifies it, so every sign-in from it emails",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    }
+  ],
+  "open_vagueness": [
+    {
+      "id": "v1",
+      "text": "Many IPs each sending 5 argon2id checks per 15 minutes can still cost CPU; whether a global password-check budget is needed",
+      "kind": "follow_up",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v2",
+      "text": "Resend outage blocks app sign-in; break-glass /login covers the trial, but after Access is removed a fallback (e.g. server CLI one-time login) may be needed",
+      "kind": "follow_up",
+      "claim_id": null,
+      "resolved": true,
+      "resolution": "Owner: an email-delivery outage needs no extra fallback for now",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v3",
+      "text": "Whether Resend reports quota exhaustion distinctly (status or error name) so the alert can say 'quota used up' instead of a generic failure; any failure alerts either way",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v4",
+      "text": "Cloudflare Email Routing send_email limits and pricing for a Worker were not checked in this pass",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    }
+  ],
+  "scope_entries": [
+    {
+      "id": "s1",
+      "surface": "src/irc_lens/web/entry.py post_signin (L401)",
+      "finding": "correct password -> 303 /login, wrong -> 401 ERR_SIGNIN: a password-correctness oracle; argon2id + dummy verify + 0.5 s floor + _over_limit 5/15min per email and per IP (per-email lets an attacker lock the owner out)",
+      "seeds": []
+    },
+    {
+      "id": "s2",
+      "surface": "src/irc_lens/web/auth.py build_cloudflare_middleware",
+      "finding": "approved tier comes only from a verified Access JWT + allowed_emails; non-approved resolves to anonymous only when guest_mode is on; deny-by-default via allows_anonymous",
+      "seeds": []
+    },
+    {
+      "id": "s3",
+      "surface": "src/irc_lens/web/csrf.py guest cookie",
+      "finding": "guest session is a stateless HMAC cookie lens_guest (Secure, SameSite=Strict, secret IRC_LENS_GUEST_COOKIE_SECRET) - not revocable server-side; Origin check on cookie-bearing POSTs",
+      "seeds": []
+    },
+    {
+      "id": "s4",
+      "surface": "src/irc_lens/guest_store.py",
+      "finding": "passwords table (argon2id, CLI-set via irc-lens guests passwd), tokens table with purpose (guest/delete), attempts table for rate limits; no sessions table",
+      "seeds": []
+    },
+    {
+      "id": "s5",
+      "surface": "src/irc_lens/web/deletion.py + mail.py",
+      "finding": "emailed single-use token pattern with purpose and fixed per-purpose template already exists (0.12.2); Resend adapter live",
+      "seeds": []
+    },
+    {
+      "id": "s6",
+      "surface": "challenge pass / security lens: src/irc_lens/web/csrf.py csrf_middleware",
+      "finding": "same-origin proof without Origin is checked only for the lens_guest cookie; a SameSite=Lax lens_session would not be covered - seeded the CSRF requirement",
+      "seeds": []
+    },
+    {
+      "id": "s7",
+      "surface": "challenge pass / lifecycle lens: src/irc_lens/web/sessions.py reap_idle + bans.py _loop",
+      "finding": "reap_idle closes sandbox sessions only after idle_s with no open SSE tab; an open idle tab is never reaped, so with max_guests=1 one forgotten tab holds the only slot forever - seeded the action-based idle requirement",
+      "seeds": []
+    },
+    {
+      "id": "s8",
+      "surface": "challenge pass / security lens: src/irc_lens/web/bans.py sweep_once",
+      "finding": "bans close live sessions via registry.close; nothing equivalent exists for approved users because Access JWT expiry was enforced per request only - seeded the revocation requirement",
+      "seeds": []
+    },
+    {
+      "id": "s9",
+      "surface": "challenge pass / adjacent-systems lens: src/irc_lens/web/entry.py get_login",
+      "finding": "/login always 303s to / whatever the tier; with Access path-scoped and path_cookie off, the Access cookie still covers / so break-glass keeps working - consistent with c16, no new claim",
+      "seeds": []
+    },
+    {
+      "id": "s10",
+      "surface": "challenge pass / concurrency lens: guest slot (sessions.py registry, store calls via asyncio.to_thread)",
+      "finding": "slot check and session open are separate awaits; two verifies can interleave - c24 already demands the verify-time re-check; plan must hold an asyncio lock across check+open (plan-side risk)",
+      "seeds": []
+    },
+    {
+      "id": "s11",
+      "surface": "challenge pass / adjacent-systems lens: Cloudflare Email Routing Worker (cultureflare)",
+      "finding": "not read - no Worker code exists yet; send_email destination-verification rule rests on assumption c26; Resend quota error shape unknown (v3)",
+      "seeds": []
+    }
+  ],
+  "lapses": [
+    {
+      "id": "l1",
+      "code": "provenance-missing",
+      "what": "t4 wrote the send_email binding upload shape ({type:send_email,name:ALERT_EMAIL}) from memory, unchecked against Cloudflare docs; no end-to-end send",
+      "skipped_check": "verify binding metadata against Cloudflare docs / a real deploy",
+      "refs": [
+        "t4 cultureflare cf-delivery-alert-deploy.sh"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l2",
+      "code": "grader-unverified",
+      "what": "t3 test_guest_and_delete_outputs_unchanged checks prefixes and its first assertion compares the guest email to itself, so 'templates unchanged' is not really asserted",
+      "skipped_check": "golden-string comparison against the pre-change templates",
+      "refs": [
+        "t3 tests/test_mail_signin.py"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l3",
+      "code": "control-absent",
+      "what": "t2 and t3 wrote tests and implementation in one step without watching the new tests fail first",
+      "skipped_check": "red run of the new tests before implementing",
+      "refs": [
+        "t2 tests/test_config_app_signin.py; t3 tests/test_mail_signin.py"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l4",
+      "code": "control-absent",
+      "what": "t1 wrote tests first but did not run them red before implementing",
+      "skipped_check": "red run of new tests",
+      "refs": [
+        "t1 tests/test_app_sessions_store.py"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l5",
+      "code": "control-absent",
+      "what": "t7 wrote implementation before tests; full suite not re-run after its black pass; no HTTP-level test of the default urllib poster and no end-to-end route->alert test",
+      "skipped_check": "red run; post-format full suite; real HTTP poster test",
+      "refs": [
+        "t7 src/irc_lens/alerts.py"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l6",
+      "code": "control-absent",
+      "what": "t9 wrote the registry changes before the tests (then stashed and ran tests red: 11 failed)",
+      "skipped_check": "tests-first ordering",
+      "refs": [
+        "t9 src/irc_lens/web/sessions.py"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l7",
+      "code": "grader-unverified",
+      "what": "t6's tests used aiohttp's test client, which doesn't apply browser referrer policy, and even asserted no-referrer, so a set-password form that every real browser rejects with 403 passed CI",
+      "skipped_check": "real-browser POST of the set-password form",
+      "refs": [
+        "t6 tests/test_setpw.py"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l8",
+      "code": "grader-unverified",
+      "what": "trusted-browser task's tests never checked that moving trust to a new browser id keeps the first email's one-year limit; the migration reset created (extending trust without that email signing in) and passed its 1261-test suite \u2014 caught in main-agent diff review, fixed test-first in 9b908ef",
+      "skipped_check": "",
+      "refs": [
+        "c37 add_trusted_device"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    }
+  ],
+  "obligations": [
+    {
+      "id": "o1",
+      "claim_id": "c10",
+      "seam": "POST /entry/signin",
+      "behavior": "unknown email, wrong password, right password and rate-limited attempts give byte-identical responses apart from the email, each padded to the floor; exactly one code mail only for the right password",
+      "source_text": "POST /entry/signin answers identically (same status, same body apart from the echoed email, padded to the same floor) for an unknown email, an approved email with a wrong password, an approved email with the right password, and a rate-limited attempt; the code email is sent off the request path so it adds no timing difference",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o2",
+      "claim_id": "c9",
+      "seam": "POST /entry/code",
+      "behavior": "a correct password without the emailed code never yields an approved session",
+      "source_text": "Guessing passwords teaches an attacker nothing, a stolen password alone is not enough (password plus mailbox, where Access checked only the mailbox), and a correct guess emails the owner",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o3",
+      "claim_id": "c11",
+      "seam": "POST /entry/code",
+      "behavior": "a code fails in another browser, fails on reuse, fails after 10 minutes, and the 6th try in 15 minutes fails even when right",
+      "source_text": "Sign-in codes are single-use, expire after 10 minutes, carry purpose 'signin', and work only together with the pending-sign-in cookie set by the code screen (same browser); code entry is limited to 5 tries per 15 minutes per email and per IP; a wrong, expired, reused or rate-limited code all show the one error",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o4",
+      "claim_id": "c12",
+      "seam": "session cookie + middleware",
+      "behavior": "the store holds only sha256 of session ids; 7-day idle and 30-day total limits refuse the cookie; logout and password change invalidate it; removal from allowed_emails makes the next request anonymous",
+      "source_text": "Approved sessions are server-side: a sessions table holds sha256 of the session id, the email, created and last-seen times; the cookie lens_session is HttpOnly, Secure, SameSite=Lax; 7 days idle or 30 days total ends it; logout ends it; setting a password ends every session for that email; the email is re-checked against allowed_emails on every request",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o5",
+      "claim_id": "c13",
+      "seam": "sign-in email template",
+      "behavior": "the email states the correct password was entered, says to change it if it wasn't you, and is identical across approved addresses apart from the code",
+      "source_text": "The sign-in email says the correct password was just entered and tells the reader to change it if it wasn't them",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o6",
+      "claim_id": "c14",
+      "seam": "password rate limits",
+      "behavior": "the 6th attempt from one IP in 15 minutes is not checked and shows the same screen; a distributed attack never locks the email out, and codes sent per email are capped at 5 per 15 minutes",
+      "source_text": "Rate limits: password checks stay limited per IP (5 per 15 minutes; over the limit, no check, same screen); per email there is no lockout, only a cap of 5 sign-in codes sent per 15 minutes",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o7",
+      "claim_id": "c15",
+      "seam": "set-password flow",
+      "behavior": "the request screen is identical for every address; the link works once, expires in 30 minutes, refuses passwords under 12 characters, and ends the email's sessions",
+      "source_text": "Set or reset password: a link on the entry card asks for an email and always shows the same 'check your email' screen; only an approved email gets a single-use link (purpose 'setpw', 30-minute expiry) to a page that sets an argon2id password of at least 12 characters and ends all of that email's sessions",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o8",
+      "claim_id": "c20",
+      "seam": "POST /entry/signin",
+      "behavior": "a stored password shorter than 12 characters still signs in",
+      "source_text": "A password set before this change that is shorter than 12 characters still signs in; the set-or-reset password flow is how it gets replaced with one of at least 12",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o9",
+      "claim_id": "c16",
+      "seam": "Access JWT middleware",
+      "behavior": "a valid Access JWT still grants the approved tier and /login still lands on the real mesh",
+      "source_text": "During the trial a verified Cloudflare Access JWT still yields the approved tier, so /login keeps working as break-glass",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o10",
+      "claim_id": "c24",
+      "seam": "guest entry + code verify",
+      "behavior": "with max_guests guests active a new guest gets the busy message before any code is emailed; simultaneous verifies leave exactly max_guests active; approved Guest view never counts",
+      "source_text": "Guest limit: while guest_mode.max_guests (default 1) guests are active, a new visitor who picks Guest mode sees 'The sandbox is busy. Try again in a few minutes.' before any code is emailed, and code verification re-checks the limit so two guests can't slip in together; a slot frees when the guest deletes their data, or after 15 minutes with no action (idle close 900 s); an approved user's Guest view does not count",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o11",
+      "claim_id": "c25",
+      "seam": "mail failure path",
+      "behavior": "a forced Resend failure posts one alert per failure kind per hour to the Worker with the shared secret; the alert holds no guest email or code",
+      "source_text": "Delivery alert: when a Resend send fails (HTTP error, including quota exhaustion, or a network error), the lens posts at most one alert per hour per failure kind to a Cloudflare Worker over HTTPS with a shared secret; the Worker emails each approved user through Cloudflare Email Routing; the alert names what failed, says sign-in and guest codes are not being delivered, and points to /login; it never contains a guest's email address or a code",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o12",
+      "claim_id": "c27",
+      "seam": "csrf_middleware",
+      "behavior": "cross-site POSTs carrying lens_session or the pending cookie without Origin get 403",
+      "source_text": "The CSRF guard that today demands same-origin proof for cookie-bearing POSTs without an Origin header (csrf.py: only when lens_guest is present) also applies to the lens_session and pending-sign-in cookies",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o13",
+      "claim_id": "c28",
+      "seam": "guest idle reaper",
+      "behavior": "15 minutes without a sent message signs a guest off even with the tab open",
+      "source_text": "Guest idle sign-off counts actions, not open tabs: 15 minutes with no message or command sent closes the guest's session even if the tab stays open (today's reap_idle only closes sessions with no open event stream)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o14",
+      "claim_id": "c29",
+      "seam": "session revocation",
+      "behavior": "ending an approved session closes its open IRC session and event stream within one sweep",
+      "source_text": "Ending an approved session (logout, password change, expiry, removal from allowed_emails) also closes that user's open IRC session and event stream, as the ban sweeper does for guests, so an open tab doesn't keep working",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o15",
+      "claim_id": "c30",
+      "seam": "set-password link",
+      "behavior": "GET never consumes the token; only the password POST does",
+      "source_text": "Opening a set-password link (GET) never uses it up; only submitting the new password (POST) consumes the token, so mail scanners that prefetch links can't burn it",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o16",
+      "claim_id": "c31",
+      "seam": "sign-in completion",
+      "behavior": "a fresh session id is minted and the pending cookie cleared at code entry",
+      "source_text": "A new random session id is minted at each successful code entry and the pending-sign-in cookie is cleared; a session id from before sign-in is never promoted",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o17",
+      "claim_id": "c32",
+      "seam": "auth.app_signin.enabled",
+      "behavior": "false restores 303 /login on a correct password",
+      "source_text": "A config switch (auth.app_signin.enabled, default on) turns app sign-in off and restores the 0.12.2 behavior (correct password -> /login), as the rollback if something goes wrong at cutover",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o18",
+      "claim_id": "c33",
+      "seam": "metrics + logs",
+      "behavior": "the counters exist and no log line holds a code, session id or password",
+      "source_text": "Owner metrics count sign-in codes sent, sessions started and ended, guest-busy refusals and delivery alerts; no log line contains a code, a session id or a password",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o19",
+      "claim_id": "c34",
+      "seam": "retention sweep",
+      "behavior": "expired sessions and used or expired signin/setpw tokens are gone after a day",
+      "source_text": "The retention sweep deletes expired sessions and used or expired sign-in and set-password tokens after a day, the same as guest codes",
+      "origin": "llm",
+      "status": "approved"
+    }
+  ]
+}

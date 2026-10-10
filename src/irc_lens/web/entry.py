@@ -62,10 +62,19 @@ from argon2.exceptions import InvalidHashError, VerificationError
 from irc_lens import legal, metrics
 from irc_lens.config import LensConfig, _default_guest_store_path
 from irc_lens.guest_store import GuestStore
-from irc_lens.mail import MailAdapter, make_adapter, render_token_email
-from irc_lens.web import csrf
+from irc_lens.alerts import Alerter, make_alerter
+from irc_lens.mail import (
+    PURPOSE_SIGNIN,
+    MailAdapter,
+    make_adapter,
+    render_signin_notice,
+    render_token_email,
+    send_with_alert,
+)
+from irc_lens.web import app_session, csrf
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.render import render_fragment, static_url
+from irc_lens.web.sessions import GUEST_PRINCIPAL_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +87,13 @@ SIGNIN_WINDOW_S = 900
 TOKEN_REQUEST_WINDOW_S = 60
 TOKEN_VERIFY_WINDOW_S = 900
 TOKEN_PURPOSE = "guest"
+SIGNIN_CODE_PURPOSE = PURPOSE_SIGNIN
+#: App sign-in, untrusted browsers: password submissions and code entries
+#: from one IP, counted together, per 15 minutes (r6/c38). Separate from
+#: ``rate_limits.password_attempts_per_15min``, which guests and the 0.12.2
+#: rollback path keep using.
+SIGNIN_IP_ATTEMPTS_PER_15MIN = 3
+SIGNIN_IP_KIND = "signin-ip"
 NICK_PREFIX = "sbx-"
 NICK_MIN, NICK_MAX = 2, 16
 #: Nicknames a guest may never take (``sbx-ask`` is the sandbox agent).
@@ -91,6 +107,8 @@ ERR_NICK_INVALID = "Invalid nickname"
 ERR_CONSENT = "Consent required"
 ERR_BOT = "Verification failed"
 ERR_LATER = "Try again later"
+#: Shown while guest_mode.max_guests guests are active (c24); exact wording.
+MSG_BUSY = "The sandbox is busy. Try again in a few minutes."
 
 TERMS_URL = "https://culture.dev/terms"
 PRIVACY_URL = "https://culture.dev/privacy"
@@ -188,8 +206,11 @@ class EntryState:
     config: LensConfig
     store: GuestStore | None = None
     mailer: MailAdapter | None = None
+    alerter: Alerter | None = None
     verifier: BotVerifier = field(default_factory=NoopVerifier)
     signin_floor_s: float = SIGNIN_FLOOR_S
+    #: Background sign-in mail sends (kept referenced until done).
+    mail_tasks: set = field(default_factory=set)
 
     def get_store(self) -> GuestStore:
         if self.store is None:
@@ -209,7 +230,10 @@ def install(app: web.Application, config: LensConfig) -> None:
     # entry routes, the guest tier in auth and the routing consent gate all
     # read and write one store.
     app[ENTRY_STATE] = EntryState(
-        config=config, store=app.get("guest_store"), verifier=make_bot_verifier()
+        config=config,
+        store=app.get("guest_store"),
+        alerter=make_alerter(config),
+        verifier=make_bot_verifier(),
     )
     app.router.add_get("/entry", get_entry)
     # Post-SSO landing: Cloudflare Access forwards the user back here.
@@ -220,6 +244,7 @@ def install(app: web.Application, config: LensConfig) -> None:
     app.router.add_get("/consent", get_entry)
     app.router.add_post("/entry/email", post_email)
     app.router.add_post("/entry/signin", post_signin)
+    app.router.add_post("/entry/code", post_code)
     app.router.add_post("/entry/guest", post_guest)
     app.router.add_post("/entry/guest/start", post_guest_start)
     app.router.add_post("/entry/verify", post_verify)
@@ -335,6 +360,7 @@ def _page(
         site_key=site_key,
         turnstile_script=TURNSTILE_SCRIPT_URL,
         turnstile_field=TURNSTILE_FIELD,
+        busy=MSG_BUSY,
         nick_prefix=NICK_PREFIX,
         nick_max=NICK_MAX,
         terms_url=TERMS_URL,
@@ -358,6 +384,49 @@ def _see_other(location: str) -> web.Response:
     return web.Response(
         status=303, headers={"Location": location, "Cache-Control": "no-store"}
     )
+
+
+def busy_page(state: EntryState) -> web.Response:
+    """The guest-limit page (c24): one fixed message, nothing else.
+
+    Also served on ``/`` to a returning guest whose slot was taken (c35).
+    """
+    metrics.get_metrics().guest_busy()
+    return _page(state, "busy")
+
+
+def _guests_full(request: web.Request, email: str) -> bool:
+    """True iff max_guests guests are active and *email* is not one of them.
+
+    Only real guests count; an approved user's Guest view never does.
+    """
+    registry = request.app["registry"]
+    limit = request.app["config"].guest_max_guests
+    return not registry.guest_slot_free(GUEST_PRINCIPAL_PREFIX + email, limit)
+
+
+def _signin_blocked(store: GuestStore, request: web.Request, email: str) -> bool:
+    """App sign-in limits for one password submission or code entry (r6).
+
+    A trusted browser (a valid ``lens_device`` for *this* email, c37) skips
+    every limit and is not counted. Any other browser is limited per IP
+    (:data:`SIGNIN_IP_ATTEMPTS_PER_15MIN`, password and code attempts
+    together), then -- if the IP still has room -- by the email's shared
+    untrusted budget (c38: 3 per 15 minutes, strict 2 per 30 minutes after
+    exhaustion until 24 quiet hours). The caller answers a blocked attempt
+    exactly like an unblocked one.
+    """
+    if store.is_trusted_device(app_session.read_device_cookie(request), email):
+        return False
+    ip_key = f"i:{client_ip(request)}"
+    ip_limited = store.rate_limited(
+        SIGNIN_IP_KIND,
+        ip_key,
+        limit=SIGNIN_IP_ATTEMPTS_PER_15MIN,
+        window=SIGNIN_WINDOW_S,
+    )
+    store.record_attempt(SIGNIN_IP_KIND, ip_key)
+    return ip_limited or not store.signin_budget_take(email)
 
 
 async def _pad(started: float, floor: float) -> None:
@@ -399,7 +468,14 @@ async def post_email(request: web.Request) -> web.Response:
 
 @allows_anonymous
 async def post_signin(request: web.Request) -> web.Response:
-    """Approved email + correct password -> /login; else the one error."""
+    """Password step. App sign-in: always the code screen; else 0.12.2."""
+    if _state(request).config.app_signin_enabled:
+        return await _post_signin_app(request)
+    return await _post_signin_access(request)
+
+
+async def _post_signin_access(request: web.Request) -> web.Response:
+    """0.12.2 (``auth.app_signin.enabled: false``): correct -> /login."""
     started = time.perf_counter()
     state = _state(request)
     cfg = state.config
@@ -439,12 +515,172 @@ async def post_signin(request: web.Request) -> web.Response:
     )
 
 
+async def _send_signin_code(state: EntryState, email: str, code: str) -> None:
+    """Mail one sign-in code (runs as a background task, off the request)."""
+    subject, body = render_token_email(code, purpose=PURPOSE_SIGNIN)
+    try:
+        await asyncio.to_thread(
+            send_with_alert, state.get_mailer(), state.alerter, email, subject, body
+        )
+    except Exception as exc:  # noqa: BLE001 -- the page was already the same
+        logger.warning("signin code mail not sent: %s", type(exc).__name__)
+        return
+    metrics.get_metrics().signin_code_sent()
+
+
+def _schedule_signin_code(state: EntryState, email: str, code: str) -> None:
+    task = asyncio.create_task(_send_signin_code(state, email, code))
+    state.mail_tasks.add(task)
+    task.add_done_callback(state.mail_tasks.discard)
+
+
+async def _send_signin_notice(
+    state: EntryState, email: str, ip: str, user_agent: str, when: float
+) -> None:
+    """Mail the new-browser sign-in notice (c40; background, off the request)."""
+    subject, body = render_signin_notice(ip=ip, user_agent=user_agent, when=when)
+    try:
+        await asyncio.to_thread(
+            send_with_alert, state.get_mailer(), state.alerter, email, subject, body
+        )
+    except Exception as exc:  # noqa: BLE001 -- the sign-in already succeeded
+        logger.warning("sign-in notice mail not sent: %s", type(exc).__name__)
+
+
+def _schedule_signin_notice(state: EntryState, request: web.Request, email: str) -> None:
+    task = asyncio.create_task(
+        _send_signin_notice(
+            state,
+            email,
+            client_ip(request),
+            request.headers.get("User-Agent", ""),
+            state.get_store().now(),
+        )
+    )
+    state.mail_tasks.add(task)
+    task.add_done_callback(state.mail_tasks.discard)
+
+
+async def _post_signin_app(request: web.Request) -> web.Response:
+    """Oracle-free sign-in: every case answers with the same code screen.
+
+    Unknown email, wrong password, right password and a blocked attempt
+    (over the per-IP limit or the email's untrusted budget, r6) all get
+    status 200, the same page (only the echoed email differs), one fresh
+    ``lens_signin`` pending cookie and the same time floor. Only for an
+    approved email with the right password, not blocked, is a code issued,
+    bound to this pending value, and mailed from a background task -- so
+    only the mailbox learns the password was right.
+    """
+    started = time.perf_counter()
+    state = _state(request)
+    cfg = state.config
+    form = await request.post()
+    email = _norm_email(form.get("email"))
+    password = str(form.get("password") or "")
+    ip = client_ip(request)
+    store = state.get_store()
+    # A trusted browser is never limited, so an attack on the email can't
+    # lock its owner out (r6); untrusted browsers are limited per IP and by
+    # the email's shared budget.
+    limited = _signin_blocked(store, request, email)
+    correct = False
+    if limited:
+        await asyncio.to_thread(_dummy_verify, password)
+    else:
+        human = await state.verifier.verify(str(form.get(TURNSTILE_FIELD) or ""), ip)
+        allowed = {e.lower() for e in cfg.allowed_emails}
+        if email in allowed:
+            pw_ok = await asyncio.to_thread(store.check_password, email, password)
+        else:
+            await asyncio.to_thread(_dummy_verify, password)
+            pw_ok = False
+        correct = human and pw_ok
+    pending = secrets.token_urlsafe(32)
+    if correct:
+        code = store.issue_token(email, purpose=SIGNIN_CODE_PURPOSE)
+        store.bind_signin(pending, code)
+        _schedule_signin_code(state, email, code)
+    else:
+        metrics.get_metrics().failed_sign_in()
+    if limited:
+        metrics.get_metrics().rate_limited()
+    await _pad(started, state.signin_floor_s)
+    resp = _page(state, "signin_code", email=email)
+    app_session.set_signin_cookie(resp, pending)
+    return resp
+
+
+@allows_anonymous
+async def post_code(request: web.Request) -> web.Response:
+    """Sign-in code + this browser's pending cookie -> a new app session.
+
+    A wrong, expired, reused, other-browser or blocked (per-IP limit or the
+    email's untrusted budget, r6) code all get the one error, padded to the
+    sign-in floor; a blocked try never checks (or uses up) the code. On
+    success a fresh session id is minted (nothing the browser held before
+    is promoted) and the pending cookie is cleared. With "Trust this
+    browser" ticked (c39) the browser also gets a fresh ``lens_device``;
+    unticked leaves any existing trust as it is.
+    """
+    started = time.perf_counter()
+    state = _state(request)
+    cfg = state.config
+    if not cfg.app_signin_enabled:
+        raise web.HTTPNotFound()
+    form = await request.post()
+    email = _norm_email(form.get("email"))
+    code = str(form.get("code") or "").strip()
+    pending = app_session.read_signin_cookie(request)
+    store = state.get_store()
+    limited = _signin_blocked(store, request, email)
+    allowed = {e.lower() for e in cfg.allowed_emails}
+    ok = (
+        not limited
+        and bool(code)
+        and bool(pending)
+        and email in allowed
+        and store.verify_signin_token(email, code, pending)
+    )
+    if not ok:
+        metrics.get_metrics().failed_sign_in()
+        if limited:
+            metrics.get_metrics().rate_limited()
+        await _pad(started, state.signin_floor_s)
+        return _page(state, "signin_code", status=401, email=email, error=ERR_CODE)
+    raw = store.create_session(email)
+    device = app_session.read_device_cookie(request)
+    was_trusted = store.is_trusted_device(device, email)
+    new_device = None
+    if form.get("trust") == "on":
+        new_device = store.add_trusted_device(email, previous_raw=device)
+        logger.info("app sign-in browser trusted")
+    elif was_trusted:
+        store.touch_trusted_device(device, email)
+    if not was_trusted:
+        # A browser not trusted for this email is new to it (c40): tell the
+        # user, whatever the IP. A trusted one is known, even from a new IP.
+        _schedule_signin_notice(state, request, email)
+    await _pad(started, state.signin_floor_s)
+    resp = _see_other("/")
+    app_session.issue_session_cookie(resp, raw)
+    app_session.clear_signin_cookie(resp)
+    if new_device is not None:
+        app_session.issue_device_cookie(resp, new_device)
+    metrics.get_metrics().session_started()
+    logger.info("app sign-in session started")
+    return resp
+
+
 @allows_anonymous
 async def post_guest(request: web.Request) -> web.Response:
-    """Guest mode button: nickname + consent."""
+    """Guest mode button: nickname + consent (or the busy page, c24)."""
     state = _state(request)
     form = await request.post()
-    return _page(state, "guest", email=_norm_email(form.get("email")))
+    email = _norm_email(form.get("email"))
+    if _guests_full(request, email):
+        return busy_page(state)
+    return _page(state, "guest", email=email)
 
 
 @allows_anonymous
@@ -457,6 +693,9 @@ async def post_guest_start(request: web.Request) -> web.Response:
     raw_nick = str(form.get("nickname") or "")
     ip = client_ip(request)
     store = state.get_store()
+    # c24: never email a code while the sandbox is full.
+    if _guests_full(request, email):
+        return busy_page(state)
 
     def again(error: str) -> web.Response:
         return _page(
@@ -487,7 +726,7 @@ async def post_guest_start(request: web.Request) -> web.Response:
         token = store.issue_token(email, purpose=TOKEN_PURPOSE)
         subject, body = render_token_email(token)
         try:
-            await asyncio.to_thread(state.get_mailer().send, email, subject, body)
+            await asyncio.to_thread(send_with_alert, state.get_mailer(), state.alerter, email, subject, body)
         except Exception as exc:  # noqa: BLE001 -- same page either way (o4/o5)
             logger.warning("guest token mail not sent: %s", type(exc).__name__)
     return _page(
@@ -555,8 +794,20 @@ async def post_verify(request: web.Request) -> web.Response:
             error=ERR_LATER,
             train=_train(form),
         )
-    if not store.verify_token(email, code, purpose=TOKEN_PURPOSE):
-        return wrong(401)
+    # c24/h16: re-check the guest limit and claim the slot atomically, so
+    # two simultaneous verifies can never both get in. The code is checked
+    # inside the lock *after* the limit, so a refused guest's code is not
+    # consumed (they may retry it while it is still valid). The slot is
+    # held as a short reservation until this browser's GET / opens the
+    # session.
+    registry = request.app["registry"]
+    principal = GUEST_PRINCIPAL_PREFIX + email
+    async with registry.guest_lock:
+        if not registry.guest_slot_free(principal, cfg.guest_max_guests):
+            return busy_page(state)
+        if not store.verify_token(email, code, purpose=TOKEN_PURPOSE):
+            return wrong(401)
+        registry.try_reserve_guest(principal, cfg.guest_max_guests)
 
     store.record_guest(email, NICK_PREFIX + nick, ip)
     store.record_consent(

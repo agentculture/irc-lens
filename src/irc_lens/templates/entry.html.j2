@@ -59,6 +59,7 @@
             <button type="submit" class="btn btn-outline" formaction="/entry/guest"
                     formnovalidate>Guest mode</button>
           </div>
+          <p class="entry-consent"><a href="/password">Set or reset password</a></p>
         </form>
 
         {% elif step == "guest" %}
@@ -97,26 +98,53 @@
           </div>
         </form>
 
-        {% elif step == "code" %}
-        <form method="post" action="/entry/verify" class="entry-form">
+        {% elif step == "busy" %}
+        <div class="entry-form">
+          <p class="entry-note" role="status">{{ busy }}</p>
+          <div class="entry-actions">
+            <a href="/entry" class="btn btn-outline">Back</a>
+          </div>
+        </div>
+
+        {% elif step in ("code", "signin_code") %}
+        {% set signin = step == "signin_code" %}
+        <form method="post" action="{{ '/entry/code' if signin else '/entry/verify' }}" class="entry-form">
           <div class="entry-chip">
             <span class="entry-chip-email">{{ email }}</span>
             <a href="/entry" class="entry-chip-change">Change</a>
           </div>
           <input type="hidden" name="email" value="{{ email }}">
+          {% if signin %}
+          <p class="entry-note">If your email and password are right, a code is on its way. Nothing after a minute? Go back and re-enter your password.</p>
+          {% else %}
           <input type="hidden" name="nickname" value="{{ nickname }}">
           {% if train %}
           <input type="hidden" name="train" value="on">
           {% endif %}
+          {% endif %}
           <label for="entry-code">Code</label>
           <input id="entry-code" name="code" type="text" autocomplete="one-time-code"
                  autocapitalize="none" spellcheck="false" required autofocus maxlength="128">
+          {% if signin %}
+          <label class="entry-consent">
+            <input type="checkbox" name="trust" value="on">
+            <span>Trust this browser (not on a shared computer)</span>
+          </label>
+          {% endif %}
           {% if error %}
           <p class="entry-error" role="alert">{{ error }}</p>
           {% endif %}
+          {% if signin %}
+          <div class="entry-actions entry-actions-split">
+            <button type="submit" class="btn btn-outline" formaction="/entry/email"
+                    formnovalidate>Back</button>
+            <button type="submit" class="btn btn-primary">Verify</button>
+          </div>
+          {% else %}
           <div class="entry-actions">
             <button type="submit" class="btn btn-primary">Verify</button>
           </div>
+          {% endif %}
         </form>
         {% endif %}
       </section>

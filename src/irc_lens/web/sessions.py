@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import time
 from collections import defaultdict
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -105,6 +106,10 @@ async def _open_sandbox_rooms(session: Any, own: str, others: list[str]) -> None
 #: Provides the guest store lazily (it may be swapped after app build).
 StoreGetter = Callable[[], Any]
 
+#: How long a guest slot reserved at code verification is held for the
+#: browser's first ``GET /`` (which opens the session and consumes it).
+GUEST_RESERVATION_S = 120.0
+
 
 class SessionRegistry:
     """Maps principal → Session, lazy-opening as needed."""
@@ -115,6 +120,7 @@ class SessionRegistry:
         sandbox_factory: SessionFactory | None = None,
         room_prefix: str = "#g-",
         guest_store: StoreGetter | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._factories: dict[str, SessionFactory] = {BACKEND_MESH: factory}
         # Prefix of the private room every sandbox session joins on open:
@@ -125,6 +131,17 @@ class SessionRegistry:
         # without a store (unit tests) they fall back to the nickname.
         self._guest_store = guest_store or (lambda: None)
         self._idle_since: dict[tuple[str, str], float] = {}
+        # Guest limit (c24) + action-based idle sign-off (c28). The clock
+        # is the one the ban sweeper passes to reap_idle (monotonic).
+        self._clock = clock
+        self._last_action: dict[tuple[str, str], float] = {}
+        # Guest principal -> expiry of a slot held for a browser that has
+        # passed code verification (or a guest about to reopen) but has
+        # not opened its session yet.
+        self._reserved: dict[str, float] = {}
+        #: Held across "count + reserve" so concurrent verifies/reopens can
+        #: never admit more than max_guests guests.
+        self.guest_lock = asyncio.Lock()
         if sandbox_factory is not None:
             self._factories[BACKEND_SANDBOX] = sandbox_factory
         self._sessions: dict[tuple[str, str], Any] = {}
@@ -176,6 +193,10 @@ class SessionRegistry:
     async def close(self, principal: str, backend: str) -> None:
         """Disconnect and forget one (principal, backend) Session."""
         session = self._sessions.pop((principal, backend), None)
+        self._last_action.pop((principal, backend), None)
+        self._idle_since.pop((principal, backend), None)
+        if backend == BACKEND_SANDBOX:
+            self._reserved.pop(principal, None)
         if session is None:
             return
         if self._counts_as_guest(principal, backend):
@@ -184,6 +205,65 @@ class SessionRegistry:
             await session.disconnect()
         except Exception:  # noqa: BLE001 — closing must not raise
             pass
+
+    # -- guest limit (c24/h16) ----------------------------------------------
+
+    def _live_reservations(self, now: float) -> set[str]:
+        for principal, expires in tuple(self._reserved.items()):  # snapshot: deleting below
+            if expires <= now:
+                del self._reserved[principal]
+        return set(self._reserved)
+
+    def active_guests(self, now: float | None = None) -> set[str]:
+        """Guest principals holding a slot: an open guest sandbox session or
+        an unexpired reservation. An approved user's Guest view
+        (``sandbox_preview``, no ``guest:`` prefix) never counts."""
+        now = self._clock() if now is None else now
+        open_ = {p for p, b in self._sessions if self._counts_as_guest(p, b)}
+        return open_ | self._live_reservations(now)
+
+    def active_guest_count(self, now: float | None = None) -> int:
+        return len(self.active_guests(now))
+
+    def is_active_guest(self, principal: str, now: float | None = None) -> bool:
+        return principal in self.active_guests(now)
+
+    def guest_slot_free(
+        self, principal: str, max_guests: int, now: float | None = None
+    ) -> bool:
+        """True iff *principal* already holds a slot or one is free."""
+        active = self.active_guests(now)
+        return principal in active or len(active) < max_guests
+
+    def try_reserve_guest(
+        self,
+        principal: str,
+        max_guests: int,
+        *,
+        now: float | None = None,
+        ttl: float = GUEST_RESERVATION_S,
+    ) -> bool:
+        """Count + reserve in one step; call with :attr:`guest_lock` held.
+
+        A guest that already holds a slot keeps it (its reservation is only
+        refreshed when it has no open session). Returns False when full.
+        """
+        now = self._clock() if now is None else now
+        if not self.guest_slot_free(principal, max_guests, now):
+            return False
+        if not self.has(principal, BACKEND_SANDBOX):
+            self._reserved[principal] = now + ttl
+        return True
+
+    def release_guest(self, principal: str) -> None:
+        """Drop a reservation that will not be used (e.g. a failed open)."""
+        self._reserved.pop(principal, None)
+
+    def touch(self, principal: str, backend: str, now: float | None = None) -> None:
+        """Record a user action (page load, message, command) on a session."""
+        key = (principal, backend)
+        if key in self._sessions:
+            self._last_action[key] = self._clock() if now is None else now
 
     def _rooms_for(self, identity: Identity, is_guest: bool) -> tuple[str, list[str]]:
         """(own room, other rooms to join) for a new sandbox session."""
@@ -199,19 +279,26 @@ class SessionRegistry:
         return own, [self._room_prefix + rid for _email, rid in store.list_rooms()]
 
     async def reap_idle(self, *, now: float, idle_s: float) -> list[tuple[str, str]]:
-        """Close sandbox sessions that had no open event stream for *idle_s*.
+        """Close idle sandbox sessions; mesh sessions are never reaped.
 
-        Guests close the tab without telling us, so without this every guest
-        IRC connection (and its room) lived until the lens restarted (d7).
-        Mesh sessions are never reaped.
+        * Guests (``guest:`` principals) are signed off after *idle_s* with
+          no action -- no message or command sent (c28) -- even with a tab
+          open, so one forgotten tab cannot hold the only guest slot.
+        * An approved user's Guest view keeps the tab rule: closed after
+          *idle_s* with no open event stream (guests close the tab without
+          telling us, d7).
         """
         closed = []
         sandbox = [(k, s) for k, s in self._sessions.items() if k[1] == BACKEND_SANDBOX]
         for key, session in sandbox:
-            if _has_open_tab(session):
+            if self._counts_as_guest(*key):
+                idle = now - self._last_action.setdefault(key, now) >= idle_s
+            elif _has_open_tab(session):
                 self._idle_since.pop(key, None)
-            elif now - self._idle_since.setdefault(key, now) >= idle_s:
-                self._idle_since.pop(key, None)
+                idle = False
+            else:
+                idle = now - self._idle_since.setdefault(key, now) >= idle_s
+            if idle:
                 await self.close(*key)
                 closed.append(key)
         return closed
@@ -282,6 +369,10 @@ class SessionRegistry:
                 await self._init_sandbox(session, identity)
             self._sessions[key] = session
             if self._counts_as_guest(*key):
+                # The open consumes the guest's reservation; it counts as
+                # the first action for the idle sign-off.
+                self._reserved.pop(identity.principal, None)
+                self._last_action[key] = self._clock()
                 metrics.get_metrics().session_opened()
             return session
 

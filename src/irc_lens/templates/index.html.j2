@@ -39,6 +39,11 @@
       {% if session.sandbox_available %}
         <button type="button" class="lens-btn" data-testid="sandbox-enter" hx-post="/sandbox/enter" hx-swap="none">Guest view</button>
       {% endif %}
+      {% if show_logout and tier != "guest" %}
+        <form class="lens-logout" method="post" action="/logout" hx-post="/logout" hx-swap="none">
+          <button type="submit" class="lens-btn" data-testid="logout">Log out</button>
+        </form>
+      {% endif %}
     </header>
     {% if tier == "sandbox_preview" %}
       <div class="lens-banner" data-testid="sandbox-banner" role="status">

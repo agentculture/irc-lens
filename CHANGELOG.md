@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-10
+
+### Added
+
+- **App sign-in.** Approved users sign in inside the app: password, then a
+  10-minute single-use emailed code (`POST /entry/signin`, `POST
+  /entry/code`), then a server-side `lens_session` cookie (7 days idle, 30
+  days total) and `POST /logout`. No Cloudflare Access round trip; `/login`
+  stays as break-glass. Approved users remain `allowed_emails` (no sign-up).
+- **Set or reset password** by emailed single-use link (`/password`,
+  `/password/<token>`, 12-character minimum, argon2id); setting one ends
+  that email's sessions.
+- **Delivery alerts.** On a mail provider failure or quota exhaustion the
+  lens posts one alert per kind per hour to `guest_mode.mail.alert_url`
+  (auth via `guest_mode.mail.alert_secret_env`) for a small Cloudflare email
+  Worker to forward.
+- **Guest limit.** `guest_mode.max_guests` (default 1): further visitors see
+  a busy page and no code is mailed.
+- Owner metrics: `signin_codes_sent`, `sessions_started`, `sessions_ended`,
+  `guest_busy`, `delivery_alerts`.
+- **Trusted browsers and an escalating sign-in budget** (owner decision
+  r6). A **Trust this browser** checkbox on the code screen (unchecked by
+  default) sets `lens_device` (one year, only its sha256 stored per email);
+  that browser has no sign-in attempt limit for that email; logout keeps it,
+  setting a password revokes it. Untrusted browsers share one per-email
+  budget of password and code attempts: 3 per 15 minutes, 2 per 30 minutes
+  after exhaustion until 24 quiet hours, plus 3 attempts per 15 minutes
+  per IP (password and code together); blocked attempts look exactly like
+  unblocked ones. Replaces the per-email 5 code tries, the 5 codes per 15
+  minutes and the per-IP 5 password checks on the app sign-in path.
+- **New-browser sign-in notice** (owner decision c40). A completed sign-in
+  from a browser not trusted for that email mails the user the time, IP and
+  browser, and how to reset the password if it wasn't them. Trusted
+  browsers get none, even from a new IP.
+- `auth.app_signin.enabled` (default true) and `auth.app_signin.base_url`.
+  App sign-in needs a mail provider: with `guest_mode.mail.provider: none`
+  it stays off (approved users use `/login`) and the console logs why.
+- `tests/test_log_hygiene.py`: end-to-end check that no log record contains a
+  password, code, token, session id or cookie value.
+
+### Changed
+
+- Guest idle sign-off (`guest_mode.idle_close_s`, default 900) now counts
+  actions (messages and commands), not open tabs.
+- Docs: `docs/cli.md` and `docs/guest-mode-config.md` describe all of the
+  above, including the rollback switch.
+
+### Security
+
+- Rollback: `auth.app_signin.enabled: false` restores the 0.12.2 password ->
+  `/login` behavior.
+- Set-password tokens are redacted from request-path logs; no log line
+  contains a code, session id or password. The Cloudflare tunnel and cache
+  configuration are unchanged.
+- `auth.allowed_emails` is compared without case on every app sign-in path
+  (session check, revocation sweep, set-password), as it already was at the
+  password step.
+- A set-password request with a non-https base URL issues no token.
+- Delivery alerts for HTTP 429 say "quota used up or rate-limited" (Resend
+  uses 429 for both); finished alert threads are no longer kept.
+
 ## [0.12.2] - 2026-10-10
 
 ### Changed

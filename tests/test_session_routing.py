@@ -465,6 +465,8 @@ async def test_guest_session_joins_its_private_room(env: Env) -> None:
 
 
 async def test_two_guests_never_share_a_room(env: Env) -> None:
+    # Two concurrent guests need two slots (guest_mode.max_guests, t9).
+    object.__setattr__(env.app["config"], "guest_max_guests", 2)
     env.add_guest()
     env.add_guest(email="other@example.org", nick="sbx-ola")
     assert (await env.client.get("/", headers=env.guest_headers())).status == 200
@@ -501,8 +503,10 @@ async def test_approved_guest_view_sees_every_guest_room(env: Env) -> None:
 
 
 async def test_idle_sandbox_sessions_are_closed() -> None:
-    """d7: a sandbox session with no open event stream for idle_close_s is
-    closed; one with a live stream, and every mesh session, is kept."""
+    """d7 + c28 (t9): a guest session with no action for idle_close_s is
+    closed even with its tab open; an approved user's Guest view keeps the
+    tab rule (closed only with no open event stream); mesh sessions are
+    never reaped."""
     from unittest.mock import AsyncMock, MagicMock
 
     from irc_lens.session import SessionEventBus
@@ -519,22 +523,33 @@ async def test_idle_sandbox_sessions_are_closed() -> None:
         s.event_bus = SessionEventBus()  # the real API, not a mock
         return s
 
-    reg = SessionRegistry(mk, sandbox_factory=mk)
+    reg = SessionRegistry(mk, sandbox_factory=mk, clock=lambda: 0.0)
     idle = await reg.get_or_open(
         Identity(principal="guest:a@x", nick="sbx-a", raw_jwt_subject="g"), "sandbox"
     )
-    live = await reg.get_or_open(
+    tab_open = await reg.get_or_open(
         Identity(principal="guest:b@x", nick="sbx-b", raw_jwt_subject="g"), "sandbox"
     )
-    live.event_bus.subscribe()  # an open tab
+    tab_open.event_bus.subscribe()  # an open tab no longer keeps a guest
+    preview_idle = await reg.get_or_open(
+        Identity(principal="p@x", nick="sbx-op-p", raw_jwt_subject="s"), "sandbox"
+    )
+    preview_live = await reg.get_or_open(
+        Identity(principal="q@x", nick="sbx-op-q", raw_jwt_subject="s"), "sandbox"
+    )
+    preview_live.event_bus.subscribe()
     mesh = await reg.get_or_open(Identity(principal="o@x", nick="srv-o", raw_jwt_subject="s"))
     await reg.reap_idle(now=0.0, idle_s=600)
     await reg.reap_idle(now=599.0, idle_s=600)
     assert reg.has("guest:a@x", "sandbox")
+    assert reg.has("p@x", "sandbox")
     await reg.reap_idle(now=600.0, idle_s=600)
     assert not reg.has("guest:a@x", "sandbox")
     idle.disconnect.assert_awaited()
-    assert reg.has("guest:b@x", "sandbox")
+    assert not reg.has("guest:b@x", "sandbox")
+    assert not reg.has("p@x", "sandbox")
+    preview_idle.disconnect.assert_awaited()
+    assert reg.has("q@x", "sandbox")
     assert "o@x" in reg
     mesh.disconnect.assert_not_awaited()
 

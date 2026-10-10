@@ -1,0 +1,636 @@
+{
+  "slug": "app-native-sign-in",
+  "title": "app-native sign-in",
+  "frame_slug": "app-native-sign-in",
+  "schema_version": 5,
+  "status": "exported",
+  "created": "2026-10-10T14:49:26Z",
+  "updated": "2026-10-10T16:40:29Z",
+  "targets": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "chat.culture.dev approved users sign in inside the app with a password and an emailed code, and a wrong password looks exactly like a right one",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h1",
+      "kind": "honesty",
+      "text": "an approved user reaches the real mesh at chat.culture.dev with password plus emailed code, without passing through Cloudflare Access",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c6",
+      "kind": "audience",
+      "text": "Approved users of chat.culture.dev (the owner and one collaborator), and anyone trying to guess their passwords",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h2",
+      "kind": "honesty",
+      "text": "the only approved users are the emails in auth.allowed_emails; nothing else grants the approved tier besides a verified Access JWT during the trial",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c7",
+      "kind": "before_state",
+      "text": "A correct password answers 303 to /login (Cloudflare Access) and a wrong one 401 'Email or password is wrong', so an attacker spreading guesses over many IPs learns the moment a guess is right; the 5-per-15-minutes per-email limit lets an attacker lock the owner out; the collaborator has no password and relies on the Access email PIN",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h3",
+      "kind": "honesty",
+      "text": "the before-state is what 0.12.2 does: post_signin returns 303 /login on success and 401 otherwise, with _over_limit counting per email and per IP",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c8",
+      "kind": "after_state",
+      "text": "Email, then password, then always the same code screen; a sign-in code is emailed only when the email is approved and the password is correct; the right code in the same browser starts a server-side, revocable app session that reaches the real mesh; Cloudflare Access is not on the normal path",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h4",
+      "kind": "honesty",
+      "text": "after the change no response of /entry/signin depends on whether the password was correct; only the mailbox learns it",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c9",
+      "kind": "why_it_matters",
+      "text": "Guessing passwords teaches an attacker nothing, a stolen password alone is not enough (password plus mailbox, where Access checked only the mailbox), and a correct guess emails the owner",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h5",
+      "kind": "honesty",
+      "text": "a correct password with no access to the mailbox never yields a session",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c10",
+      "kind": "requirement",
+      "text": "POST /entry/signin answers identically (same status, same body apart from the echoed email, padded to the same floor) for an unknown email, an approved email with a wrong password, an approved email with the right password, and a rate-limited attempt; the code email is sent off the request path so it adds no timing difference",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h6",
+      "kind": "honesty",
+      "text": "a test posts the 4 cases and asserts equal status, equal body after replacing the email, and that each took at least the floor; the mail send runs in a background task",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c11",
+      "kind": "requirement",
+      "text": "Sign-in codes are single-use, expire after 10 minutes, carry purpose 'signin', and work only together with the pending-sign-in cookie set by the code screen (same browser); code entry is limited to 5 tries per 15 minutes per email and per IP; a wrong, expired, reused or rate-limited code all show the one error",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h7",
+      "kind": "honesty",
+      "text": "a code from browser A fails in browser B, a used code fails the second time, an 11-minute-old code fails, and the 6th try in 15 minutes fails even with the right code",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c12",
+      "kind": "requirement",
+      "text": "Approved sessions are server-side: a sessions table holds sha256 of the session id, the email, created and last-seen times; the cookie lens_session is HttpOnly, Secure, SameSite=Lax; 7 days idle or 30 days total ends it; logout ends it; setting a password ends every session for that email; the email is re-checked against allowed_emails on every request",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h8",
+      "kind": "honesty",
+      "text": "the database never holds a raw session id; a session idle 7 days or older than 30 days is refused; logout and password change make the old cookie fail; removing the email from allowed_emails makes the next request anonymous",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c13",
+      "kind": "requirement",
+      "text": "The sign-in email says the correct password was just entered and tells the reader to change it if it wasn't them",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h9",
+      "kind": "honesty",
+      "text": "the rendered sign-in email contains the change-your-password line and the email is identical for every approved address apart from the code",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c14",
+      "kind": "requirement",
+      "text": "Rate limits: password checks stay limited per IP (5 per 15 minutes; over the limit, no check, same screen); per email there is no lockout, only a cap of 5 sign-in codes sent per 15 minutes",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h10",
+      "kind": "honesty",
+      "text": "the 6th password attempt from one IP in 15 minutes is not checked yet shows the same screen; an approved email under a distributed attack still gets codes when the right password is entered, up to 5 per 15 minutes",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c15",
+      "kind": "requirement",
+      "text": "Set or reset password: a link on the entry card asks for an email and always shows the same 'check your email' screen; only an approved email gets a single-use link (purpose 'setpw', 30-minute expiry) to a page that sets an argon2id password of at least 12 characters and ends all of that email's sessions",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h11",
+      "kind": "honesty",
+      "text": "the set-password screen is identical for approved and unknown emails; a link works once, expires in 30 minutes, rejects passwords under 12 characters, and setting a password ends that email's sessions",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c16",
+      "kind": "requirement",
+      "text": "During the trial a verified Cloudflare Access JWT still yields the approved tier, so /login keeps working as break-glass",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h12",
+      "kind": "honesty",
+      "text": "with a valid Access JWT the approved tier is granted exactly as in 0.12.2, so /login still works",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c17",
+      "kind": "boundary",
+      "text": "irc-lens plus one small Cloudflare email Worker for delivery alerts; the guest flow changes only by the one-guest limit and the 15-minute idle sign-off; the Cloudflare tunnel and CDN cache rules are unchanged; approved users stay defined by allowed_emails in config (no sign-up, no account creation)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h15",
+      "kind": "honesty",
+      "text": "outside the guest limit and idle sign-off, guest-mode tests pass unchanged; the PR changes no Cloudflare tunnel or cache configuration",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c19",
+      "kind": "success_signal",
+      "text": "Tests show the 4 sign-in cases give byte-identical responses apart from the email with 0 codes sent for 3 of them; a correct password without the code gives 0 access; a real-browser pass on staging signs the owner in with password plus code in under 2 minutes; the live owner sign-in works with Cloudflare Access bypassed",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h14",
+      "kind": "honesty",
+      "text": "each success signal maps to a named test or a recorded browser/live check in the delivery record",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c24",
+      "kind": "requirement",
+      "text": "Guest limit: while guest_mode.max_guests (default 1) guests are active, a new visitor who picks Guest mode sees 'The sandbox is busy. Try again in a few minutes.' before any code is emailed, and code verification re-checks the limit so two guests can't slip in together; a slot frees when the guest deletes their data, or after 15 minutes with no action (idle close 900 s); an approved user's Guest view does not count",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h16",
+      "kind": "honesty",
+      "text": "with one guest active, a second visitor gets the busy message and 0 codes are emailed; two guests verifying codes at the same moment yield exactly one active guest; after the first guest's 15 idle minutes or deletion, the next visitor gets in; approved users in Guest view are never refused",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c25",
+      "kind": "requirement",
+      "text": "Delivery alert: when a Resend send fails (HTTP error, including quota exhaustion, or a network error), the lens posts at most one alert per hour per failure kind to a Cloudflare Worker over HTTPS with a shared secret; the Worker emails each approved user through Cloudflare Email Routing; the alert names what failed, says sign-in and guest codes are not being delivered, and points to /login; it never contains a guest's email address or a code",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h17",
+      "kind": "honesty",
+      "text": "a forced Resend failure sends exactly one alert per failure kind within an hour, the alert body holds no guest email address or code, and the Worker rejects a request without the shared secret",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c27",
+      "kind": "requirement",
+      "text": "The CSRF guard that today demands same-origin proof for cookie-bearing POSTs without an Origin header (csrf.py: only when lens_guest is present) also applies to the lens_session and pending-sign-in cookies",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h18",
+      "kind": "honesty",
+      "text": "a cross-site POST carrying lens_session or the pending cookie, with no Origin and Sec-Fetch-Site cross-site, gets 403 before any handler runs",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c28",
+      "kind": "requirement",
+      "text": "Guest idle sign-off counts actions, not open tabs: 15 minutes with no message or command sent closes the guest's session even if the tab stays open (today's reap_idle only closes sessions with no open event stream)",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h19",
+      "kind": "honesty",
+      "text": "a guest with the tab open who sends nothing for 15 minutes is signed off and frees the slot; a guest who keeps chatting is not",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c29",
+      "kind": "requirement",
+      "text": "Ending an approved session (logout, password change, expiry, removal from allowed_emails) also closes that user's open IRC session and event stream, as the ban sweeper does for guests, so an open tab doesn't keep working",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h20",
+      "kind": "honesty",
+      "text": "after logout or password change, the user's already-open tab stops receiving events and its next POST is refused within one sweep interval",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c30",
+      "kind": "requirement",
+      "text": "Opening a set-password link (GET) never uses it up; only submitting the new password (POST) consumes the token, so mail scanners that prefetch links can't burn it",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h21",
+      "kind": "honesty",
+      "text": "a GET of a set-password link leaves the token usable; only the POST that sets the password consumes it",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c31",
+      "kind": "requirement",
+      "text": "A new random session id is minted at each successful code entry and the pending-sign-in cookie is cleared; a session id from before sign-in is never promoted",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h22",
+      "kind": "honesty",
+      "text": "the session cookie after sign-in differs from any cookie the browser held before, and the pending-sign-in cookie is gone",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c32",
+      "kind": "requirement",
+      "text": "A config switch (auth.app_signin.enabled, default on) turns app sign-in off and restores the 0.12.2 behavior (correct password -> /login), as the rollback if something goes wrong at cutover",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h23",
+      "kind": "honesty",
+      "text": "with auth.app_signin.enabled false, a correct password answers 303 /login exactly as 0.12.2 did",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c33",
+      "kind": "requirement",
+      "text": "Owner metrics count sign-in codes sent, sessions started and ended, guest-busy refusals and delivery alerts; no log line contains a code, a session id or a password",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h24",
+      "kind": "honesty",
+      "text": "metrics expose the five counters; a grep of logs from a full test run finds no code, session id or password value",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c34",
+      "kind": "requirement",
+      "text": "The retention sweep deletes expired sessions and used or expired sign-in and set-password tokens after a day, the same as guest codes",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h25",
+      "kind": "honesty",
+      "text": "a sweep at day+1 leaves no expired session row and no used or expired signin/setpw token",
+      "deferred": false,
+      "deferred_reason": ""
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t1",
+      "summary": "Store: approved sessions table, signin/setpw token purposes, revoke-all, retention sweep",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "guest_store.py gains a sessions table (sha256 id hash, email, created, last_seen) with create/get/touch/delete/delete_for_email; the raw session id is never stored (test reads every cell)",
+        "issue_token/verify_token accept purposes 'signin' (10 min) and 'setpw' (30 min); a token of one purpose never verifies for another",
+        "sweep() deletes sessions idle over 7 days or older than 30 days, and used or expired signin/setpw tokens older than a day; existing guest-store tests pass unchanged"
+      ],
+      "deps": [],
+      "covers": [
+        "c34",
+        "h25"
+      ],
+      "instruction": "Touch only src/irc_lens/guest_store.py, src/irc_lens/web/retention.py and new tests (tests/test_app_sessions_store.py). Follow the existing _migrate() pattern for the new table (CREATE TABLE IF NOT EXISTS) so old stores upgrade in place. Hash session ids with hashlib.sha256 like email_hash()."
+    },
+    {
+      "id": "t2",
+      "summary": "Config and metrics for app sign-in, guest limit and delivery alerts",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "config.py parses auth.app_signin.enabled (default true), guest_mode.max_guests (default 1, positive int), guest_mode.idle_close_s default 900, and guest_mode.mail.alert_url + alert_secret_env; invalid values fail load with a clear error",
+        "metrics.py exposes counters signin_codes_sent, sessions_started, sessions_ended, guest_busy and delivery_alerts on the owner metrics endpoint"
+      ],
+      "deps": [],
+      "covers": [
+        "c32",
+        "c33"
+      ],
+      "instruction": "Touch only src/irc_lens/config.py, src/irc_lens/metrics.py, docs/guest-mode-config.md and tests (tests/test_config_app_signin.py). Mirror how guest_mode keys are parsed today (_positive_int). Do not wire behavior; later tasks consume these fields."
+    },
+    {
+      "id": "t3",
+      "summary": "Mail templates for sign-in and set-password",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "render_token_email accepts purpose 'signin': subject 'Your chat.culture.dev sign-in code', body says the correct password was just entered and to change it via the set-password link if it wasn't you; identical across addresses apart from the code",
+        "render_link_email (or purpose 'setpw') renders a set-password email carrying a link https://<public_base_url>/password/<token>, 30-minute expiry stated, identical across addresses apart from the link; guest and delete templates unchanged"
+      ],
+      "deps": [],
+      "covers": [
+        "c13",
+        "h9"
+      ],
+      "instruction": "Touch only src/irc_lens/mail.py and tests/test_mail.py (+ a new test file if cleaner). Keep the PURPOSE_* constants pattern added in 0.12.2. Never log the code or link."
+    },
+    {
+      "id": "t4",
+      "summary": "cultureflare: delivery-alert Worker sending through Cloudflare Email Routing",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "A Worker accepts POST /alert with a bearer shared secret (constant-time compare); without or with a wrong secret it answers 401 and sends nothing",
+        "With the secret it sends one plain-text email per configured recipient through the send_email binding (verified destinations only), using the posted kind and message; the body it sends contains only the posted fields"
+      ],
+      "deps": [],
+      "covers": [
+        "h17"
+      ],
+      "instruction": "In ../cultureflare (separate repo and PR, follow its CLAUDE.md and existing Worker layout; relates to issue #59). Recipients come from Worker config, not the request. Deploy only after owner approval."
+    },
+    {
+      "id": "t5",
+      "summary": "App session: cookie, middleware tier, revocation of live sessions, CSRF coverage",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "A valid lens_session cookie (HttpOnly, Secure, SameSite=Lax) whose email is still in allowed_emails yields the approved tier; idle >7 days, >30 days old, deleted, or email removed -> anonymous",
+        "A verified Access JWT still yields the approved tier exactly as 0.12.2 (existing auth tests unchanged)",
+        "POST /logout deletes the session and clears the cookie; a sweep closes registry sessions whose app session ended (logout, revoke, expiry, allowlist removal) within one interval",
+        "csrf_middleware applies the same-origin proof check to lens_session and lens_signin cookies (cross-site POST without Origin -> 403)"
+      ],
+      "deps": [
+        "t1",
+        "t2"
+      ],
+      "covers": [
+        "c12",
+        "h8",
+        "c16",
+        "h12",
+        "c6",
+        "h2",
+        "c27",
+        "h18",
+        "c29",
+        "h20"
+      ],
+      "instruction": "New module src/irc_lens/web/app_session.py (issue/read/end session, cookie names lens_session and lens_signin); integrate into auth.py's middleware before the Access JWT path; extend csrf.py; revocation sweep alongside bans.py's loop. Session ids: secrets.token_urlsafe(32). Do not touch entry.py."
+    },
+    {
+      "id": "t6",
+      "summary": "Set or reset password by emailed link",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "GET/POST /password asks for an email and always shows the same check-your-email page; only an allowed email gets a setpw link (rate-limited per email and IP)",
+        "GET /password/{token} shows the form without consuming the token; POST consumes it, refuses passwords under 12 characters (token stays valid), sets argon2id, and ends every session for that email",
+        "the entry card's password step links to /password"
+      ],
+      "deps": [
+        "t1",
+        "t3",
+        "t5"
+      ],
+      "covers": [
+        "c15",
+        "h11",
+        "c30",
+        "h21"
+      ],
+      "instruction": "New module src/irc_lens/web/setpw.py + templates/setpw.html.j2, modelled on web/deletion.py. Only a one-line link in templates/entry.html.j2 (coordinate: t8 edits entry.html.j2 later, so keep this change minimal). Mark routes allows_anonymous."
+    },
+    {
+      "id": "t7",
+      "summary": "Delivery alert client: one alert per failure kind per hour",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "When a mail send fails (HTTP error incl. 429/quota, or network error) the lens posts {kind, message} to guest_mode.mail.alert_url with the bearer secret from alert_secret_env, at most once per hour per kind; delivery_alerts counter increments",
+        "The alert payload never contains a recipient address or a code (test inspects the posted body); an alert failure is logged and never raises into the request"
+      ],
+      "deps": [
+        "t2",
+        "t3"
+      ],
+      "covers": [
+        "c25"
+      ],
+      "instruction": "New module src/irc_lens/alerts.py; hook it where entry.py/deletion.py catch mail exceptions via a small helper in mail.py (send_with_alert) so callers change one line. Messages: 'Resend quota used up' for 429 else 'Resend send failed (<status or network>)'; both say codes aren't being delivered and to use /login."
+    },
+    {
+      "id": "t8",
+      "summary": "Oracle-free sign-in: password -> code screen -> emailed code -> app session",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "POST /entry/signin returns byte-identical responses (email masked) for unknown, wrong, right and rate-limited, each >= the floor; only the right case sends exactly one signin mail, from a background task",
+        "POST /entry/code with the right code and matching lens_signin cookie mints a new lens_session and clears lens_signin; wrong browser, reuse, >10 minutes, or 6th try in 15 minutes -> the one error",
+        "per-IP password limit 5/15min (over: no check, same screen); no per-email lockout; at most 5 signin codes sent per email per 15 min",
+        "stored passwords shorter than 12 characters still sign in; with auth.app_signin.enabled false the 0.12.2 behavior (303 /login) is restored and its tests pass"
+      ],
+      "deps": [
+        "t1",
+        "t2",
+        "t3",
+        "t5"
+      ],
+      "covers": [
+        "c1",
+        "h1",
+        "c8",
+        "h4",
+        "c9",
+        "h5",
+        "c10",
+        "h6",
+        "c11",
+        "h7",
+        "c14",
+        "h10",
+        "c31",
+        "h22",
+        "c32",
+        "h23",
+        "c7",
+        "h3"
+      ],
+      "instruction": "Edit src/irc_lens/web/entry.py and templates/entry.html.j2 (new 'code' step for sign-in reusing the guest code UI). Keep _dummy_verify and the floor. Use t5's app_session API; send mail with asyncio.create_task and t7's send_with_alert if merged (else plain send). Code screen copy: 'If your email and password are right, a code is on its way. Nothing after a minute? Go back and re-enter your password.'"
+    },
+    {
+      "id": "t9",
+      "summary": "Guest limit and action-based idle sign-off",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "with max_guests guests active, post_guest shows 'The sandbox is busy. Try again in a few minutes.' and sends no code; code verify re-checks under an asyncio lock so simultaneous verifies leave exactly max_guests active; Guest view of approved users never counts",
+        "a guest session with no POST /input for idle_close_s (900) is closed even with an open tab; a returning guest with a valid cookie rejoins if a slot is free, else sees the busy page; no new code is emailed"
+      ],
+      "deps": [
+        "t2",
+        "t8"
+      ],
+      "covers": [
+        "c24",
+        "h16",
+        "c28",
+        "h19"
+      ],
+      "instruction": "Edit src/irc_lens/web/entry.py (post_guest, verify), src/irc_lens/web/sessions.py (track last action; reap on action idle), src/irc_lens/web/routes.py (touch last action in post_input and on GET / for returning guests). Count active guests from the registry's sandbox sessions whose principal is a guest."
+    },
+    {
+      "id": "t10",
+      "summary": "Log hygiene, docs, version bump",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "a test runs the full sign-in, set-password and guest flows with log capture and finds no code, session id or password value in any record",
+        "docs/cli.md and docs/guest-mode-config.md describe app sign-in, set-password, guest limit, idle sign-off, delivery alerts and the rollback switch; CHANGELOG + pyproject bumped (minor); full suite and guest-mode tests pass"
+      ],
+      "deps": [
+        "t6",
+        "t7",
+        "t8",
+        "t9"
+      ],
+      "covers": [
+        "c33",
+        "h24",
+        "c17",
+        "h15"
+      ],
+      "instruction": "Docs and one test file; no behavior changes. Confirm the PR diff contains no Cloudflare config changes."
+    },
+    {
+      "id": "t11",
+      "summary": "Staging browser pass and live cutover",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "real-browser pass on an isolated local staging: owner signs in with password + code in under 2 minutes; wrong password shows the identical code screen; set-password, logout, guest busy page and idle sign-off all exercised; screenshots at 375px",
+        "after merge + owner approval: lens upgraded on spark, alert Worker deployed, owner signs in live with Cloudflare Access bypassed; /login break-glass still works; results recorded in the delivery record"
+      ],
+      "deps": [
+        "t10",
+        "t4"
+      ],
+      "covers": [
+        "c19",
+        "h14"
+      ],
+      "instruction": "Main agent only (outward-facing). Reuse scratchpad/staging/ux layout (own sbx ircd on 6678, file mailer). Ask before deploying the Worker and before the live switch."
+    }
+  ],
+  "risks": [
+    {
+      "id": "r1",
+      "text": "t6 and t8 share wave 2 and both edit templates/entry.html.j2 (t6 adds one link); expect a small merge conflict, resolved at merge",
+      "kind": "unknown_nonblocking",
+      "task_id": "t6",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r2",
+      "text": "Guest-slot check and session open are separate awaits; t9 must hold one asyncio lock across check+open or two verifies can both pass",
+      "kind": "unknown_nonblocking",
+      "task_id": "t9",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r3",
+      "text": "Alert emails reach only verified Email Routing destinations; the collaborator's address must be verified before the Worker can mail them (assumption c26)",
+      "kind": "follow_up",
+      "task_id": "t4",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r4",
+      "text": "Cloudflare send_email limits/pricing unchecked (frame v4) and Resend quota error shape unknown (frame v3); t7 treats any 429 as quota",
+      "kind": "unknown_nonblocking",
+      "task_id": "t7",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r5",
+      "text": "Mixed sign-in during the trial: if a user's IRC session was opened via an Access JWT, logging out of an app-session tab does not close it (by design, so the sweep never closes JWT sessions); the logged-out tab's existing event stream keeps receiving until it reloads",
+      "kind": "follow_up",
+      "task_id": "t5",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r6",
+      "text": "Code entry is limited per email (5 per 15 min, c11), so someone who knows only an approved email can burn its code tries and block sign-in for 15 minutes; password checks have no per-email lockout",
+      "kind": "unknown_nonblocking",
+      "task_id": "t8",
+      "resolved": true,
+      "resolution": "owner: trusted browsers unlimited; untrusted per-email 3/15min then 2/30min, silent (c36-c38, d5)"
+    }
+  ],
+  "obligations": []
+}

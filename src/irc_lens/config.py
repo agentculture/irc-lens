@@ -54,7 +54,7 @@ class LensConfig:
     # The sandbox IRCd itself runs memory-only (culture server --no-persist).
     guest_sandbox_flag_log: str | None = None
     # Close a sandbox session after this long with no open event stream.
-    guest_idle_close_s: int = 600
+    guest_idle_close_s: int = 900
     # Retention (d9): erase guests inactive this many days (hourly sweep).
     guest_retention_days: int = 90
     guest_store_path: str = ""
@@ -62,6 +62,17 @@ class LensConfig:
     guest_mail_provider: str = "none"
     guest_mail_from: str = ""
     guest_mail_api_key_env: str = "IRC_LENS_MAIL_API_KEY"
+    # Delivery-alert webhook (https; http only for loopback) and the env var
+    # holding its shared secret.
+    guest_mail_alert_url: str | None = None
+    guest_mail_alert_secret_env: str | None = None
+    # Concurrent guest sessions allowed on the sandbox.
+    guest_max_guests: int = 1
+    # auth.app_signin.enabled: False restores password -> /login behavior.
+    app_signin_enabled: bool = True
+    # auth.app_signin.base_url: public base of set-password links (https;
+    # http only for loopback). None falls back to media_public_base_url.
+    app_signin_base_url: str | None = None
     guest_rate_entry_per_min: int = 10
     guest_rate_messages_per_min: int = 20
     guest_rate_password_attempts_per_15min: int = 5
@@ -434,15 +445,82 @@ _GUEST_KEYS = frozenset(
         "rate_limits",
         "idle_close_s",
         "retention_days",
+        "max_guests",
     }
 )
 _GUEST_SANDBOX_KEYS = frozenset(
     {"name", "host", "port", "room_prefix", "flag_log"}
 )
-_GUEST_MAIL_KEYS = frozenset({"provider", "from", "api_key_env"})
+_GUEST_MAIL_KEYS = frozenset({"provider", "from", "api_key_env", "alert_url", "alert_secret_env"})
 _GUEST_RATE_KEYS = frozenset(
     {"entry_per_min", "messages_per_min", "password_attempts_per_15min"}
 )
+
+
+_APP_SIGNIN_KEYS = frozenset({"enabled", "base_url"})
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost"})
+
+
+def _validate_app_signin(auth: dict) -> bool:
+    """auth.app_signin.enabled (default True)."""
+    sect = _optional_mapping(
+        auth.get("app_signin"), "auth.app_signin", _APP_SIGNIN_KEYS
+    )
+    return _coerce_bool(sect.get("enabled", True), "auth.app_signin.enabled")
+
+
+def _app_signin_base_url(auth: dict) -> str | None:
+    """auth.app_signin.base_url: https URL (http only for loopback), or None.
+
+    The base of emailed set-password links; links are never built from a
+    request's Host header.
+    """
+    sect = _optional_mapping(
+        auth.get("app_signin"), "auth.app_signin", _APP_SIGNIN_KEYS
+    )
+    value = sect.get("base_url")
+    if value is None:
+        return None
+    url = _coerce_str(value, "auth.app_signin.base_url")
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+    except ValueError:
+        parsed, host = None, None
+    ok = bool(host) and (
+        parsed.scheme == "https"
+        or (parsed.scheme == "http" and host in _LOOPBACK_HOSTS)
+    )
+    if not ok:
+        raise _err(
+            f"auth.app_signin.base_url must be an https:// URL "
+            f"(http:// only for 127.0.0.1/localhost), got {url!r}",
+            "set `auth.app_signin.base_url:` to the lens's public https URL, "
+            "e.g. https://chat.culture.dev",
+        )
+    return url
+
+
+def _alert_url(value: object) -> str | None:
+    if value is None:
+        return None
+    url = _coerce_str(value, "guest_mode.mail.alert_url")
+    parsed = urlsplit(url)
+    ok = bool(parsed.netloc) and (
+        parsed.scheme == "https"
+        or (parsed.scheme == "http" and parsed.hostname in _LOOPBACK_HOSTS)
+    )
+    if not ok:
+        raise _err(
+            f"guest_mode.mail.alert_url must be an https:// URL "
+            f"(http:// only for 127.0.0.1/localhost), got {url!r}",
+            "set `guest_mode.mail.alert_url:` to an https URL, or remove the key",
+        )
+    return url
+
+
+def _optional_str(value: object, where: str) -> str | None:
+    return None if value is None else _coerce_str(value, where)
 
 
 def _default_guest_store_path() -> str:
@@ -542,7 +620,7 @@ def _validate_guest_mode_section(raw: dict) -> dict:
             sandbox.get("flag_log"), "guest_mode.sandbox.flag_log"
         ),
         "guest_idle_close_s": _positive_int(
-            guest.get("idle_close_s", 600), "guest_mode.idle_close_s"
+            guest.get("idle_close_s", 900), "guest_mode.idle_close_s"
         ),
         "guest_retention_days": _positive_int(
             guest.get("retention_days", 90), "guest_mode.retention_days"
@@ -559,6 +637,13 @@ def _validate_guest_mode_section(raw: dict) -> dict:
         "guest_mail_api_key_env": _coerce_str(
             mail.get("api_key_env", "IRC_LENS_MAIL_API_KEY"),
             "guest_mode.mail.api_key_env",
+        ),
+        "guest_mail_alert_url": _alert_url(mail.get("alert_url")),
+        "guest_mail_alert_secret_env": _optional_str(
+            mail.get("alert_secret_env"), "guest_mode.mail.alert_secret_env"
+        ),
+        "guest_max_guests": _positive_int(
+            guest.get("max_guests", 1), "guest_mode.max_guests"
         ),
         "guest_rate_entry_per_min": rate("entry_per_min", 10),
         "guest_rate_messages_per_min": rate("messages_per_min", 20),
@@ -627,6 +712,12 @@ def load_config(path: Path) -> LensConfig:
     ) = _validate_media_section(raw)
     culture_residents_url, culture_overview_name = _validate_culture_section(raw)
     guest_fields = _validate_guest_mode_section(raw)
+    app_signin_enabled = _validate_app_signin(auth)
+    if guest_fields.get("guest_mail_provider", "none") == "none":
+        # Codes can't be mailed: keep the 0.12.2 path (303 /login) instead of
+        # a code screen whose code never arrives. make_app logs why.
+        app_signin_enabled = False
+    app_signin_base_url = _app_signin_base_url(auth)
 
     return LensConfig(
         auth_mode=mode,
@@ -650,6 +741,8 @@ def load_config(path: Path) -> LensConfig:
         media_trusted_hosts=media_trusted_hosts,
         culture_residents_url=culture_residents_url,
         culture_overview_name=culture_overview_name,
+        app_signin_enabled=app_signin_enabled,
+        app_signin_base_url=app_signin_base_url,
         **guest_fields,
     )
 

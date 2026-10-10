@@ -37,6 +37,11 @@ def test_counters_and_snapshot() -> None:
         "rate_limited_429": 0,
         "failed_sign_ins": 0,
         "agent_errors": 0,
+        "signin_codes_sent": 0,
+        "sessions_started": 0,
+        "sessions_ended": 0,
+        "guest_busy": 0,
+        "delivery_alerts": 0,
     }
     m.entry()
     m.entry()
@@ -154,6 +159,11 @@ async def test_route_approved_gets_snapshot_and_agent(
         "rate_limited_429",
         "failed_sign_ins",
         "agent_errors",
+        "signin_codes_sent",
+        "sessions_started",
+        "sessions_ended",
+        "guest_busy",
+        "delivery_alerts",
     }
     # No sandbox session open: nothing to measure room membership against
     # (online/offline: test_chat_ui::test_owner_metrics_agent_state_*).
