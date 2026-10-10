@@ -54,8 +54,10 @@
   - honesty: a sweep at day+1 leaves no expired session row and no used or expired signin/setpw token
 - Trusted browser: completing code entry with 'Trust this browser' ticked (c39) sets `lens_device` (random id, only its sha256 stored with the email; HttpOnly, Secure, SameSite=Lax, one year from the trusting sign-in, never extended by later moves); it exempts that browser from all sign-in attempt limits for that email only; logout keeps it; setting or resetting the password revokes every trusted browser for that email
   - honesty: a trusted browser signs in after 20 blocked attempts on its email from other browsers; the trust cookie of one email does not exempt another email; after set-password the old trust cookie gives no exemption
-- Untrusted-browser budget per email counts password submissions and code entries together: 3 per 15 minutes; after it is first exhausted the email is strict at 2 per 30 minutes until 24 hours pass with no blocked attempt; untrusted browsers are also limited per IP to 3 attempts per 15 minutes (password and code entry)
-  - honesty: the 4th untrusted attempt within 15 minutes is blocked silently (byte-identical responses, no code mail); after exhaustion only 2 per 30 minutes pass; 24 quiet hours restore 3 per 15 minutes
+- Untrusted-browser budget per email counts wrong password submissions only: 3 per 15 minutes; after it is first exhausted the email is strict at 2 per 30 minutes until 24 hours pass with no blocked attempt; untrusted browsers are also limited per IP to 3 wrong password submissions per 15 minutes. Correct passwords (c42) and code entries (c41) are never counted
+  - ⚠ contested by `d7`: live go-live: an owner's second browser on the same IP had its correct code silently refused, because the first sign-in's code entry used an IP slot; code guessing is infeasible, so counting codes only locked out the real user
+  - ⚠ contested by `d8`: review of #73 (finding 2): several new browsers on one home IP could still silently lock out the owner at the password step
+  - honesty: the 4th wrong untrusted password submission within 15 minutes blocks the next attempt silently (byte-identical response, no code mail); after exhaustion only 2 wrong per 30 minutes are allowed; 24 quiet hours restore 3 per 15 minutes; any number of correct passwords or code entries, from one IP or many, uses no budget
 
 ## Honesty conditions
 
@@ -112,6 +114,8 @@
 - Owner: the sign-in code screen has a 'Trust this browser' checkbox; only when it is ticked does completing sign-in make the browser trusted (`lens_device`)
 - Owner: email the user when a sign-in completes from a new browser so they are aware; a browser already trusted for that email is not new, even from a changed IP (no email); a browser without trust has nothing that identifies it, so every sign-in from it emails
   - ⚠ contested by `d6`: owner request during review of #68: users should learn of sign-ins from browsers they have not trusted
+- Owner (2026-10-10, after go-live): code entries count toward nothing — not the per-IP limit, not the per-email budget, and no cap on code entries; only password submissions count. A code is 256 random bits bound to the browser that entered the right password, so guessing it needs brute force the password limits already prevent. Blocked password attempts still look exactly like unblocked ones.
+- Owner (2026-10-10, review of #73): only WRONG password submissions count toward the per-IP limit and the per-email untrusted budget; a correct password is not counted (the count is never visible, so this reveals nothing, and a correct password still needs the emailed code). Brute force -- a run of wrong guesses -- stays fully limited.
 
 ## Open parks
 
