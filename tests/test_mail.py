@@ -104,6 +104,16 @@ def test_resend_request_shape():
     assert "sekret" not in req.data.decode()
 
 
+def test_resend_request_sends_explicit_user_agent():
+    # Resend sits behind Cloudflare, which rejects urllib's default
+    # "Python-urllib/3.x" agent with error 1010 (HTTP 403) — every guest
+    # code mail failed live until the request named itself.
+    req = mail.ResendAdapter("g@culture.dev", "K").build_request("k", "t@x.y", "s", "b")
+    ua = req.get_header("User-agent")
+    assert ua and ua.startswith("irc-lens/")
+    assert "python-urllib" not in ua.lower()
+
+
 def test_resend_send_reads_key_from_env_and_posts(monkeypatch):
     monkeypatch.setenv("MY_KEY", "k1")
     seen = {}

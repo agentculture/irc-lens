@@ -27,12 +27,17 @@ import urllib.error
 import urllib.request
 from typing import Protocol, runtime_checkable
 
+from irc_lens import __version__
 from irc_lens._errors import EXIT_ENV_ERROR, AfiError
 from irc_lens.config import LensConfig
 from irc_lens.guest_store import DEFAULT_TOKEN_TTL
 
 #: POST target of Resend's transactional email API.
 RESEND_API_URL = "https://api.resend.com/emails"
+
+#: Resend sits behind Cloudflare, which rejects urllib's default
+#: ``Python-urllib/3.x`` agent (error 1010, HTTP 403) — name ourselves.
+USER_AGENT = f"irc-lens/{__version__}"
 
 _SUBJECT = "Your chat.culture.dev code"
 
@@ -145,6 +150,7 @@ class ResendAdapter:
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {api_key}",
+                "User-Agent": USER_AGENT,
             },
         )
 
