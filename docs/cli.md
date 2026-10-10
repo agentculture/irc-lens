@@ -393,6 +393,36 @@ nothing to export.
   `~/.culture/sandbox/flags.jsonl`). `guests ban --flag <id>` bans the
   flagged guest, resolving a log nick to the guest's email via the store.
 
+## App sign-in, set-password, guest limit and delivery alerts
+
+`irc-lens serve` with guest mode on also serves the app's own sign-in for
+approved users (no Cloudflare Access needed). Full reference, with every
+config key and default, in [guest-mode-config.md](guest-mode-config.md).
+
+- **Sign-in.** `POST /entry/signin` (email + password) always answers with the
+  same code screen; a right password for an `auth.allowed_emails` address
+  mails a 10-minute single-use code, and `POST /entry/code` turns it into the
+  `lens_session` cookie (30 days, 7 idle). `POST /logout` ends it. Approved
+  users stay defined by `allowed_emails`: no sign-up, no account creation.
+- **Set or reset a password.** `GET/POST /password` mails a single-use
+  30-minute link `<auth.app_signin.base_url>/password/<token>` (falls back to
+  `media.public_base_url`); setting a password (12 characters or more, argon2id)
+  ends that email's sessions. The owner can still use `irc-lens guests passwd`.
+- **Guest limit and idle sign-off.** `guest_mode.max_guests` (default `1`)
+  caps concurrent guests; extra visitors see the busy page and no code is
+  mailed. A guest idle for `guest_mode.idle_close_s` (default `900`, 15
+  minutes) without sending a message or command is signed off; open tabs do
+  not count.
+- **Delivery alerts.** If mail sending fails, `guest_mode.mail.alert_url`
+  (optional, https) receives one alert per failure kind per hour, authorized
+  by the env var named in `guest_mode.mail.alert_secret_env`.
+- **Rollback.** Set `auth.app_signin.enabled: false` and restart: a correct
+  password goes back to `303 /login` (0.12.2 behavior), and `/entry/code`,
+  `/logout` and `/password` are not served.
+- **Metrics.** `/owner/metrics` adds `signin_codes_sent`, `sessions_started`,
+  `sessions_ended`, `guest_busy` and `delivery_alerts`. No log line contains
+  a code, a session id or a password.
+
 ## Guest data deletion (`/delete`)
 
 A guest requests deletion at `/delete`: the lens mails a fresh single-use
