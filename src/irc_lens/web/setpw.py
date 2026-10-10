@@ -126,7 +126,10 @@ def _page(step: str, *, status: int = 200, token: str = "", error: str = ""):
     )
     resp = web.Response(text=html, content_type="text/html", status=status)
     resp.headers["Cache-Control"] = "no-store"
-    resp.headers["Referrer-Policy"] = "no-referrer"
+    # same-origin, not no-referrer: a browser sends ``Origin: null`` on a
+    # form POST from a no-referrer page, which the CSRF floor refuses. The
+    # token still never leaves the origin in a Referer header.
+    resp.headers["Referrer-Policy"] = "same-origin"
     resp[ENTRY_PAGE_MARKER] = True
     return resp
 

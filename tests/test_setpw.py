@@ -259,7 +259,11 @@ async def test_get_link_twice_leaves_token_usable(env: Env) -> None:
         html = await r.text()
         assert 'name="password"' in html and 'name="confirm"' in html
         assert 'minlength="12"' in html
-        assert 'content="no-referrer"' in html
+        # Never no-referrer: browsers then send Origin: null on the form
+        # POST and the CSRF floor refuses it (found in the browser pass).
+        assert 'content="same-origin"' in html
+        assert 'no-referrer' not in html
+        assert r.headers["Referrer-Policy"] == "same-origin"
     assert env.store.peek_token(token, purpose="setpw") == ALICE
     r = await env.submit(token, GOOD_PW)
     assert r.status == 200
@@ -525,3 +529,12 @@ def test_config_base_url_accepted(tmp_path, url) -> None:
 def test_config_base_url_rejected(tmp_path, url) -> None:
     with pytest.raises(AfiError, match="auth.app_signin.base_url"):
         _load(tmp_path, f"    base_url: {url}")
+
+
+async def test_setpw_pages_never_send_no_referrer(env):
+    """Regression: the request form must POST with a real Origin in browsers."""
+    for path in ("/password",):
+        r = await env.client.get(path)
+        html = await r.text()
+        assert r.headers["Referrer-Policy"] == "same-origin"
+        assert "no-referrer" not in html
