@@ -110,7 +110,8 @@ def test_resend_request_sends_explicit_user_agent():
     # code mail failed live until the request named itself.
     req = mail.ResendAdapter("g@culture.dev", "K").build_request("k", "t@x.y", "s", "b")
     ua = req.get_header("User-agent")
-    assert ua and ua.startswith("irc-lens/")
+    assert ua is not None
+    assert ua.startswith("irc-lens/")
     assert "python-urllib" not in ua.lower()
 
 
