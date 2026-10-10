@@ -29,6 +29,11 @@ _COUNTERS = (
     "rate_limited_429",
     "failed_sign_ins",
     "agent_errors",
+    "signin_codes_sent",
+    "sessions_started",
+    "sessions_ended",
+    "guest_busy",
+    "delivery_alerts",
 )
 
 
@@ -56,6 +61,21 @@ class Metrics:
     def agent_error(self) -> None:
         self._bump("agent_errors")
 
+    def signin_code_sent(self) -> None:
+        self._bump("signin_codes_sent")
+
+    def session_started(self) -> None:
+        self._bump("sessions_started")
+
+    def session_ended(self) -> None:
+        self._bump("sessions_ended")
+
+    def guest_busy(self) -> None:
+        self._bump("guest_busy")
+
+    def delivery_alert(self) -> None:
+        self._bump("delivery_alerts")
+
     def session_opened(self) -> None:
         with self._lock:
             self._active += 1
@@ -73,6 +93,11 @@ class Metrics:
                 "rate_limited_429": c["rate_limited_429"],
                 "failed_sign_ins": c["failed_sign_ins"],
                 "agent_errors": c["agent_errors"],
+                "signin_codes_sent": c["signin_codes_sent"],
+                "sessions_started": c["sessions_started"],
+                "sessions_ended": c["sessions_ended"],
+                "guest_busy": c["guest_busy"],
+                "delivery_alerts": c["delivery_alerts"],
             }
 
 
