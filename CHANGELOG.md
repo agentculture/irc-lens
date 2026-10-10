@@ -22,6 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   password submissions only, and any number of wrong code entries leaves the
   right code working. Blocked password attempts still look exactly like
   unblocked ones.
+- **Only wrong passwords count** (owner decision c42, deviation d8, from
+  review of this fix). A correct password is taken back from the per-IP
+  limit and the per-email budget once checked, so several new browsers on
+  one home IP no longer lock each other out at the password step. The count
+  is never visible, so this reveals nothing; brute force stays fully
+  limited, and a blocked attempt (never checked) is not refunded.
 
 ## [0.13.0] - 2026-10-10
 

@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-10-10T14:30:58Z",
-  "updated": "2026-10-10T20:25:02Z",
+  "updated": "2026-10-10T20:44:18Z",
   "claims": [
     {
       "id": "c1",
@@ -658,7 +658,7 @@
     {
       "id": "c38",
       "kind": "requirement",
-      "text": "Untrusted-browser budget per email counts password submissions only: 3 per 15 minutes; after it is first exhausted the email is strict at 2 per 30 minutes until 24 hours pass with no blocked attempt; untrusted browsers are also limited per IP to 3 password submissions per 15 minutes. Code entries are never limited or counted (c41)",
+      "text": "Untrusted-browser budget per email counts wrong password submissions only: 3 per 15 minutes; after it is first exhausted the email is strict at 2 per 30 minutes until 24 hours pass with no blocked attempt; untrusted browsers are also limited per IP to 3 wrong password submissions per 15 minutes. Correct passwords (c42) and code entries (c41) are never counted",
       "origin": "llm",
       "status": "proposed",
       "honesty_conditions": [
@@ -671,6 +671,12 @@
         {
           "id": "h29",
           "text": "the 4th untrusted password submission within 15 minutes is blocked silently (byte-identical response, no code mail); after exhaustion only 2 per 30 minutes pass; 24 quiet hours restore 3 per 15 minutes; any number of wrong code entries, from any IP, leaves the right code working and uses no budget",
+          "status": "proposed",
+          "instruction": ""
+        },
+        {
+          "id": "h30",
+          "text": "the 4th wrong untrusted password submission within 15 minutes blocks the next attempt silently (byte-identical response, no code mail); after exhaustion only 2 wrong per 30 minutes are allowed; 24 quiet hours restore 3 per 15 minutes; any number of correct passwords or code entries, from one IP or many, uses no budget",
           "status": "proposed",
           "instruction": ""
         }
@@ -688,6 +694,11 @@
           "text": "Untrusted-browser budget per email counts password submissions and code entries together: 3 per 15 minutes; after it is first exhausted the email is strict at 2 per 30 minutes until 24 hours pass with no blocked attempt; untrusted browsers are also limited per IP to 3 attempts per 15 minutes (password and code entry)",
           "kind": "requirement",
           "reason": "owner decision c41 after go-live (deviation d7): code entries count toward nothing"
+        },
+        {
+          "text": "Untrusted-browser budget per email counts password submissions only: 3 per 15 minutes; after it is first exhausted the email is strict at 2 per 30 minutes until 24 hours pass with no blocked attempt; untrusted browsers are also limited per IP to 3 password submissions per 15 minutes. Code entries are never limited or counted (c41)",
+          "kind": "requirement",
+          "reason": "owner decision c42 (deviation d8): only wrong passwords count"
         }
       ]
     },
@@ -719,6 +730,18 @@
       "id": "c41",
       "kind": "decision",
       "text": "Owner (2026-10-10, after go-live): code entries count toward nothing \u2014 not the per-IP limit, not the per-email budget, and no cap on code entries; only password submissions count. A code is 256 random bits bound to the browser that entered the right password, so guessing it needs brute force the password limits already prevent. Blocked password attempts still look exactly like unblocked ones.",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c42",
+      "kind": "decision",
+      "text": "Owner (2026-10-10, review of #73): only WRONG password submissions count toward the per-IP limit and the per-email untrusted budget; a correct password is not counted (the count is never visible, so this reveals nothing, and a correct password still needs the emailed code). Brute force -- a run of wrong guesses -- stays fully limited.",
       "origin": "user",
       "status": "confirmed",
       "honesty_conditions": [],

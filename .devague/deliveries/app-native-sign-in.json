@@ -2,7 +2,7 @@
   "plan_slug": "app-native-sign-in",
   "schema_version": 2,
   "created": "2026-10-10T15:04:29Z",
-  "updated": "2026-10-10T20:21:11Z",
+  "updated": "2026-10-10T20:40:17Z",
   "deviations": [
     {
       "id": "d1",
@@ -95,6 +95,19 @@
       "status": "approved",
       "classification": null,
       "seq": 7
+    },
+    {
+      "id": "d8",
+      "what": "correct password submissions are refunded from the per-IP limit and the per-email untrusted budget; only wrong ones count (amends c38)",
+      "task_ref": "t8",
+      "reason": "review of #73 (finding 2): several new browsers on one home IP could still silently lock out the owner at the password step",
+      "affects": [
+        "c38"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": null,
+      "seq": 8
     }
   ],
   "evidence": [],

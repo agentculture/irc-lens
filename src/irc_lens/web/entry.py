@@ -61,7 +61,7 @@ from argon2.exceptions import InvalidHashError, VerificationError
 
 from irc_lens import legal, metrics
 from irc_lens.config import LensConfig, _default_guest_store_path
-from irc_lens.guest_store import GuestStore
+from irc_lens.guest_store import SIGNIN_BUDGET_KIND, GuestStore
 from irc_lens.alerts import Alerter, make_alerter
 from irc_lens.mail import (
     PURPOSE_SIGNIN,
@@ -431,6 +431,22 @@ def _signin_blocked(store: GuestStore, request: web.Request, email: str) -> bool
     return ip_limited or not store.signin_budget_take(email)
 
 
+def _refund_correct_password(
+    store: GuestStore, request: web.Request, email: str
+) -> None:
+    """A correct password does not count (c42): take back what was counted.
+
+    Called only for a checked (so not blocked) submission whose password
+    was right. :func:`_signin_blocked` counted it per IP and against the
+    email's budget unless the browser is trusted; brute force -- a run of
+    wrong guesses -- stays fully limited.
+    """
+    if store.is_trusted_device(app_session.read_device_cookie(request), email):
+        return
+    store.unrecord_attempt(SIGNIN_IP_KIND, f"i:{client_ip(request)}")
+    store.unrecord_attempt(SIGNIN_BUDGET_KIND, f"e:{email}")
+
+
 async def _pad(started: float, floor: float) -> None:
     remaining = floor - (time.perf_counter() - started)
     if remaining > 0:
@@ -600,6 +616,7 @@ async def _post_signin_app(request: web.Request) -> web.Response:
         correct = human and pw_ok
     pending = secrets.token_urlsafe(32)
     if correct:
+        _refund_correct_password(store, request, email)
         code = store.issue_token(email, purpose=SIGNIN_CODE_PURPOSE)
         store.bind_signin(pending, code)
         _schedule_signin_code(state, email, code)

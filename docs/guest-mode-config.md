@@ -123,13 +123,20 @@ user signs in inside the app, without Cloudflare Access:
   unticked keeps its trust. Logout keeps `lens_device`; setting or resetting
   the password (web link or `irc-lens guests passwd`) revokes every trusted
   browser of that email. The sweep drops trust rows after 365 days.
-- **Untrusted browsers** have one budget per email that counts password
-  submissions (`POST /entry/signin`) only: 3 per 15 minutes. Once it is
-  exhausted the email is strict, 2 per 30 minutes, until 24 hours pass with
-  no blocked attempt (table `signin_budget`). Untrusted browsers are also
-  limited per IP to 3 password submissions per 15 minutes (fixed;
+- **Untrusted browsers** have one budget per email that counts **wrong**
+  password submissions (`POST /entry/signin`) only: 3 per 15 minutes. Once
+  it is exhausted the email is strict, 2 per 30 minutes, until 24 hours pass
+  with no blocked attempt (table `signin_budget`). Untrusted browsers are
+  also limited per IP to 3 wrong password submissions per 15 minutes (fixed;
   `rate_limits.password_attempts_per_15min` stays the guest and
   rollback-path limit).
+- **A correct password is not counted.** Each submission is counted before
+  the password is checked (so the limit check stays atomic and a blocked one
+  is never checked), and taken back when it turns out right. The count is
+  never visible, so this reveals nothing, and a correct password still needs
+  the emailed code; brute force, a run of wrong guesses, stays fully
+  limited. Several new browsers on one home IP no longer lock each other
+  out.
 - **Code entries are never limited or counted** (`POST /entry/code`). A code
   is 256 random bits, valid once for 10 minutes, and only in the browser
   that entered the right password, so guessing one is infeasible; limiting

@@ -19,17 +19,22 @@ Covers spec claims:
           (``test_code_screen_has_unchecked_trust_box``,
           ``test_unticked_signin_sets_no_device_and_no_trust_row``,
           ``test_trusted_browser_signing_in_unticked_keeps_trust``).
-* c38/h27 untrusted browsers have one per-email budget counting password
-          submissions only: 3 per 15 minutes; once exhausted the email is
-          strict at 2 per 30 minutes until 24 hours pass with no blocked
-          attempt; blocked attempts are silent and byte-identical; the per-IP
-          limit (3 password submissions per 15 minutes) still applies
-          (``test_fourth_untrusted_password_attempt_blocked_silently``,
+* c38/h27 untrusted browsers have one per-email budget counting wrong
+          password submissions only: 3 per 15 minutes; once exhausted the
+          email is strict at 2 per 30 minutes until 24 hours pass with no
+          blocked attempt; blocked attempts are silent and byte-identical; the
+          per-IP limit (3 wrong password submissions per 15 minutes) still
+          applies (``test_fourth_untrusted_password_attempt_blocked_silently``,
           ``test_strict_mode_two_per_thirty_minutes_after_exhaustion``,
           ``test_24_quiet_hours_restore_normal_budget``,
           ``test_blocked_attempt_restarts_the_24_hours``,
           ``test_per_ip_password_limit_still_applies_to_untrusted``,
-          ``test_per_ip_limit_counts_passwords_only``).
+          ``test_per_ip_limit_counts_wrong_passwords_only``).
+* c42     a correct password is not counted, per IP or per email; a blocked
+          one was never checked and is not refunded (owner decision, d8)
+          (``test_correct_passwords_are_not_counted``,
+          ``test_correct_passwords_do_not_use_the_email_budget``,
+          ``test_blocked_correct_password_is_not_refunded``).
 * c41     code entries count toward nothing -- no per-IP limit, no budget,
           no cap (owner decision after go-live, deviation d7)
           (``test_code_still_works_after_the_password_budget_is_used``,
@@ -371,11 +376,9 @@ async def test_garbage_device_cookie_is_untrusted(env: TEnv) -> None:
 async def test_fourth_untrusted_password_attempt_blocked_silently(env: TEnv) -> None:
     env.state.signin_floor_s = entry.SIGNIN_FLOOR_S  # the real floor
     shapes = set()
-    for i in range(3):
-        r = await env.pw(ALICE, PW, _ip(i))
+    for i in range(3):  # wrong passwords: these count (c42)
+        r = await env.pw(ALICE, WRONG_PW, _ip(i))
         shapes.add(_shape(r, await r.text(), ALICE))
-    await env.drain()
-    assert len(env.mail.sent) == 3
     t0 = time.perf_counter()
     r = await env.pw(ALICE, PW, _ip(3))  # 4th within 15 minutes, right password
     body = await r.text()
@@ -383,7 +386,32 @@ async def test_fourth_untrusted_password_attempt_blocked_silently(env: TEnv) -> 
     shapes.add(_shape(r, body, ALICE))
     assert len(shapes) == 1, "a blocked attempt looks exactly like an unblocked one"
     await env.drain()
-    assert len(env.mail.sent) == 3, "no code mail when blocked"
+    assert env.mail.sent == [], "no code mail when blocked"
+
+
+async def test_correct_passwords_are_not_counted(env: TEnv) -> None:
+    """c42/d8: only wrong passwords count, per IP and per email."""
+    ip = "203.0.113.60"
+    for _ in range(6):  # six new browsers on one IP, right password each
+        assert await env.mails_after(env.pw(ALICE, PW, ip)) == 1
+    for _ in range(3):  # three wrong ones use the IP's room
+        await env.pw(ALICE, WRONG_PW, ip)
+    assert await env.mails_after(env.pw(ALICE, PW, ip)) == 0  # now blocked
+
+
+async def test_correct_passwords_do_not_use_the_email_budget(env: TEnv) -> None:
+    await _wrong(env, 2, 0)  # 2 of 3 counted
+    for i in range(5):  # right passwords from fresh IPs: not counted
+        assert await _right_mails(env, 10 + i) is True
+    await _wrong(env, 1, 20)  # 3rd counted: full
+    assert await _right_mails(env, 21) is False
+
+
+async def test_blocked_correct_password_is_not_refunded(env: TEnv) -> None:
+    """A blocked attempt was never checked, so nothing is taken back."""
+    await _exhaust(env)  # 3 wrong + 1 blocked: strict mode
+    for i in range(5):
+        assert await env.mails_after(env.pw(ALICE, PW, _ip(40 + i))) == 0
 
 
 async def test_code_still_works_after_the_password_budget_is_used(env: TEnv) -> None:
@@ -399,16 +427,17 @@ async def test_code_still_works_after_the_password_budget_is_used(env: TEnv) -> 
 
 
 async def test_code_entries_do_not_use_the_email_budget(env: TEnv) -> None:
-    r = await env.pw(ALICE, WRONG_PW, _ip(0))  # password 1
+    r = await env.pw(ALICE, WRONG_PW, _ip(0))  # wrong password: counted (1)
     for i in range(5):  # wrong codes: not counted
         await env.enter(ALICE, "nope", pending_of(r), _ip(10 + i))
-    r = await env.pw(ALICE, PW, _ip(1))  # password 2, mails
+    r = await env.pw(ALICE, PW, _ip(1))  # right password: not counted (c42)
     await env.drain()
     ok = await env.enter(ALICE, env.last_code(), pending_of(r), _ip(2))
     assert ok.status == 303
     await env.drain()  # the new-browser notice (c40)
-    assert await env.mails_after(env.pw(ALICE, PW, _ip(3))) == 1  # password 3
-    assert await env.mails_after(env.pw(ALICE, PW, _ip(4))) == 0  # 4th: blocked
+    for i in (3, 4):  # wrong passwords 2 and 3
+        await env.pw(ALICE, WRONG_PW, _ip(i))
+    assert await env.mails_after(env.pw(ALICE, PW, _ip(5))) == 0  # budget full
 
 
 async def test_second_browser_on_the_same_ip_signs_in(env: TEnv) -> None:
@@ -427,43 +456,57 @@ async def test_second_browser_on_the_same_ip_signs_in(env: TEnv) -> None:
     await env.drain()  # the new-browser notice (c40)
 
 
-async def _passes(env: TEnv, n: int, start: int) -> list[bool]:
-    """*n* right-password attempts from fresh IPs; which ones mailed a code."""
-    out = []
+async def _wrong(env: TEnv, n: int, start: int) -> None:
+    """*n* wrong-password attempts from fresh IPs (these count, c42)."""
     for i in range(start, start + n):
-        out.append(await env.mails_after(env.pw(ALICE, PW, _ip(i))) == 1)
-    return out
+        await env.pw(ALICE, WRONG_PW, _ip(i))
+
+
+async def _right_mails(env: TEnv, i: int) -> bool:
+    """One right-password attempt: True if it passed (a code was mailed).
+
+    A passing right password is not counted (c42); a blocked one restarts
+    the strict period like any blocked attempt.
+    """
+    return await env.mails_after(env.pw(ALICE, PW, _ip(i))) == 1
 
 
 async def test_strict_mode_two_per_thirty_minutes_after_exhaustion(
     env: TEnv,
 ) -> None:
-    assert await _passes(env, 4, 0) == [True, True, True, False]
-    # 16 minutes on, the normal rule would allow 3 again; strict allows none
-    # (3 passed within the last 30 minutes).
+    await _wrong(env, 3, 0)
+    assert await _right_mails(env, 3) is False  # 4th: blocked -> strict
+    # 16 minutes on, the normal rule would have room; strict has none (3
+    # counted within the last 30 minutes).
     env.clock["t"] = T0 + 16 * MIN
-    assert await _passes(env, 1, 10) == [False]
-    # 31 minutes after the last pass: exactly 2 pass.
+    assert await _right_mails(env, 10) is False
+    # 31 minutes after the last block: strict allows 2 per 30 minutes.
     env.clock["t"] = T0 + 16 * MIN + 31 * MIN
-    assert await _passes(env, 3, 20) == [True, True, False]
-    env.clock["t"] += 31 * MIN
-    assert await _passes(env, 3, 30) == [True, True, False]
+    await _wrong(env, 1, 20)
+    assert await _right_mails(env, 21) is True  # 1 counted, room for one more
+    await _wrong(env, 1, 22)
+    assert await _right_mails(env, 23) is False  # 2 counted: strict is full
 
 
 async def test_24_quiet_hours_restore_normal_budget(env: TEnv) -> None:
-    assert await _passes(env, 4, 0) == [True, True, True, False]
+    await _exhaust(env)
     env.clock["t"] = T0 + 24 * HOUR + 1
-    assert await _passes(env, 4, 10) == [True, True, True, False]
+    await _wrong(env, 2, 10)
+    assert await _right_mails(env, 12) is True  # normal 3: room left
+    await _wrong(env, 1, 13)
+    assert await _right_mails(env, 14) is False  # 3 counted: full
 
 
 async def test_blocked_attempt_restarts_the_24_hours(env: TEnv) -> None:
-    assert await _passes(env, 4, 0) == [True, True, True, False]
+    await _exhaust(env)  # strict from T0
     env.clock["t"] = T0 + 23 * HOUR
-    assert await _passes(env, 3, 10) == [True, True, False]  # strict, blocks
+    await _wrong(env, 3, 10)  # 2 counted, the 3rd blocked: restarts at 23 h
     env.clock["t"] = T0 + 24 * HOUR + 1  # only 1 h since the last block
-    assert await _passes(env, 3, 20) == [True, True, False]
+    await _wrong(env, 2, 20)
+    assert await _right_mails(env, 22) is False  # still strict (2 per 30 min)
     env.clock["t"] = T0 + 48 * HOUR + 2  # 24 h after the last block
-    assert await _passes(env, 4, 30) == [True, True, True, False]
+    await _wrong(env, 2, 30)
+    assert await _right_mails(env, 32) is True  # normal again
 
 
 async def test_budget_is_per_email(env: TEnv) -> None:
@@ -483,17 +526,18 @@ async def test_per_ip_password_limit_still_applies_to_untrusted(env: TEnv) -> No
     assert await env.mails_after(env.pw(ALICE, PW, ip, device)) == 1
 
 
-async def test_per_ip_limit_counts_passwords_only(env: TEnv) -> None:
+async def test_per_ip_limit_counts_wrong_passwords_only(env: TEnv) -> None:
     ip = "198.51.100.62"
-    r = await env.pw(ALICE, PW, ip)  # 1 (password)
+    r = await env.pw(ALICE, PW, ip)  # right password: not counted (c42)
     await env.drain()
     pending, code = pending_of(r), env.last_code()
-    for i in range(5):  # code entries: not counted
+    for i in range(5):  # code entries: not counted (c41)
         await env.enter(f"z{i}@example.org", "nope", pending, ip)
     assert (await env.enter(ALICE, code, pending, ip)).status == 303
     await env.drain()  # the new-browser notice (c40)
-    await env.pw(UNKNOWN, WRONG_PW, ip)  # 2
-    await env.pw(BOB, WRONG_PW, ip)  # 3
+    await env.pw(UNKNOWN, WRONG_PW, ip)  # 1
+    await env.pw(BOB, WRONG_PW, ip)  # 2
+    await env.pw(UNKNOWN, WRONG_PW, ip)  # 3
     assert await env.mails_after(env.pw(BOB, BOB_PW, ip)) == 0  # 4th: blocked
     # 15 minutes on, the IP has room again.
     env.clock["t"] = T0 + 15 * MIN + 1

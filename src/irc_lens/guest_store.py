@@ -44,8 +44,9 @@ ATTEMPT_RETENTION_S = _DAY_S
 BAN_RETENTION_S = 365 * _DAY_S
 #: Trusted browsers (``lens_device``) last one year from the trusting sign-in.
 TRUSTED_DEVICE_S = 365 * _DAY_S
-#: Untrusted sign-in budget per email (r6/c38): password submissions only
-#: (code entries are not counted, c41). Normal: 3 per 15 minutes. Once it
+#: Untrusted sign-in budget per email (r6/c38): wrong password submissions
+#: only (code entries, c41, and correct passwords, c42, are not counted).
+#: Normal: 3 per 15 minutes. Once it
 #: has been exhausted the email is strict -- 2 per 30 minutes -- until 24
 #: hours pass with no blocked attempt.
 SIGNIN_BUDGET = (3, 900)
@@ -505,6 +506,19 @@ class GuestStore:
             (kind, key, self._now() - int(window)),
         )
         return rows[0][0]
+
+    def unrecord_attempt(self, kind: str, key: str) -> None:
+        """Take back the most recent *kind*/*key* attempt (one row).
+
+        Used when an attempt turns out not to count: a correct password on
+        app sign-in (c42). Counting first and refunding after keeps the
+        limit check atomic.
+        """
+        self._run(
+            "DELETE FROM attempts WHERE rowid = (SELECT MAX(rowid) FROM attempts "
+            "WHERE kind=? AND key=?)",
+            (kind, key),
+        )
 
     def rate_limited(self, kind: str, key: str, *, limit: int, window: int) -> bool:
         return self.count_attempts(kind, key, window) >= limit
