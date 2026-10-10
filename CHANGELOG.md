@@ -15,6 +15,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or Sonar) before it pushes a fix. irc-lens still declares no mesh agent.
   No version bump: nothing shipped changes.
 
+## [0.12.0] - 2026-10-10
+
+### Changed
+
+- **Guest deletion keeps nothing** (owner deviation d9). The anonymized
+  Q&A corpus is gone: deletion no longer copies anything, `keep_corpus`,
+  `list_corpus` and `corpus.anonymized_pairs` are removed, the export has no
+  `anonymous`/`qa` rows, and an existing `corpus` table is dropped on
+  startup.
+- **The deletion log stores only a hash**: `deletions.email` holds
+  `sha256(lower(email))` (`guest_store.email_hash`); existing plaintext rows
+  are hashed on startup.
+- **The redacted export includes only opted-in guests**: a guest's inputs
+  are exported only when their most recent consent row has `train = 1`.
+
+### Added
+
+- **Separate, optional training consent** on the guest step: "Use my
+  conversations to improve culture.dev's models (optional)", unchecked by
+  default and not required. Stored as `consents.train` (migrated with
+  `ALTER TABLE` on existing stores); `record_consent(..., train=)`,
+  `GuestStore.training_opt_in`, `training_emails` and `set_training` (for
+  owner-applied withdrawal).
+- **Retention sweep** (`GuestStore.sweep`, `web.retention`): at startup and
+  hourly while guest mode is on, guests inactive for
+  `guest_mode.retention_days` (new, default 90) are erased through the same
+  path as a self-service deletion (`deletion.erase_guest_data`: store rows,
+  uploads, flag-log lines); tokens and rate-limit attempts older than a day
+  and bans older than 365 days expire.
+
 ## [0.11.0] - 2026-10-09
 
 ### Added
