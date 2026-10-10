@@ -190,6 +190,22 @@ html, body {
   font-size: 0.875rem;
 }
 
+.entry-warning {
+  margin: 0;
+  padding: 10px 12px;
+  border-left: 3px solid var(--entry-error);
+  background: var(--entry-bg);
+  color: var(--entry-soft);
+  font-size: 0.875rem;
+  line-height: 1.5;
+}
+
+.entry-done {
+  margin: 0;
+  color: var(--entry-fg);
+  line-height: 1.5;
+}
+
 .entry-actions {
   display: flex;
   gap: 12px;
@@ -205,6 +221,13 @@ html, body {
   font: inherit;
   font-weight: 600;
   cursor: pointer;
+}
+
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
 
 .btn-primary {

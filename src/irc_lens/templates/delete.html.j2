@@ -31,12 +31,16 @@
           {% if error %}
           <p class="entry-error" role="alert">{{ error }}</p>
           {% endif %}
+          <p class="entry-warning" id="del-warning">This permanently deletes your guest account, your conversations and your room. It can't be undone, and we keep no copy.</p>
           <div class="entry-actions">
-            <button type="submit" class="btn btn-primary">Delete my data</button>
+            <button type="submit" class="btn btn-primary" aria-describedby="del-warning">Delete my data</button>
           </div>
         </form>
         {% else %}
-        <p>Done.</p>
+        <p class="entry-done" role="status">Your data has been deleted. You can start fresh as a guest any time.</p>
+        <div class="entry-actions">
+          <a href="/" class="btn btn-primary">Back to chat.culture.dev</a>
+        </div>
         {% endif %}
       </section>
     </main>

@@ -40,6 +40,11 @@ RESEND_API_URL = "https://api.resend.com/emails"
 USER_AGENT = f"irc-lens/{__version__}"
 
 _SUBJECT = "Your chat.culture.dev code"
+_DELETE_SUBJECT = "Your chat.culture.dev deletion code"
+
+#: ``purpose`` values accepted by :func:`render_token_email`.
+PURPOSE_GUEST = "guest"
+PURPOSE_DELETE = "delete"
 
 
 def _human_duration(seconds: int) -> str:
@@ -51,15 +56,24 @@ def _human_duration(seconds: int) -> str:
     return f"{n} {unit}{'' if n == 1 else 's'}"
 
 
-def render_token_email(token: str, ttl_s: int = DEFAULT_TOKEN_TTL) -> tuple[str, str]:
-    """Render the single fixed guest-token template.
+def render_token_email(
+    token: str, ttl_s: int = DEFAULT_TOKEN_TTL, *, purpose: str = PURPOSE_GUEST
+) -> tuple[str, str]:
+    """Render the fixed token template for *purpose* (guest seat or deletion).
 
-    Returns ``(subject, text_body)``. The body shape is identical for
-    every token and every address; only the code line varies. *ttl_s* is
-    the real lifetime the store issues tokens with (the same for every
-    address). The code itself is embedded in the body (it *is* the credential the guest
-    types in) but is never written to any log by this module.
+    Returns ``(subject, text_body)``. For a given *purpose* the body shape is
+    identical for every token and every address; only the code line varies.
+    *ttl_s* is the real lifetime the store issues tokens with (the same for
+    every address). The code itself is embedded in the body (it *is* the
+    credential the guest types in) but is never written to any log by this
+    module.
     """
+    if purpose not in (PURPOSE_GUEST, PURPOSE_DELETE):
+        raise AfiError(
+            code=EXIT_ENV_ERROR,
+            message=f"unknown token email purpose: {purpose!r}",
+            remediation="use 'guest' or 'delete'",
+        )
     if not isinstance(token, str) or not token:
         raise AfiError(
             code=EXIT_ENV_ERROR,
@@ -77,7 +91,25 @@ def render_token_email(token: str, ttl_s: int = DEFAULT_TOKEN_TTL) -> tuple[str,
         "— nothing else needs doing.\n\n"
         "The Culture team\n"
     )
+    if purpose == PURPOSE_DELETE:
+        return _DELETE_SUBJECT, _delete_body(token, ttl_s)
     return _SUBJECT, body
+
+
+def _delete_body(token: str, ttl_s: int) -> str:
+    return (
+        "Hello,\n\n"
+        "You asked to delete your guest data on chat.culture.dev. Enter the "
+        "code below in the Code field on the deletion page to confirm:\n\n"
+        f"    {token}\n\n"
+        "Deleting is permanent: your guest account, your conversations and "
+        "your room are erased and can't be recovered.\n\n"
+        f"The code works once and expires in {_human_duration(ttl_s)}; "
+        "after that you can request a fresh one from the same page.\n\n"
+        "If you did not ask to delete anything, you can ignore this email "
+        "— nothing will be deleted.\n\n"
+        "The Culture team\n"
+    )
 
 
 @runtime_checkable

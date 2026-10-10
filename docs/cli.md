@@ -401,3 +401,15 @@ a guest), and on confirmation erases the guest's profile, messages,
 consents, flags, uploads (the lens media directory filed under their
 email) and cookie, and closes their sandbox session. Only the deletion
 record remains. Bans are intentionally kept.
+
+The deletion email has its own subject and text ("Your chat.culture.dev
+deletion code"), identical for every address, and says that deleting is
+permanent. The code step warns, before the **Delete my data** button, that
+deletion can't be undone and nothing is kept; the done page says the data
+was deleted.
+
+From the guest chat, `/delete` is a page link, not an IRC command: it is
+listed in the guest palette and help pane, and typing it in the message box
+redirects to the deletion page (`HX-Redirect: /delete`) instead of the
+"Not in guest view" refusal. The approved user's Guest view does not offer
+it.
