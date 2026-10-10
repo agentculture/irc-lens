@@ -14,8 +14,8 @@ guest_mode:
     port: 6668
     room_prefix: "#g-"      # private room per guest; must match sbx-ask
     flag_log: ~/.culture/sandbox/flags.jsonl  # deletion purges it
-  idle_close_s: 900         # close a session with no open tab
-  max_guests: 1             # concurrent guest sessions allowed
+  idle_close_s: 900         # sign off a guest after this long with no action
+  max_guests: 1             # concurrent guests allowed (Guest view never counts)
   retention_days: 90        # erase guests inactive this many days
   store_path: ~/.local/share/irc-lens/guests.db   # default: $XDG_DATA_HOME/irc-lens/guests.db
   legal_version_url: https://culture.dev/legal/version.json
@@ -199,7 +199,24 @@ unchanged.
 Approved users' sandbox nicks are `sbx-op-<name>` and guest nicknames may only
 use `[a-z0-9_]`, so a guest can never take an approved user's nick or room.
 
-A sandbox session with no open browser tab is closed after `idle_close_s`.
+A guest is signed off after `idle_close_s` with no message or command sent,
+even with the tab still open (page loads, event streams and presence polls are
+not actions). An approved user's Guest view is closed after `idle_close_s`
+with no open browser tab.
+
+### Guest limit
+
+At most `max_guests` guests are active at once: a guest with an open sandbox
+session, or one whose code was just verified (the slot is held for 120 s until
+the browser opens the chat). While the sandbox is full, a visitor who picks
+Guest mode sees `The sandbox is busy. Try again in a few minutes.` and no code
+is emailed (the `guest_busy` counter counts these pages). Code verification
+re-checks the limit under a lock, so two guests verifying at once cannot both
+get in; the refused one sees the busy page and their code is not used up. A
+slot frees when the guest deletes their data or is signed off for idleness.
+A signed-off guest's cookie still works: they rejoin their room if a slot is
+free, otherwise they see the busy page; no new code is sent. An approved
+user's Guest view never counts toward the limit and is never refused.
 
 ### Guest chat records and deletion
 

@@ -73,6 +73,7 @@ from irc_lens.mail import (
 from irc_lens.web import app_session, csrf
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.render import render_fragment, static_url
+from irc_lens.web.sessions import GUEST_PRINCIPAL_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +102,8 @@ ERR_NICK_INVALID = "Invalid nickname"
 ERR_CONSENT = "Consent required"
 ERR_BOT = "Verification failed"
 ERR_LATER = "Try again later"
+#: Shown while guest_mode.max_guests guests are active (c24); exact wording.
+MSG_BUSY = "The sandbox is busy. Try again in a few minutes."
 
 TERMS_URL = "https://culture.dev/terms"
 PRIVACY_URL = "https://culture.dev/privacy"
@@ -352,6 +355,7 @@ def _page(
         site_key=site_key,
         turnstile_script=TURNSTILE_SCRIPT_URL,
         turnstile_field=TURNSTILE_FIELD,
+        busy=MSG_BUSY,
         nick_prefix=NICK_PREFIX,
         nick_max=NICK_MAX,
         terms_url=TERMS_URL,
@@ -375,6 +379,25 @@ def _see_other(location: str) -> web.Response:
     return web.Response(
         status=303, headers={"Location": location, "Cache-Control": "no-store"}
     )
+
+
+def busy_page(state: EntryState) -> web.Response:
+    """The guest-limit page (c24): one fixed message, nothing else.
+
+    Also served on ``/`` to a returning guest whose slot was taken (c35).
+    """
+    metrics.get_metrics().guest_busy()
+    return _page(state, "busy")
+
+
+def _guests_full(request: web.Request, email: str) -> bool:
+    """True iff max_guests guests are active and *email* is not one of them.
+
+    Only real guests count; an approved user's Guest view never does.
+    """
+    registry = request.app["registry"]
+    limit = request.app["config"].guest_max_guests
+    return not registry.guest_slot_free(GUEST_PRINCIPAL_PREFIX + email, limit)
 
 
 async def _pad(started: float, floor: float) -> None:
@@ -595,10 +618,13 @@ async def post_code(request: web.Request) -> web.Response:
 
 @allows_anonymous
 async def post_guest(request: web.Request) -> web.Response:
-    """Guest mode button: nickname + consent."""
+    """Guest mode button: nickname + consent (or the busy page, c24)."""
     state = _state(request)
     form = await request.post()
-    return _page(state, "guest", email=_norm_email(form.get("email")))
+    email = _norm_email(form.get("email"))
+    if _guests_full(request, email):
+        return busy_page(state)
+    return _page(state, "guest", email=email)
 
 
 @allows_anonymous
@@ -611,6 +637,9 @@ async def post_guest_start(request: web.Request) -> web.Response:
     raw_nick = str(form.get("nickname") or "")
     ip = client_ip(request)
     store = state.get_store()
+    # c24: never email a code while the sandbox is full.
+    if _guests_full(request, email):
+        return busy_page(state)
 
     def again(error: str) -> web.Response:
         return _page(
@@ -709,8 +738,20 @@ async def post_verify(request: web.Request) -> web.Response:
             error=ERR_LATER,
             train=_train(form),
         )
-    if not store.verify_token(email, code, purpose=TOKEN_PURPOSE):
-        return wrong(401)
+    # c24/h16: re-check the guest limit and claim the slot atomically, so
+    # two simultaneous verifies can never both get in. The code is checked
+    # inside the lock *after* the limit, so a refused guest's code is not
+    # consumed (they may retry it while it is still valid). The slot is
+    # held as a short reservation until this browser's GET / opens the
+    # session.
+    registry = request.app["registry"]
+    principal = GUEST_PRINCIPAL_PREFIX + email
+    async with registry.guest_lock:
+        if not registry.guest_slot_free(principal, cfg.guest_max_guests):
+            return busy_page(state)
+        if not store.verify_token(email, code, purpose=TOKEN_PURPOSE):
+            return wrong(401)
+        registry.try_reserve_guest(principal, cfg.guest_max_guests)
 
     store.record_guest(email, NICK_PREFIX + nick, ip)
     store.record_consent(

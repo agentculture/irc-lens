@@ -421,6 +421,8 @@ async def test_refused_commands_count_toward_the_limit(env: Env, limit3) -> None
 
 
 async def test_rate_limit_is_per_guest_and_per_ip(env: Env, limit3) -> None:
+    # Two concurrent guests need two slots (guest_mode.max_guests, t9).
+    object.__setattr__(env.app["config"], "guest_max_guests", 2)
     env.add_guest()
     env.add_guest("other@example.org", "sbx-other")
     a = {**env.guest_headers(), "CF-Connecting-IP": "203.0.113.7"}
