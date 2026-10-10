@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-10-10T14:30:58Z",
-  "updated": "2026-10-10T15:07:16Z",
+  "updated": "2026-10-10T15:46:18Z",
   "claims": [
     {
       "id": "c1",
@@ -765,6 +765,28 @@
       "skipped_check": "red run; post-format full suite; real HTTP poster test",
       "refs": [
         "t7 src/irc_lens/alerts.py"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l6",
+      "code": "control-absent",
+      "what": "t9 wrote the registry changes before the tests (then stashed and ran tests red: 11 failed)",
+      "skipped_check": "tests-first ordering",
+      "refs": [
+        "t9 src/irc_lens/web/sessions.py"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l7",
+      "code": "grader-unverified",
+      "what": "t6's tests used aiohttp's test client, which doesn't apply browser referrer policy, and even asserted no-referrer, so a set-password form that every real browser rejects with 403 passed CI",
+      "skipped_check": "real-browser POST of the set-password form",
+      "refs": [
+        "t6 tests/test_setpw.py"
       ],
       "origin": "llm",
       "status": "proposed"

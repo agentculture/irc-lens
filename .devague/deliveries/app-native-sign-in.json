@@ -1,0 +1,64 @@
+{
+  "plan_slug": "app-native-sign-in",
+  "schema_version": 2,
+  "created": "2026-10-10T15:04:29Z",
+  "updated": "2026-10-10T15:41:14Z",
+  "deviations": [
+    {
+      "id": "d1",
+      "what": "t5 also adds a minimal 'Log out' button (form POST /logout) to the approved user's header in templates/index.html.j2",
+      "task_ref": "t5",
+      "reason": "the plan requires POST /logout but names no way to reach it from the UI; without a button logout is unusable",
+      "affects": [
+        "t5"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 1
+    },
+    {
+      "id": "d2",
+      "what": "t6 adds config key auth.app_signin.base_url (falls back to media.public_base_url; set-password routes disabled with a logged error if neither is set) for building set-password links",
+      "task_ref": "t6",
+      "reason": "link host must come from trusted config, never the request Host header (reset-link host injection); the plan named no base-URL source",
+      "affects": [
+        "t6"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 2
+    },
+    {
+      "id": "d3",
+      "what": "t6 adds RedactTokenFilter on the aiohttp.access, irc_lens.web.auth/csrf/routes loggers, rewriting /password/<token> to /password/[redacted]",
+      "task_ref": "t6",
+      "reason": "the token-logging test showed aiohttp's access log and the auth middleware wrote the full set-password token into the journal; c33 forbids codes in logs",
+      "affects": [
+        "t6",
+        "t10"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 3
+    },
+    {
+      "id": "d4",
+      "what": "t9 checks the guest limit before verifying the code, so a guest refused as busy keeps an unused code (the brief accepted a consumed one); a verified slot is reserved for 120 s until the browser opens it",
+      "task_ref": "t9",
+      "reason": "kinder to the refused guest and spends no extra email; reservation closes the check-then-open race",
+      "affects": [
+        "t9"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "classification": "acceptable",
+      "seq": 4
+    }
+  ],
+  "evidence": [],
+  "deltas": [],
+  "supersessions": []
+}

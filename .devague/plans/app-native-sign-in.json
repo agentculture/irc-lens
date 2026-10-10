@@ -5,7 +5,7 @@
   "schema_version": 5,
   "status": "exported",
   "created": "2026-10-10T14:49:26Z",
-  "updated": "2026-10-10T14:54:54Z",
+  "updated": "2026-10-10T15:29:59Z",
   "targets": [
     {
       "id": "c1",
@@ -612,6 +612,22 @@
       "text": "Cloudflare send_email limits/pricing unchecked (frame v4) and Resend quota error shape unknown (frame v3); t7 treats any 429 as quota",
       "kind": "unknown_nonblocking",
       "task_id": "t7",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r5",
+      "text": "Mixed sign-in during the trial: if a user's IRC session was opened via an Access JWT, logging out of an app-session tab does not close it (by design, so the sweep never closes JWT sessions); the logged-out tab's existing event stream keeps receiving until it reloads",
+      "kind": "follow_up",
+      "task_id": "t5",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r6",
+      "text": "Code entry is limited per email (5 per 15 min, c11), so someone who knows only an approved email can burn its code tries and block sign-in for 15 minutes; password checks have no per-email lockout",
+      "kind": "unknown_nonblocking",
+      "task_id": "t8",
       "resolved": false,
       "resolution": ""
     }
