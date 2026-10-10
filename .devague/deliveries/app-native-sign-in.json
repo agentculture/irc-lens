@@ -2,7 +2,7 @@
   "plan_slug": "app-native-sign-in",
   "schema_version": 2,
   "created": "2026-10-10T15:04:29Z",
-  "updated": "2026-10-10T20:40:17Z",
+  "updated": "2026-10-10T21:33:09Z",
   "deviations": [
     {
       "id": "d1",
@@ -108,9 +108,515 @@
       "status": "approved",
       "classification": null,
       "seq": 8
+    },
+    {
+      "id": "d9",
+      "what": "review fixes on #68 changed behavior outside the plan: app sign-in turns itself off (0.12.2 /login path) when guest_mode.mail.provider is none; allowed_emails compared without case on every app path; set-password checks the base URL before issuing a token; 429 alerts say 'quota used up or rate-limited'",
+      "task_ref": "t8",
+      "reason": "owner confirmed the /code-review fixes on #68 ('confirmed as recommended'); filed late at validate-delivery because no record existed",
+      "affects": [],
+      "origin": "llm",
+      "status": "proposed",
+      "classification": null,
+      "seq": 32
     }
   ],
-  "evidence": [],
-  "deltas": [],
+  "evidence": [
+    {
+      "id": "e1",
+      "obligation_ref": "o1",
+      "test_ref": "tests/test_app_signin.py::test_signin_four_cases_identical_and_floored",
+      "behavior_text": "2 test(s) assert it: test_signin_four_cases_identical_and_floored, test_fourth_untrusted_password_attempt_blocked_silently.",
+      "contract_text": "unknown email, wrong password, right password and rate-limited attempts give byte-identical responses apart from the email, each padded to the floor; exactly one code mail only for the right password",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 9
+    },
+    {
+      "id": "e2",
+      "obligation_ref": "o2",
+      "test_ref": "tests/test_app_signin.py::test_correct_password_without_mailbox_never_yields_session",
+      "behavior_text": "1 test(s) assert it: test_correct_password_without_mailbox_never_yields_session.",
+      "contract_text": "a correct password without the emailed code never yields an approved session",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 10
+    },
+    {
+      "id": "e3",
+      "obligation_ref": "o3",
+      "test_ref": "tests/test_app_signin.py::test_code_from_another_browser_fails",
+      "behavior_text": "5 test(s) assert it: test_code_from_another_browser_fails, test_code_is_single_use, test_code_expires_after_ten_minutes, test_wrong_codes_never_lock_out_the_right_one, test_second_browser_on_the_same_ip_signs_in. Literal obligation text also says the 6th try fails even when right: that behavior was deliberately removed by approved deviation d7 (owner c41), filed as a removed delta; the retained behaviors (other browser, reuse, 10 minutes) pass.",
+      "contract_text": "a code fails in another browser, fails on reuse, fails after 10 minutes, and the 6th try in 15 minutes fails even when right",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 11
+    },
+    {
+      "id": "e4",
+      "obligation_ref": "o4",
+      "test_ref": "tests/test_app_session.py::test_db_never_holds_raw_session_id",
+      "behavior_text": "6 test(s) assert it: test_db_never_holds_raw_session_id, test_session_idle_over_7_days_is_anonymous, test_activity_keeps_session_alive_until_30_days, test_logout_deletes_session_clears_cookie_and_redirects, test_email_removed_from_allowlist_is_anonymous_next_request, test_set_password_argon2id_consumes_token_and_ends_sessions.",
+      "contract_text": "the store holds only sha256 of session ids; 7-day idle and 30-day total limits refuse the cookie; logout and password change invalidate it; removal from allowed_emails makes the next request anonymous",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 12
+    },
+    {
+      "id": "e5",
+      "obligation_ref": "o5",
+      "test_ref": "tests/test_mail_signin.py::test_signin_body_says_password_entered_and_how_to_change",
+      "behavior_text": "2 test(s) assert it: test_signin_body_says_password_entered_and_how_to_change, test_signin_identical_across_codes.",
+      "contract_text": "the email states the correct password was entered, says to change it if it wasn't you, and is identical across approved addresses apart from the code",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 13
+    },
+    {
+      "id": "e6",
+      "obligation_ref": "o6",
+      "test_ref": "tests/test_app_signin.py::test_password_attempts_limited_per_ip_without_check",
+      "behavior_text": "5 test(s) assert it: test_password_attempts_limited_per_ip_without_check, test_distributed_attack_blocks_untrusted_but_not_trusted, test_correct_passwords_are_not_counted, test_strict_mode_two_per_thirty_minutes_after_exhaustion, test_trusted_browser_signs_in_after_20_blocked_attempts. Literal obligation text (6th attempt per IP, 5 codes per email) was deliberately replaced by approved deviations d5 (r6 budget) and d8 (owner c42: only wrong passwords count), filed as an amended delta; the tests assert the amended behavior.",
+      "contract_text": "the 6th attempt from one IP in 15 minutes is not checked and shows the same screen; a distributed attack never locks the email out, and codes sent per email are capped at 5 per 15 minutes",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 14
+    },
+    {
+      "id": "e7",
+      "obligation_ref": "o7",
+      "test_ref": "tests/test_setpw.py::test_request_page_identical_for_allowed_and_unknown_email",
+      "behavior_text": "4 test(s) assert it: test_request_page_identical_for_allowed_and_unknown_email, test_set_password_argon2id_consumes_token_and_ends_sessions, test_expired_link_refused_after_30_minutes, test_short_password_refused_and_token_stays_valid.",
+      "contract_text": "the request screen is identical for every address; the link works once, expires in 30 minutes, refuses passwords under 12 characters, and ends the email's sessions",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 15
+    },
+    {
+      "id": "e8",
+      "obligation_ref": "o8",
+      "test_ref": "tests/test_app_signin.py::test_short_legacy_password_still_signs_in",
+      "behavior_text": "1 test(s) assert it: test_short_legacy_password_still_signs_in.",
+      "contract_text": "a stored password shorter than 12 characters still signs in",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 16
+    },
+    {
+      "id": "e9",
+      "obligation_ref": "o9",
+      "test_ref": "tests/test_app_session.py::test_access_jwt_alone_still_approved",
+      "behavior_text": "2 test(s) assert it: test_access_jwt_alone_still_approved, test_invalid_session_cookie_falls_through_to_access_jwt.",
+      "contract_text": "a valid Access JWT still grants the approved tier and /login still lands on the real mesh",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 17
+    },
+    {
+      "id": "e10",
+      "obligation_ref": "o10",
+      "test_ref": "tests/test_guest_limit.py::test_busy_page_on_guest_mode_and_no_code_mailed",
+      "behavior_text": "3 test(s) assert it: test_busy_page_on_guest_mode_and_no_code_mailed, test_simultaneous_verifies_admit_exactly_one, test_approved_guest_view_never_counts_or_refused.",
+      "contract_text": "with max_guests guests active a new guest gets the busy message before any code is emailed; simultaneous verifies leave exactly max_guests active; approved Guest view never counts",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 18
+    },
+    {
+      "id": "e11",
+      "obligation_ref": "o11",
+      "test_ref": "tests/test_alerts.py::test_429_is_quota_and_payload_is_clean",
+      "behavior_text": "3 test(s) assert it: test_429_is_quota_and_payload_is_clean, test_500_is_send_failed, test_rate_limit_per_kind_and_after_an_hour.",
+      "contract_text": "a forced Resend failure posts one alert per failure kind per hour to the Worker with the shared secret; the alert holds no guest email or code",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 19
+    },
+    {
+      "id": "e12",
+      "obligation_ref": "o12",
+      "test_ref": "tests/test_app_session.py::test_cross_site_post_with_new_cookie_is_403",
+      "behavior_text": "2 test(s) assert it: test_cross_site_post_with_new_cookie_is_403, test_csrf_proof_cookie_set_covers_all_four.",
+      "contract_text": "cross-site POSTs carrying lens_session or the pending cookie without Origin get 403",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 20
+    },
+    {
+      "id": "e13",
+      "obligation_ref": "o13",
+      "test_ref": "tests/test_guest_limit.py::test_open_tab_with_no_input_is_signed_off",
+      "behavior_text": "2 test(s) assert it: test_open_tab_with_no_input_is_signed_off, test_chatting_guest_is_not_signed_off.",
+      "contract_text": "15 minutes without a sent message signs a guest off even with the tab open",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 21
+    },
+    {
+      "id": "e14",
+      "obligation_ref": "o14",
+      "test_ref": "tests/test_app_session.py::test_logout_closes_irc_session_opened_via_app_session",
+      "behavior_text": "2 test(s) assert it: test_logout_closes_irc_session_opened_via_app_session, test_sweep_closes_irc_session_when_app_session_ends.",
+      "contract_text": "ending an approved session closes its open IRC session and event stream within one sweep",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 22
+    },
+    {
+      "id": "e15",
+      "obligation_ref": "o15",
+      "test_ref": "tests/test_setpw.py::test_get_link_twice_leaves_token_usable",
+      "behavior_text": "1 test(s) assert it: test_get_link_twice_leaves_token_usable.",
+      "contract_text": "GET never consumes the token; only the password POST does",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 23
+    },
+    {
+      "id": "e16",
+      "obligation_ref": "o16",
+      "test_ref": "tests/test_app_signin.py::test_full_signin_reaches_real_mesh",
+      "behavior_text": "1 test(s) assert it: test_full_signin_reaches_real_mesh.",
+      "contract_text": "a fresh session id is minted and the pending cookie cleared at code entry",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 24
+    },
+    {
+      "id": "e17",
+      "obligation_ref": "o17",
+      "test_ref": "tests/test_app_signin.py::test_switch_off_restores_login_redirect",
+      "behavior_text": "1 test(s) assert it: test_switch_off_restores_login_redirect.",
+      "contract_text": "false restores 303 /login on a correct password",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 25
+    },
+    {
+      "id": "e18",
+      "obligation_ref": "o18",
+      "test_ref": "tests/test_log_hygiene.py::test_no_secret_value_in_any_log_record",
+      "behavior_text": "2 test(s) assert it: test_no_secret_value_in_any_log_record, test_new_counters.",
+      "contract_text": "the counters exist and no log line holds a code, session id or password",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 26
+    },
+    {
+      "id": "e19",
+      "obligation_ref": "o19",
+      "test_ref": "tests/test_app_sessions_store.py::test_sweep_removes_expired_sessions_and_old_tokens",
+      "behavior_text": "2 test(s) assert it: test_sweep_removes_expired_sessions_and_old_tokens, test_sweep_at_day_plus_one_leaves_no_expired_rows.",
+      "contract_text": "expired sessions and used or expired signin/setpw tokens are gone after a day",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "tests ran green at merged main cf6bad6 (irc-lens 0.13.1, live on chat.culture.dev); full suite 1277 passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-10T21:32:07",
+        "commit": "cf6bad6"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 27
+    },
+    {
+      "id": "e20",
+      "obligation_ref": "o9",
+      "test_ref": "live: chat.culture.dev /login, 2026-10-10 23:16:26 +0300",
+      "behavior_text": "owner opened /login in a private window after go-live; the console log shows auth=ok for /login and / WITHOUT via=app-session (Access JWT path), landing on the real mesh as the owner",
+      "contract_text": "a valid Access JWT still grants the approved tier and /login still lands on the real mesh",
+      "evidence_type": "observation",
+      "strength": "fidelity",
+      "strength_basis": "live journal lines of culture-console-spark.service on irc-lens 0.13.0, owner-confirmed",
+      "outcome": "pass",
+      "run": null,
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 28
+    },
+    {
+      "id": "e21",
+      "obligation_ref": "o11",
+      "test_ref": "live: lens-delivery-alert Worker, 2026-10-10 ~23:05 +0300",
+      "behavior_text": "a test alert posted by irc_lens.alerts.Alerter with the grant-held secret reached the owner's inbox via the Worker's send_email binding (owner-confirmed); requests with no or a wrong secret got 401. The forced-Resend-failure trigger itself was exercised in the isolated staging pass and the unit tests, not live",
+      "contract_text": "a forced Resend failure posts one alert per failure kind per hour to the Worker with the shared secret; the alert holds no guest email or code",
+      "evidence_type": "observation",
+      "strength": "fidelity",
+      "strength_basis": "live end-to-end delivery observed by the owner; trigger path not forced live",
+      "outcome": "pass",
+      "run": null,
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 29
+    },
+    {
+      "id": "e22",
+      "obligation_ref": "o2",
+      "test_ref": "live: chat.culture.dev sign-in, 2026-10-10 23:13:37-23:13:51 +0300",
+      "behavior_text": "owner's live sign-in: password step at 23:13:37, emailed code entered 23:13:50, 'app sign-in session started' at 23:13:51; a second-browser attempt without a working code produced no session",
+      "contract_text": "a correct password without the emailed code never yields an approved session",
+      "evidence_type": "observation",
+      "strength": "fidelity",
+      "strength_basis": "live journal + owner report",
+      "outcome": "pass",
+      "run": null,
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 30
+    },
+    {
+      "id": "e23",
+      "obligation_ref": "o16",
+      "test_ref": "live: chat.culture.dev sign-in, 2026-10-10 23:13:51 +0300",
+      "behavior_text": "after code entry the owner landed on / via=app-session with a new lens_session; one sessions row, one trusted_devices row (64-char hash only)",
+      "contract_text": "a fresh session id is minted and the pending cookie cleared at code entry",
+      "evidence_type": "observation",
+      "strength": "fidelity",
+      "strength_basis": "live journal and guests.db row counts read after the sign-in",
+      "outcome": "pass",
+      "run": null,
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 31
+    }
+  ],
+  "deltas": [
+    {
+      "id": "b1",
+      "kind": "added",
+      "behavior_text": "trusted browsers: a 'Trust this browser' checkbox (unchecked by default) on the code screen sets lens_device (one year, sha256 only, per email); a trusted browser has no sign-in attempt limit; logout keeps it, setting a password revokes it (tests/test_trusted_devices.py, 28 tests)",
+      "caused_by": [
+        "d5"
+      ],
+      "evidence_refs": [
+        "e6"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b2",
+      "kind": "amended",
+      "behavior_text": "sign-in rate limits: the per-IP 5-password limit and the 5-codes-per-email cap were replaced by an untrusted per-email budget (3 per 15 min, strict 2 per 30 min until 24 quiet hours) plus 3 per IP per 15 min, silent when blocked",
+      "caused_by": [
+        "d5"
+      ],
+      "evidence_refs": [
+        "e6"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b3",
+      "kind": "removed",
+      "behavior_text": "code entries are no longer limited or counted at all (was: 6th try in 15 minutes fails even when right; then counted toward the per-IP limit and budget); any number of wrong entries leaves the right code working",
+      "caused_by": [
+        "d7"
+      ],
+      "evidence_refs": [
+        "e3"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b4",
+      "kind": "amended",
+      "behavior_text": "only WRONG password submissions count toward the per-IP limit and the per-email budget; a correct password is refunded once checked; a blocked one is never checked or refunded",
+      "caused_by": [
+        "d8"
+      ],
+      "evidence_refs": [
+        "e6"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b5",
+      "kind": "added",
+      "behavior_text": "new-browser sign-in notice: a completed sign-in from a browser not trusted for that email mails the user time, IP and browser; trusted browsers get none (tests/test_signin_notice.py; owner received one live 2026-10-10)",
+      "caused_by": [
+        "d6"
+      ],
+      "evidence_refs": [],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    }
+  ],
   "supersessions": []
 }

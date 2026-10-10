@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-10-10T14:30:58Z",
-  "updated": "2026-10-10T20:44:18Z",
+  "updated": "2026-10-10T21:33:01Z",
   "claims": [
     {
       "id": "c1",
@@ -942,6 +942,17 @@
       "skipped_check": "",
       "refs": [
         "c37 add_trusted_device"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l9",
+      "code": "assumption-for-measurement",
+      "what": "the #68 review's finding that code entries share the 3-per-IP/3-per-email limit was dismissed as 'the owner's design' without working the concrete case (two browsers on one home IP); every test exercised attempts from distinct IPs, so the lockout only surfaced live at go-live, when the owner's second browser had its correct code silently refused",
+      "skipped_check": "a same-IP, multi-browser sign-in scenario test (now test_second_browser_on_the_same_ip_signs_in)",
+      "refs": [
+        "c38 / d7 / irc-lens #73"
       ],
       "origin": "llm",
       "status": "proposed"
