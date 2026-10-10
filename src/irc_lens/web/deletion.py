@@ -3,9 +3,11 @@
 ``GET /delete`` -> email form; ``POST /delete/request`` mails a fresh
 single-use token (``purpose="delete"``, the same template and adapter as
 entry); ``POST /delete/confirm`` re-verifies that token and then erases
-the guest's profile, recorded messages, consents and uploads, closes
-their sandbox session and clears their cookie. Only the deletion record
-(email, time, count) remains.
+the guest's profile, recorded messages and answers, consents and uploads,
+closes their sandbox session and clears their cookie. Nothing of the
+conversation is kept (d9); only the deletion record (a SHA-256 hash of
+the email, time, count) remains. :func:`erase_guest_data` is the one
+erase path, shared with the retention sweep (``web.retention``).
 
 The request step answers identically whether or not the email belongs to
 a guest, so the page cannot be used to probe who has used the service.
@@ -23,7 +25,6 @@ from pathlib import Path
 from aiohttp import web
 
 from irc_lens import metrics
-from irc_lens.corpus import anonymized_pairs
 from irc_lens.mail import render_token_email
 from irc_lens.web import csrf
 from irc_lens.web.auth import allows_anonymous
@@ -85,6 +86,22 @@ def purge_flag_log(cfg, nicks: set[str]) -> None:
     tmp = path.with_name(path.name + ".tmp")
     tmp.write_text("".join(kept))  # NOSONAR S2083 - operator config path
     os.replace(tmp, path)  # NOSONAR S2083 - operator config path
+
+
+def erase_guest_data(store, cfg, email: str, media=None) -> int:
+    """Erase everything the lens holds about one guest (blocking).
+
+    Their uploads (when a media store is given), their lines in sbx-ask's
+    flag log, then every store row (:meth:`GuestStore.delete_guest_inputs`,
+    which logs the deletion by hash). Used by the self-service deletion and
+    by the retention sweep, so both erase exactly the same data.
+    """
+    if media is not None:
+        media.delete_principal(email)
+    nicks = {nick for _e, nick, _ip in store.get_guest(email)}
+    if nicks:
+        purge_flag_log(cfg, nicks)
+    return store.delete_guest_inputs(email)
 
 
 def install(app: web.Application) -> None:
@@ -166,15 +183,10 @@ async def post_confirm(request: web.Request) -> web.Response:
     await request.app["registry"].close(
         f"{GUEST_PRINCIPAL_PREFIX}{email}", BACKEND_SANDBOX
     )
-    media = request.app.get("media_store")
-    if media is not None:
-        await asyncio.to_thread(media.delete_principal, email)
-    nicks = {nick for _e, nick, _ip in store.get_guest(email)}
-    # d8: keep only Q&A that cannot reasonably identify the guest, then erase.
-    pairs = await asyncio.to_thread(anonymized_pairs, store, email)
-    await asyncio.to_thread(store.keep_corpus, pairs)
-    await asyncio.to_thread(purge_flag_log, cfg, nicks)
-    await asyncio.to_thread(store.delete_guest_inputs, email)
+    # d9: nothing of the guest's conversation is kept.
+    await asyncio.to_thread(
+        erase_guest_data, store, cfg, email, request.app.get("media_store")
+    )
     resp = _page("done")
     resp.del_cookie(csrf.GUEST_COOKIE_NAME, path="/")
     return resp

@@ -55,6 +55,8 @@ class LensConfig:
     guest_sandbox_flag_log: str | None = None
     # Close a sandbox session after this long with no open event stream.
     guest_idle_close_s: int = 600
+    # Retention (d9): erase guests inactive this many days (hourly sweep).
+    guest_retention_days: int = 90
     guest_store_path: str = ""
     guest_legal_version_url: str = "https://culture.dev/legal/version.json"
     guest_mail_provider: str = "none"
@@ -431,6 +433,7 @@ _GUEST_KEYS = frozenset(
         "mail",
         "rate_limits",
         "idle_close_s",
+        "retention_days",
     }
 )
 _GUEST_SANDBOX_KEYS = frozenset(
@@ -540,6 +543,9 @@ def _validate_guest_mode_section(raw: dict) -> dict:
         ),
         "guest_idle_close_s": _positive_int(
             guest.get("idle_close_s", 600), "guest_mode.idle_close_s"
+        ),
+        "guest_retention_days": _positive_int(
+            guest.get("retention_days", 90), "guest_mode.retention_days"
         ),
         "guest_store_path": _coerce_str(
             guest.get("store_path", _default_guest_store_path()),

@@ -17,7 +17,7 @@ from aiohttp import web
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
-from irc_lens.web import bans, csrf, deletion, entry, routes
+from irc_lens.web import bans, csrf, deletion, entry, retention, routes
 from irc_lens.web.auth import build_cloudflare_middleware
 from irc_lens.web.front import mount_agent_front
 from irc_lens.web.identity import TIER_APPROVED, Identity
@@ -257,6 +257,9 @@ def make_app(
     if config.guest_enabled:
         deletion.install(app)
         bans.install(app, ban_sweep_interval_s)
+        # d9: erase inactive guests and expire old tokens/attempts/bans,
+        # at startup and hourly.
+        retention.install(app)
         # Guest-mode off: these paths do not exist (404), exactly as before.
         app.router.add_post("/sandbox/enter", routes.post_sandbox_enter)
         app.router.add_post("/sandbox/leave", routes.post_sandbox_leave)

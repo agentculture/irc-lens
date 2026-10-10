@@ -15,6 +15,7 @@ guest_mode:
     room_prefix: "#g-"      # private room per guest; must match sbx-ask
     flag_log: ~/.culture/sandbox/flags.jsonl  # deletion purges it
   idle_close_s: 600         # close a session with no open tab
+  retention_days: 90        # erase guests inactive this many days
   store_path: ~/.local/share/irc-lens/guests.db   # default: $XDG_DATA_HOME/irc-lens/guests.db
   legal_version_url: https://culture.dev/legal/version.json
   mail:                     # sender for guest token emails
@@ -36,6 +37,7 @@ guest_mode:
 | `sandbox.room_prefix` | `guest_room_prefix` | `#g-` |
 | `sandbox.flag_log` | `guest_sandbox_flag_log` | unset (required for full deletion) |
 | `idle_close_s` | `guest_idle_close_s` | `600` |
+| `retention_days` | `guest_retention_days` | `90` |
 | `store_path` | `guest_store_path` | `$XDG_DATA_HOME/irc-lens/guests.db` |
 | `legal_version_url` | `guest_legal_version_url` | `https://culture.dev/legal/version.json` |
 | `mail.provider` | `guest_mail_provider` | `none` |
@@ -48,7 +50,8 @@ guest_mode:
 Validation: every sub-section must be a mapping; unknown keys anywhere in the
 section are rejected (typo guard); `enabled` must be a boolean, ports go
 through the shared port check, `legal_version_url` must be an `http(s)` URL
-with a host, and rate limits must be integers.
+with a host, rate limits must be integers, and `idle_close_s` and
+`retention_days` must be positive integers.
 
 ## Guest session cookie and CSRF
 
@@ -80,7 +83,7 @@ With guest mode on, anonymous visitors get the entry card
 | `GET /entry` | Email + Continue (`get_entry`, also served on `/` for anonymous visitors) |
 | `POST /entry/email` | The password window — identical for every address |
 | `POST /entry/signin` | Approved email + correct password → 303 `/login`; otherwise `Email or password is wrong` |
-| `POST /entry/guest` | Nickname (`sbx-` prefix) + Terms/Privacy consent |
+| `POST /entry/guest` | Nickname (`sbx-` prefix) + Terms/Privacy consent + optional training opt-in |
 | `POST /entry/guest/start` | Emails a single-use, 15-minute code (one fixed template; the mail says "code", matching the Code field) |
 | `GET /login` | Post-SSO return target (Cloudflare Access forwards the user here): always 303 `/`, `Cache-Control: no-store`, any tier, never 404 and never reveals approval; served even with guest mode off |
 | `POST /entry/verify` | Code check → guest + consent recorded, `lens_guest` cookie, 303 `/` |
@@ -100,6 +103,16 @@ characters, unique among recorded guests, never derived from the email, and
 Consent is recorded against `irc_lens.legal.current_legal_versions(cfg)` (the
 `legal_version_url` JSON, cached in-process for 5 minutes; a failed fetch with
 nothing cached blocks entry rather than recording an unknown version).
+
+Training use is a separate consent. The guest step carries a second checkbox,
+"Use my conversations to improve culture.dev's models (optional)", unchecked
+by default and not required; signing up without it works. The choice travels
+through the code step as a hidden field and is stored as `consents.train`
+(0/1, default 0) with the consent row. Only guests whose most recent consent
+row has `train = 1` appear in `irc-lens guests export`. Withdrawal arrives by
+email; the owner applies it with `GuestStore.set_training(email, False)`,
+which updates the guest's latest consent row. Existing stores gain the column
+on startup (`ALTER TABLE ... ADD COLUMN`, guarded by `PRAGMA table_info`).
 
 ### Bot protection (Cloudflare Turnstile)
 
@@ -137,18 +150,29 @@ writes no channel history to disk. The guest store is the one durable record
 of guest chat: each guest's messages (`kind="message"`) and the answers
 sbx-ask posts in their room (`kind="answer"`).
 
-A confirmed deletion first keeps the guest's question-and-answer pairs in an
-anonymized `corpus` table — email, IP, nickname and room dropped, PII scrubbed
-(the same heuristic as the export), day-only date, a random row id, and
-NSFW-declined pairs left out — then erases the guest's profile, inputs,
-consents, tokens, flags and room id from the guest store, their uploads, and
-their lines in sbx-ask's flag log (`sandbox.flag_log`). Bans are kept. The
-corpus is not deleted; `irc-lens guests export` includes it as `anonymous`
-`qa` rows. Without `flag_log` the lens logs a warning at startup.
+A confirmed deletion keeps nothing of the guest's conversation: it erases the
+guest's profile, questions and answers, consents, tokens, flags, room id and
+rate-limit counters from the guest store, their uploads, and their lines in
+sbx-ask's flag log (`sandbox.flag_log`). Without `flag_log` the lens logs a
+warning at startup. Bans are kept, so a banned guest cannot lift a ban by
+deleting. The `deletions` log records only the SHA-256 hex digest of the
+lower-cased email (plus time and row count), never the address; records
+written before this change are hashed on startup. There is no anonymized
+corpus any more: an older store's `corpus` table is dropped on startup.
 
-The scrub is heuristic (see the export section): a corpus row can still carry
-an identifying detail the scrub misses, such as a third party's name in plain
-prose. Review the corpus before publishing it.
+### Retention
+
+While guest mode is on, the lens sweeps the guest store at startup and then
+hourly (`GuestStore.sweep`, run in a worker thread; the task is cancelled on
+shutdown):
+
+- guests whose last activity (the latest of their entry, their inputs and
+  their consents) is older than `retention_days` (default 90) are erased by
+  the same path as a self-service deletion — store rows, uploads and
+  flag-log lines — and logged by hash;
+- tokens issued more than a day ago and rate-limit attempts older than a day
+  are removed;
+- bans older than 365 days are lifted.
 
 The agent state badge (`agent online` / `agent offline`) reflects whether the
 agent is in the session's room right now, read from the live member list. Each

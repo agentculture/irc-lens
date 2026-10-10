@@ -39,6 +39,12 @@ def store(tmp_path: Path) -> GuestStore:
     s = GuestStore(tmp_path / "guests.db")
     s.record_guest("alice.wonder@example.com", "sbx-alice", "203.0.113.42")
     s.record_guest("bob_the_builder@corp.example.org", "sbx-bobby", "198.51.100.7")
+    # d9: only guests who opted in to training use are exported.
+    for email, ip in (
+        ("alice.wonder@example.com", "203.0.113.42"),
+        ("bob_the_builder@corp.example.org", "198.51.100.7"),
+    ):
+        s.record_consent(email, ip, tos_version="t", privacy_version="p", train=True)
     s.record_input(
         "alice.wonder@example.com",
         kind="message",
@@ -150,25 +156,6 @@ def test_cli_export_stdout_and_file(store: GuestStore, tmp_path: Path, capsys) -
     assert rc == 0
     _no_pii(dest.read_text())
     assert sorted(p.name for p in dest.parent.iterdir()) == ["t.md"]
-
-
-def test_export_includes_the_anonymized_corpus(tmp_path) -> None:
-    """d8: corpus rows (kept after a guest's deletion) are part of the owner's
-    export, with no guest pseudonym."""
-    from irc_lens.guest_store import GuestStore
-    from irc_lens.export import export_redacted
-
-    s = GuestStore(tmp_path / "g.db")
-    s.keep_corpus([{"question": "what is culture?", "answer": "an IRC mesh", "date": "2026-10-09"}])
-    rows = [json.loads(l) for l in export_redacted(s).splitlines()]
-    assert rows == [
-        {
-            "guest": "anonymous",
-            "kind": "qa",
-            "date": "2026-10-09",
-            "text": "Q: what is culture?\nA: an IRC mesh",
-        }
-    ]
 
 
 def test_scrub_ipv6_forms_and_not_times() -> None:

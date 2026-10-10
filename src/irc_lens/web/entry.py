@@ -18,7 +18,8 @@ CSP keeps ``script-src 'self'``):
    (obligation o4). Over the per-email / per-IP limit the same body comes
    back as 429.
 4. ``POST /entry/guest`` -- nickname (fixed ``sbx-`` prefix) + consent to
-   the Terms and Privacy Policy.
+   the Terms and Privacy Policy, plus a separate, optional, unchecked
+   training opt-in (d9) carried through the code step as a hidden field.
 5. ``POST /entry/guest/start`` -- issues a single-use 15-minute token and
    mails it with the one fixed template (o5); the code-entry step renders
    the same way whether or not mail went out (banned / malformed address,
@@ -26,7 +27,8 @@ CSP keeps ``script-src 'self'``):
 6. ``POST /entry/verify`` -- token check (single use, 15 min, rate limited
    per email and per IP, o6); on success records the guest
    (``sbx-<nickname>``, never derived from the email) and its consent
-   against the current legal versions, sets the signed ``lens_guest``
+   against the current legal versions (with the training opt-in, default
+   off), sets the signed ``lens_guest``
    cookie and 303s to ``/``.
 
 Every route is :func:`~irc_lens.web.auth.allows_anonymous` and answers 404
@@ -320,6 +322,7 @@ def _page(
     email: str = "",
     nickname: str = "",
     error: str = "",
+    train: bool = False,
 ) -> web.Response:
     site_key = state.verifier.site_key if step in ("password", "guest") else None
     html = render_fragment(
@@ -328,6 +331,7 @@ def _page(
         email=email,
         nickname=nickname,
         error=error,
+        train=train,
         site_key=site_key,
         turnstile_script=TURNSTILE_SCRIPT_URL,
         turnstile_field=TURNSTILE_FIELD,
@@ -343,6 +347,11 @@ def _page(
     if site_key:
         resp[CSP_TURNSTILE_MARKER] = True
     return resp
+
+
+def _train(form) -> bool:
+    """The optional training opt-in (d9): only an explicit ``on`` counts."""
+    return form.get("train") == "on"
 
 
 def _see_other(location: str) -> web.Response:
@@ -482,7 +491,12 @@ async def post_guest_start(request: web.Request) -> web.Response:
         except Exception as exc:  # noqa: BLE001 -- same page either way (o4/o5)
             logger.warning("guest token mail not sent: %s", type(exc).__name__)
     return _page(
-        state, "code", status=429 if limited else 200, email=email, nickname=nick
+        state,
+        "code",
+        status=429 if limited else 200,
+        email=email,
+        nickname=nick,
+        train=_train(form),
     )
 
 
@@ -516,6 +530,7 @@ async def post_verify(request: web.Request) -> web.Response:
             email=email,
             nickname=nick or "",
             error=ERR_CODE,
+            train=_train(form),
         )
 
     if limited:
@@ -532,7 +547,13 @@ async def post_verify(request: web.Request) -> web.Response:
     except legal.LegalVersionsUnavailable as exc:
         logger.warning("guest entry blocked: %s", exc)
         return _page(
-            state, "code", status=503, email=email, nickname=nick, error=ERR_LATER
+            state,
+            "code",
+            status=503,
+            email=email,
+            nickname=nick,
+            error=ERR_LATER,
+            train=_train(form),
         )
     if not store.verify_token(email, code, purpose=TOKEN_PURPOSE):
         return wrong(401)
@@ -543,6 +564,7 @@ async def post_verify(request: web.Request) -> web.Response:
         ip,
         tos_version=versions["terms"],
         privacy_version=versions["privacy"],
+        train=_train(form),
     )
     metrics.get_metrics().entry()
     resp = _see_other("/")

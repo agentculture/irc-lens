@@ -372,6 +372,10 @@ coarsened to the date, and emails, IPs (v4/v6), phone numbers, sbx- nicks
 and self-introduced names are scrubbed from free text. Name detection is
 heuristic (known email-local-part/nick tokens plus "my name is X"/"I'm X"
 style cues) — see `src/irc_lens/export.py` for documented limitations.
+Only guests whose most recent consent opted in to training use
+(`consents.train = 1`, the optional checkbox on the entry card) are
+exported; everyone else's inputs are left out entirely. Deleted guests leave
+nothing to export.
 
 ## `irc-lens guests` owner admin (passwd, ban, unban, list, flags)
 

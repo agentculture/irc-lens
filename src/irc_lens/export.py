@@ -2,7 +2,9 @@
 
 ``export_redacted`` reads the ``inputs`` table of a :class:`GuestStore` and
 returns transcripts (JSONL or Markdown) that carry no email, IP, nick or
-nick-to-person mapping.
+nick-to-person mapping. Only guests whose most recent consent opted in to
+training use (``consents.train = 1``, d9) are included; everyone else's
+inputs are left out entirely.
 
 Design:
 
@@ -163,8 +165,11 @@ def export_redacted(store: GuestStore, *, fmt: str = "jsonl") -> str:
     """Return a redacted transcript of all recorded guest inputs."""
     if fmt not in ("jsonl", "md"):
         raise ValueError(f"unknown format {fmt!r} (use jsonl or md)")
-    guests, inputs = _read(store)
-    emails = {g[0] for g in guests} | {i[0] for i in inputs}
+    guests, all_inputs = _read(store)
+    # d9: only guests whose latest consent opted in to training use.
+    opted_in = store.training_emails()
+    inputs = [i for i in all_inputs if i[0] in opted_in]
+    emails = {i[0] for i in inputs}
     order = sorted(emails)
     # CSPRNG (secrets.SystemRandom): pseudonym order must not be guessable.
     secrets.SystemRandom().shuffle(order)  # NOSONAR S2245
@@ -172,14 +177,15 @@ def export_redacted(store: GuestStore, *, fmt: str = "jsonl") -> str:
 
     replacements: dict[str, str] = {}
     tokens: set[str] = set()
+    # Every guest's identifiers are scrubbed (an opted-in guest may mention
+    # anyone); only opted-in guests get a pseudonym.
     for email, nick, ip in guests:
-        p = pseudo[email]
-        replacements[nick] = p
+        replacements[nick] = pseudo.get(email, "[nick]")
         replacements[email] = "[email]"
         if ip:
             replacements[ip] = "[ip]"
         tokens |= _identifier_tokens(email)
-    for email in emails:
+    for email in emails | {i[0] for i in all_inputs}:
         tokens |= _identifier_tokens(email)
     # nick/email replacements must not be re-scrubbed as names
     rows = []
@@ -197,25 +203,11 @@ def export_redacted(store: GuestStore, *, fmt: str = "jsonl") -> str:
                 ),
             }
         )
-    # d8: anonymized Q&A kept after guests' deletions (no pseudonym).
-    rows += [
-        {
-            "guest": "anonymous",
-            "kind": "qa",
-            "date": c["date"],
-            "text": f"Q: {c['question']}\nA: {c['answer']}",
-        }
-        for c in store.list_corpus()
-    ]
     if fmt == "jsonl":
         return "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
     out = ["# Guest transcripts (redacted)\n"]
     current = None
-    def _order(r: dict) -> tuple[bool, int]:
-        anon = r["guest"] == "anonymous"
-        return anon, 0 if anon else int(r["guest"].split("-")[1])
-
-    for r in sorted(rows, key=_order):
+    for r in sorted(rows, key=lambda r: int(r["guest"].split("-")[1])):
         if r["guest"] != current:
             current = r["guest"]
             out.append(f"\n## {current}\n")

@@ -8,6 +8,10 @@ Security properties:
 * Approved-user passwords are stored only as argon2id hashes
   (``argon2-cffi``); no plaintext or reversible form is persisted.
 * ``secure_delete`` is on, so deleted guest inputs are overwritten.
+* A deletion keeps nothing of the guest's conversation (d9); the deletion
+  log stores only :func:`email_hash`, never the email.
+* :meth:`GuestStore.sweep` enforces retention: inactive guests are erased
+  and tokens, rate-limit attempts and old bans expire.
 
 The clock is injectable (``clock=`` callable returning epoch seconds) so
 TTL and rate-limit behaviour is testable without sleeping.
@@ -27,11 +31,16 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
 DEFAULT_TOKEN_TTL = 900
+#: Retention (d9): guests inactive this long are erased by :meth:`GuestStore.sweep`.
+DEFAULT_INACTIVE_DAYS = 90
+_DAY_S = 86400
+TOKEN_RETENTION_S = _DAY_S
+ATTEMPT_RETENTION_S = _DAY_S
+BAN_RETENTION_S = 365 * _DAY_S
 
+# d9 removed the anonymized ``corpus`` table (deletion keeps nothing).
 _SCHEMA = """
-CREATE TABLE IF NOT EXISTS corpus (
-    id TEXT PRIMARY KEY, day TEXT NOT NULL, question TEXT NOT NULL,
-    answer TEXT NOT NULL);
+DROP TABLE IF EXISTS corpus;
 CREATE TABLE IF NOT EXISTS rooms (
     email TEXT PRIMARY KEY, room_id TEXT NOT NULL UNIQUE);
 CREATE TABLE IF NOT EXISTS guests (
@@ -39,7 +48,8 @@ CREATE TABLE IF NOT EXISTS guests (
     created INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS consents (
     email TEXT NOT NULL, ip TEXT NOT NULL, tos_version TEXT NOT NULL,
-    privacy_version TEXT NOT NULL, ts INTEGER NOT NULL);
+    privacy_version TEXT NOT NULL, ts INTEGER NOT NULL,
+    train INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS tokens (
     token_hash TEXT PRIMARY KEY, email TEXT NOT NULL, purpose TEXT NOT NULL,
     issued INTEGER NOT NULL, ttl INTEGER NOT NULL, used INTEGER NOT NULL DEFAULT 0);
@@ -48,6 +58,7 @@ CREATE TABLE IF NOT EXISTS bans (
 CREATE TABLE IF NOT EXISTS inputs (
     email TEXT NOT NULL, kind TEXT NOT NULL, payload TEXT NOT NULL,
     ts INTEGER NOT NULL);
+-- deletions.email holds email_hash(email), never the address (d9).
 CREATE TABLE IF NOT EXISTS deletions (
     email TEXT NOT NULL, ts INTEGER NOT NULL, removed INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS passwords (
@@ -64,6 +75,39 @@ def _hash_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
+def email_hash(email: str) -> str:
+    """SHA-256 hexdigest of the lower-cased email: the deletion log's key.
+
+    Lets the owner answer "was this address deleted?" for an address they
+    already know, without the log itself holding any address.
+    """
+    return hashlib.sha256(email.strip().lower().encode()).hexdigest()
+
+
+def _migrate(con: sqlite3.Connection) -> None:
+    """Bring an existing store up to the current schema (idempotent)."""
+    cols = {row[1] for row in con.execute("PRAGMA table_info(consents)")}
+    if "train" not in cols:
+        con.execute(
+            "ALTER TABLE consents ADD COLUMN train INTEGER NOT NULL DEFAULT 0"
+        )
+    # Deletion records written before d9 held the plaintext email.
+    plain = con.execute(
+        "SELECT rowid, email FROM deletions WHERE email LIKE '%@%'"
+    ).fetchall()
+    con.executemany(
+        "UPDATE deletions SET email=? WHERE rowid=?",
+        [(email_hash(e), rowid) for rowid, e in plain],
+    )
+
+
+# The latest consent row of each email (newest ts, then newest rowid).
+_LATEST_CONSENT = (
+    "SELECT rowid FROM consents c2 WHERE c2.email = consents.email "
+    "ORDER BY c2.ts DESC, c2.rowid DESC LIMIT 1"
+)
+
+
 class GuestStore:
     """SQLite-backed guest-mode state. Each call uses a short connection."""
 
@@ -76,6 +120,7 @@ class GuestStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as con, con:
             con.executescript(_SCHEMA)
+            _migrate(con)
 
     def _now(self) -> int:
         return int(self._clock())
@@ -133,11 +178,20 @@ class GuestStore:
         return self._all("SELECT email, nick, ip FROM guests ORDER BY rowid")
 
     def record_consent(
-        self, email: str, ip: str, *, tos_version: str, privacy_version: str
+        self,
+        email: str,
+        ip: str,
+        *,
+        tos_version: str,
+        privacy_version: str,
+        train: bool = False,
     ) -> None:
+        """Record Terms/Privacy consent; *train* is the separate, optional
+        opt-in to training use of the guest's conversations (d9)."""
         self._run(
-            "INSERT INTO consents (email, ip, tos_version, privacy_version, ts) VALUES (?,?,?,?,?)",
-            (email, ip, tos_version, privacy_version, self._now()),
+            "INSERT INTO consents (email, ip, tos_version, privacy_version, ts, train) "
+            "VALUES (?,?,?,?,?,?)",
+            (email, ip, tos_version, privacy_version, self._now(), int(bool(train))),
         )
 
     def get_consents(self, email: str) -> list[tuple[str, str, str, str, int]]:
@@ -145,6 +199,33 @@ class GuestStore:
             "SELECT email, ip, tos_version, privacy_version, ts FROM consents "
             "WHERE email=? ORDER BY rowid",
             (email,),
+        )
+
+    def training_opt_in(self, email: str) -> bool:
+        """True when the guest's most recent consent row opted in to training."""
+        rows = self._all(
+            "SELECT train FROM consents WHERE email=? ORDER BY ts DESC, rowid DESC LIMIT 1",
+            (email,),
+        )
+        return bool(rows and rows[0][0])
+
+    def training_emails(self) -> set[str]:
+        """Every email whose most recent consent row has ``train=1``."""
+        rows = self._all(
+            f"SELECT email FROM consents WHERE rowid = ({_LATEST_CONSENT}) AND train=1"
+        )
+        return {r[0] for r in rows}
+
+    def set_training(self, email: str, on: bool) -> int:
+        """Set the training opt-in on the guest's latest consent row.
+
+        For the owner (withdrawal arrives by email). Returns rows updated:
+        0 when the email has no consent on record.
+        """
+        return self._run(
+            "UPDATE consents SET train=? WHERE rowid = ("
+            "SELECT rowid FROM consents WHERE email=? ORDER BY ts DESC, rowid DESC LIMIT 1)",
+            (int(bool(on)), email),
         )
 
     # -- tokens (single use, hashed, TTL) --------------------------------
@@ -260,41 +341,14 @@ class GuestStore:
             (email,),
         )
 
-    # -- anonymized corpus (d8) -----------------------------------------------
-
-    def keep_corpus(self, pairs: list[dict]) -> int:
-        """Keep anonymized Q&A pairs (``question``/``answer``/``date``).
-
-        No email, IP, nick or room is stored, the date is day-only and each
-        row gets a random id (rowid order is not exposed), so a row cannot
-        reasonably be linked back to the guest. Deletion never touches it.
-        """
-        rows = [
-            (secrets.token_hex(12), p["date"], p["question"], p["answer"])
-            for p in pairs
-            if p.get("question")
-        ]
-        with closing(self._connect()) as con, con:
-            con.executemany(
-                "INSERT INTO corpus (id, day, question, answer) VALUES (?,?,?,?)", rows
-            )
-        return len(rows)
-
-    def list_corpus(self) -> list[dict]:
-        return [
-            {"id": i, "date": d, "question": q, "answer": a}
-            for i, d, q, a in self._all(
-                "SELECT id, day, question, answer FROM corpus ORDER BY day, id"
-            )
-        ]
-
     def delete_guest_inputs(self, email: str) -> int:
-        """Erase the guest's profile, inputs, consents, tokens, flags and
-        rate-limit counters; log the deletion.
+        """Erase the guest's profile, inputs, consents, tokens, flags, room
+        and rate-limit counters; log the deletion.
 
-        Only the ``deletions`` record keeps the email. Bans are kept on
-        purpose: erasing them would let a banned guest evade the ban by
-        requesting deletion. The return value counts guest rows and inputs.
+        Nothing of the guest's conversation is kept (d9). The ``deletions``
+        record holds only :func:`email_hash`, never the address. Bans are
+        kept on purpose: erasing them would let a banned guest evade the ban
+        by requesting deletion. The return value counts guest rows and inputs.
         """
         with closing(self._connect()) as con, con:
             removed = con.execute("DELETE FROM guests WHERE email=?", (email,)).rowcount
@@ -308,9 +362,65 @@ class GuestStore:
             con.execute("DELETE FROM attempts WHERE key = ?", (f"e:{email}",))
             con.execute(
                 "INSERT INTO deletions (email, ts, removed) VALUES (?,?,?)",
-                (email, self._now(), removed),
+                (email_hash(email), self._now(), removed),
             )
         return removed
+
+    # -- retention (d9) ----------------------------------------------------
+    def inactive_guests(self, cutoff: int) -> list[str]:
+        """Emails whose last activity (max of guests.created, inputs.ts and
+        consents.ts) is older than *cutoff*. A guest-linked row with no
+        activity at all (e.g. an orphaned room) counts as inactive."""
+        rows = self._all(
+            "SELECT email, MAX(ts) FROM ("
+            " SELECT email, created AS ts FROM guests"
+            " UNION ALL SELECT email, ts FROM inputs"
+            " UNION ALL SELECT email, ts FROM consents"
+            " UNION ALL SELECT email, NULL FROM rooms"
+            ") GROUP BY email HAVING MAX(ts) IS NULL OR MAX(ts) < ? ORDER BY email",
+            (int(cutoff),),
+        )
+        return [r[0] for r in rows]
+
+    def sweep(
+        self,
+        now: int | None = None,
+        *,
+        inactive_days: int = DEFAULT_INACTIVE_DAYS,
+        erase: Callable[[str], int] | None = None,
+    ) -> dict:
+        """Apply the retention policy once; return per-category counts.
+
+        * ``guests``: every guest inactive for more than *inactive_days* is
+          erased through *erase* (default :meth:`delete_guest_inputs`; the
+          web app passes the full user-deletion path, which also clears
+          uploads and flag-log lines) and logged by hash.
+        * ``flags``: flag rows of those guests (erased with them).
+        * ``tokens`` issued more than a day ago.
+        * ``attempts`` (rate-limit counters) older than a day.
+        * ``bans`` older than 365 days.
+        """
+        now = self._now() if now is None else int(now)
+        erase = erase or self.delete_guest_inputs
+        expired = self.inactive_guests(now - int(inactive_days) * _DAY_S)
+        counts = {"guests": 0, "flags": 0, "tokens": 0, "attempts": 0, "bans": 0}
+        for email in expired:
+            counts["flags"] += self._all(
+                "SELECT COUNT(*) FROM flags WHERE email=?", (email,)
+            )[0][0]
+            erase(email)
+            counts["guests"] += 1
+        with closing(self._connect()) as con, con:
+            counts["tokens"] = con.execute(
+                "DELETE FROM tokens WHERE issued < ?", (now - TOKEN_RETENTION_S,)
+            ).rowcount
+            counts["attempts"] = con.execute(
+                "DELETE FROM attempts WHERE ts < ?", (now - ATTEMPT_RETENTION_S,)
+            ).rowcount
+            counts["bans"] = con.execute(
+                "DELETE FROM bans WHERE ts < ?", (now - BAN_RETENTION_S,)
+            ).rowcount
+        return counts
 
     # -- approved-user passwords (argon2id only) --------------------------
     def set_password(self, email: str, password: str) -> None:

@@ -20,7 +20,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from irc_lens import legal
 from irc_lens.cli import main
-from irc_lens.guest_store import GuestStore
+from irc_lens.guest_store import GuestStore, email_hash
 from irc_lens.mail import RecordingAdapter
 from irc_lens.web import bans, csrf, entry, make_app
 from irc_lens.web.identity import Identity
@@ -366,12 +366,14 @@ async def test_deletion_flow_removes_everything_but_the_record(env):
     assert not env.app["registry"].has(f"guest:{EMAIL}", BACKEND_SANDBOX)
     dump = _all_text(s.path)
     assert NICK not in dump
-    assert dump.count(EMAIL) == 1  # only the deletion record
+    assert EMAIL not in dump  # d9: the deletion record keeps only a hash
     assert s.get_guest(EMAIL) == []
     assert s.get_consents(EMAIL) == []
     assert s.list_flags(EMAIL) == []
     with sqlite3.connect(s.path) as con:
-        assert con.execute("SELECT email FROM deletions").fetchall() == [(EMAIL,)]
+        assert con.execute("SELECT email FROM deletions").fetchall() == [
+            (email_hash(EMAIL),)
+        ]
     # single use
     again = await env.client.post(
         "/delete/confirm", data={"email": EMAIL, "code": code}
@@ -425,10 +427,10 @@ async def test_delete_routes_404_when_guest_mode_off(jwks, legal_server, tmp_pat
         await client.close()
 
 
-async def test_deletion_purges_flag_log_and_keeps_anonymized_corpus(env, tmp_path):
-    """d7/d8: deletion also erases the guest's sbx-ask flag lines; their Q&A
-    survives only as anonymized corpus rows. The sandbox IRCd keeps no history
-    on disk (culture server --no-persist), so there is nothing there to purge."""
+async def test_deletion_purges_flag_log_and_keeps_no_corpus(env, tmp_path):
+    """d7/d9: deletion also erases the guest's sbx-ask flag lines, and none of
+    their Q&A is kept. The sandbox IRCd keeps no history on disk (culture
+    server --no-persist), so there is nothing there to purge."""
     import dataclasses
 
     flags = tmp_path / "flags.jsonl"
@@ -450,6 +452,6 @@ async def test_deletion_purges_flag_log_and_keeps_anonymized_corpus(env, tmp_pat
     assert NICK not in flags.read_text()
     assert "sbx-kim" in flags.read_text()
     assert env.store.list_rooms() == []
-    assert [(c["question"], c["answer"]) for c in env.store.list_corpus()] == [
-        ("what is culture?", "an IRC mesh")
-    ]
+    dump = _all_text(env.store.path)
+    assert "what is culture?" not in dump
+    assert "an IRC mesh" not in dump
