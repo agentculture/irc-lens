@@ -270,6 +270,38 @@ class GuestStore:
         )
         return n == 1
 
+    def peek_token(self, token: str, *, purpose: str) -> str | None:
+        """Email of a live (unused, unexpired) *purpose* token; never consumes.
+
+        For links that carry only the token (``/password/<token>``): a GET
+        that a mail scanner may prefetch must leave the token usable.
+        """
+        rows = self._all(
+            "SELECT email FROM tokens WHERE token_hash=? AND purpose=? "
+            "AND used=0 AND issued + ttl > ?",
+            (_hash_token(token), purpose, self._now()),
+        )
+        return rows[0][0] if rows else None
+
+    def consume_token(self, token: str, *, purpose: str) -> str | None:
+        """Use a live *purpose* token up; return its email exactly once."""
+        now = self._now()
+        with closing(self._connect()) as con, con:
+            row = con.execute(
+                "SELECT email FROM tokens WHERE token_hash=? AND purpose=? "
+                "AND used=0 AND issued + ttl > ?",
+                (_hash_token(token), purpose, now),
+            ).fetchone()
+            if row is None:
+                return None
+            # Atomic: only one caller's UPDATE matches the still-unused row.
+            n = con.execute(
+                "UPDATE tokens SET used=1 WHERE token_hash=? AND purpose=? "
+                "AND used=0 AND issued + ttl > ?",
+                (_hash_token(token), purpose, now),
+            ).rowcount
+        return row[0] if n == 1 else None
+
     # -- approved-user app sessions (id stored only as sha256) -------------
     def create_session(self, email: str) -> str:
         """Start a session; return the raw id (never stored, only its hash)."""

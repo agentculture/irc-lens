@@ -17,7 +17,16 @@ from aiohttp import web
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
-from irc_lens.web import app_session, bans, csrf, deletion, entry, retention, routes
+from irc_lens.web import (
+    app_session,
+    bans,
+    csrf,
+    deletion,
+    entry,
+    retention,
+    routes,
+    setpw,
+)
 from irc_lens.web.auth import build_cloudflare_middleware
 from irc_lens.web.front import mount_agent_front
 from irc_lens.web.identity import TIER_APPROVED, Identity
@@ -260,6 +269,8 @@ def make_app(
             # App-native approved sessions: POST /logout + the link table
             # the sweeper below uses to close revoked users' IRC sessions.
             app_session.install(app)
+            # Set or reset password by emailed link (/password, /password/*).
+            setpw.install(app)
         bans.install(app, ban_sweep_interval_s)
         # d9: erase inactive guests and expire old tokens/attempts/bans,
         # at startup and hourly.
