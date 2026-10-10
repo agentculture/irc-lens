@@ -19,22 +19,22 @@ Covers spec claims:
           (``test_code_screen_has_unchecked_trust_box``,
           ``test_unticked_signin_sets_no_device_and_no_trust_row``,
           ``test_trusted_browser_signing_in_unticked_keeps_trust``).
-* c38/h27 untrusted browsers share one per-email budget counting password
-          submissions and code entries: 3 per 15 minutes; once exhausted the
-          email is strict at 2 per 30 minutes until 24 hours pass with no
-          blocked attempt; blocked attempts are silent and byte-identical; the
-          per-IP limits still apply to untrusted browsers
+* c38/h27 untrusted browsers have one per-email budget counting password
+          submissions only: 3 per 15 minutes; once exhausted the email is
+          strict at 2 per 30 minutes until 24 hours pass with no blocked
+          attempt; blocked attempts are silent and byte-identical; the per-IP
+          limit (3 password submissions per 15 minutes) still applies
           (``test_fourth_untrusted_password_attempt_blocked_silently``,
-          ``test_blocked_code_entry_looks_like_a_wrong_code``,
-          ``test_password_and_code_entries_share_one_budget``,
           ``test_strict_mode_two_per_thirty_minutes_after_exhaustion``,
           ``test_24_quiet_hours_restore_normal_budget``,
           ``test_blocked_attempt_restarts_the_24_hours``,
           ``test_per_ip_password_limit_still_applies_to_untrusted``,
-          ``test_per_ip_code_limit_still_applies_to_untrusted``,
-          ``test_per_ip_limit_counts_password_and_code_together``).
-          Per IP: 3 attempts per 15 minutes, password and code entry
-          together (owner change to c38).
+          ``test_per_ip_limit_counts_passwords_only``).
+* c41     code entries count toward nothing -- no per-IP limit, no budget,
+          no cap (owner decision after go-live, deviation d7)
+          (``test_code_still_works_after_the_password_budget_is_used``,
+          ``test_code_entries_do_not_use_the_email_budget``,
+          ``test_second_browser_on_the_same_ip_signs_in``).
 """
 
 from __future__ import annotations
@@ -386,31 +386,44 @@ async def test_fourth_untrusted_password_attempt_blocked_silently(env: TEnv) -> 
     assert len(env.mail.sent) == 3, "no code mail when blocked"
 
 
-async def test_blocked_code_entry_looks_like_a_wrong_code(env: TEnv) -> None:
-    r = await env.pw(ALICE, PW, _ip(0))
+async def test_code_still_works_after_the_password_budget_is_used(env: TEnv) -> None:
+    # c41/d7: code entries are never blocked; only passwords are budgeted.
+    r = await env.pw(ALICE, PW, _ip(0))  # password 1, mails a code
     await env.drain()
     pending, code = pending_of(r), env.last_code()
-    wrong = await env.enter(ALICE, secrets.token_urlsafe(32), pending, _ip(1))
-    wrong_shape = _shape(wrong, await wrong.text(), ALICE)
-    await env.pw(ALICE, WRONG_PW, _ip(2))  # 3rd attempt: budget used up
-    blocked = await env.enter(ALICE, code, pending, _ip(3))  # right code, 4th
-    assert blocked.status == 401
-    assert app_session.SESSION_COOKIE_NAME not in blocked.cookies
-    assert _shape(blocked, await blocked.text(), ALICE) == wrong_shape
-    # The blocked try never checked the code, so it was not used up.
-    assert env.store._all(
-        "SELECT used FROM tokens WHERE purpose='signin'"
-    ) == [(0,)]
+    for i in (1, 2, 3):  # passwords 2, 3 and a blocked 4th
+        await env.pw(ALICE, WRONG_PW, _ip(i))
+    ok = await env.enter(ALICE, code, pending, _ip(4))
+    assert ok.status == 303
+    assert app_session.SESSION_COOKIE_NAME in ok.cookies
 
 
-async def test_password_and_code_entries_share_one_budget(env: TEnv) -> None:
-    r = await env.pw(ALICE, WRONG_PW, _ip(0))  # 1: password
-    await env.enter(ALICE, "nope", pending_of(r), _ip(1))  # 2: code
-    r = await env.pw(ALICE, PW, _ip(2))  # 3: password, mails
+async def test_code_entries_do_not_use_the_email_budget(env: TEnv) -> None:
+    r = await env.pw(ALICE, WRONG_PW, _ip(0))  # password 1
+    for i in range(5):  # wrong codes: not counted
+        await env.enter(ALICE, "nope", pending_of(r), _ip(10 + i))
+    r = await env.pw(ALICE, PW, _ip(1))  # password 2, mails
     await env.drain()
-    assert len(env.mail.sent) == 1
-    ok = await env.enter(ALICE, env.last_code(), pending_of(r), _ip(3))  # 4
-    assert ok.status == 401
+    ok = await env.enter(ALICE, env.last_code(), pending_of(r), _ip(2))
+    assert ok.status == 303
+    await env.drain()  # the new-browser notice (c40)
+    assert await env.mails_after(env.pw(ALICE, PW, _ip(3))) == 1  # password 3
+    assert await env.mails_after(env.pw(ALICE, PW, _ip(4))) == 0  # 4th: blocked
+
+
+async def test_second_browser_on_the_same_ip_signs_in(env: TEnv) -> None:
+    """Go-live regression (d7): a trusted first browser's own sign-in left a
+    new second browser on the same IP no room to enter its code."""
+    ip = "203.0.113.50"
+    first = await env.full_signin(ALICE, PW, ip, trust=True)
+    assert first.status == 303
+    r = await env.pw(ALICE, PW, ip)  # second browser, untrusted
+    await env.drain()
+    pending, code = pending_of(r), env.last_code()
+    for _ in range(3):  # typos on the code screen
+        assert (await env.enter(ALICE, "typo", pending, ip)).status == 401
+    ok = await env.enter(ALICE, code, pending, ip)
+    assert ok.status == 303
 
 
 async def _passes(env: TEnv, n: int, start: int) -> list[bool]:
@@ -469,25 +482,18 @@ async def test_per_ip_password_limit_still_applies_to_untrusted(env: TEnv) -> No
     assert await env.mails_after(env.pw(ALICE, PW, ip, device)) == 1
 
 
-async def test_per_ip_code_limit_still_applies_to_untrusted(env: TEnv) -> None:
-    ip = "198.51.100.61"
-    r = await env.pw(ALICE, PW, ip)
-    await env.drain()
-    pending, code = pending_of(r), env.last_code()
-    for i in range(2):  # other emails: their budgets, this IP's limit
-        await env.enter(f"y{i}@example.org", "nope", pending, ip)
-    assert (await env.enter(ALICE, code, pending, ip)).status == 401  # 4th
-
-
-async def test_per_ip_limit_counts_password_and_code_together(env: TEnv) -> None:
+async def test_per_ip_limit_counts_passwords_only(env: TEnv) -> None:
     ip = "198.51.100.62"
     r = await env.pw(ALICE, PW, ip)  # 1 (password)
     await env.drain()
     pending, code = pending_of(r), env.last_code()
-    await env.pw(UNKNOWN, WRONG_PW, ip)  # 2 (password)
-    await env.enter("z@example.org", "nope", pending, ip)  # 3 (code)
-    assert (await env.enter(ALICE, code, pending, ip)).status == 401  # 4
-    # 15 minutes on, the IP has room again (the code has expired by then).
+    for i in range(5):  # code entries: not counted
+        await env.enter(f"z{i}@example.org", "nope", pending, ip)
+    assert (await env.enter(ALICE, code, pending, ip)).status == 303
+    await env.pw(UNKNOWN, WRONG_PW, ip)  # 2
+    await env.pw(BOB, WRONG_PW, ip)  # 3
+    assert await env.mails_after(env.pw(BOB, BOB_PW, ip)) == 0  # 4th: blocked
+    # 15 minutes on, the IP has room again.
     env.clock["t"] = T0 + 15 * MIN + 1
     assert await env.mails_after(env.pw(BOB, BOB_PW, ip)) == 1
 

@@ -44,10 +44,10 @@ ATTEMPT_RETENTION_S = _DAY_S
 BAN_RETENTION_S = 365 * _DAY_S
 #: Trusted browsers (``lens_device``) last one year from the trusting sign-in.
 TRUSTED_DEVICE_S = 365 * _DAY_S
-#: Untrusted sign-in budget per email (r6/c38): password submissions and
-#: code entries together. Normal: 3 per 15 minutes. Once it has been
-#: exhausted the email is strict -- 2 per 30 minutes -- until 24 hours pass
-#: with no blocked attempt.
+#: Untrusted sign-in budget per email (r6/c38): password submissions only
+#: (code entries are not counted, c41). Normal: 3 per 15 minutes. Once it
+#: has been exhausted the email is strict -- 2 per 30 minutes -- until 24
+#: hours pass with no blocked attempt.
 SIGNIN_BUDGET = (3, 900)
 SIGNIN_BUDGET_STRICT = (2, 1800)
 SIGNIN_BUDGET_QUIET_S = _DAY_S
