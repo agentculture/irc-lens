@@ -80,9 +80,9 @@ Approved deviations, quoted from the records:
 - `d8` — correct password submissions are refunded from both limits; only
   wrong ones count — review of #73, finding 2
 
-Not yet a decision (pending owner approval):
+Approved at closeout (filed late, at validate-delivery):
 
-- `d9` (proposed) — review fixes on #68 changed behavior outside the plan:
+- `d9` — review fixes on #68 changed behavior outside the plan:
   app sign-in turns itself off when `guest_mode.mail.provider` is `none`;
   `allowed_emails` compared without case on every app path; set-password
   checks the base URL before issuing a token; 429 alerts say "quota used up
@@ -111,20 +111,20 @@ Decisions no record covers:
 | `t8` (`d6`) | owner request during review of #68 | acceptable |
 | `t8` (`d7`) | live go-live: the owner's second browser on the same IP had its correct code silently refused | acceptable |
 | `t8` (`d8`) | several new browsers on one home IP could still lock the owner out at the password step | acceptable |
-| `t2`/`t6`/`t7`/`t8` (`d9`, proposed) | owner-confirmed review fixes, recorded only at closeout | needs-follow-up (owner approves or rejects `d9`) |
+| `t2`/`t6`/`t7`/`t8` (`d9`) | owner-confirmed review fixes, recorded only at closeout | acceptable |
 | `t11` | alert recipients limited to the owner; collaborator pending Email Routing verification | needs-follow-up |
 
 ## Evidence
 
 - tests: 47 obligation-mapped node ids (57 items with parametrization) ran
   green at merged main `cf6bad6` on 2026-10-10T21:32Z, filed as `e1`–`e19`
-  (one per obligation `o1`–`o19`, proposed); full suite 1277 passed.
+  (one per obligation `o1`–`o19`); full suite 1277 passed.
 - tests (amended behavior, `b1`–`b4`): `tests/test_trusted_devices.py`
   (incl. `test_second_browser_on_the_same_ip_signs_in`,
   `test_correct_passwords_are_not_counted`),
   `tests/test_app_signin.py::test_wrong_codes_never_lock_out_the_right_one`,
   `tests/test_signin_notice.py`, `tests/test_signin_review_fixes.py` — pass.
-- live observations (filed `e20`–`e23`, proposed):
+- live observations (`e20`–`e23`):
   - owner signed in live with "Trust this browser" (2026-10-10 23:13:37–51
     +0300); the new-browser notice email arrived (owner-confirmed);
   - `/login` break-glass in a private window authenticated through the
@@ -145,45 +145,49 @@ Decisions no record covers:
 
 ## Delivery Claims
 
-Evidence records `e1`–`e23` and deltas `b1`–`b5` are `proposed` (filed by
-the agent, awaiting owner confirmation); the tests they cite ran green and
-are resolvable. Lapses `l1`–`l9` are all pending approval, so none caps a
-confidence yet.
+The owner approved evidence `e1`–`e23`, deltas `b1`–`b5`, deviation `d9`
+and lapses `l1`–`l9` on 2026-10-11; the delta for `d9` is `b6` (proposed).
+Each approved lapse caps the confidence of the claims it touches at medium,
+named in the row: `l3`/`l4`/`l6` (tests not watched failing first), `l7`
+(the set-password grader missed the referrer bug), `l8` (trust-year test
+gap), `l9` (same-IP multi-browser case untested before go-live), `l1`/`l5`
+(alert binding and poster not checked end to end until go-live).
 
 | Claim | Confidence | Evidence |
 | --- | --- | --- |
 | `c10` the password step answers identically for every case, padded to the floor | high | `tests/test_app_signin.py::test_signin_four_cases_identical_and_floored` · `e1` |
 | `c9` a correct password without the emailed code never yields a session | high | `tests/test_app_signin.py::test_correct_password_without_mailbox_never_yields_session` · live `e22` |
-| `c11` codes: same browser only, single use, 10 minutes — the claim's "5 tries" limit was deliberately removed (`d7`) | medium | `tests/test_app_signin.py::test_code_is_single_use` · `test_wrong_codes_never_lock_out_the_right_one` · `e3`, delta `b3`; claim text predates `d7` |
-| `c12` server-side sessions, sha256 only, 7 d idle / 30 d cap, logout and password change end them | high | `tests/test_app_session.py::test_db_never_holds_raw_session_id` · `e4` |
-| `c13` the sign-in email says the right password was entered and how to change it | high | `tests/test_mail_signin.py::test_signin_body_says_password_entered_and_how_to_change` · `e5` |
-| `c14`/`c38` only wrong password submissions count, per IP (3/15 min) and per email (3/15 min, strict 2/30 min); trusted browsers unlimited; blocks silent | high | `tests/test_trusted_devices.py::test_correct_passwords_are_not_counted` · `test_strict_mode_two_per_thirty_minutes_after_exhaustion` · `e6`, deltas `b2`, `b4` |
-| `c15` set or reset password by emailed link (identical request screen, single use, 30 min, 12-char minimum, ends sessions) | high | `tests/test_setpw.py::test_set_password_argon2id_consumes_token_and_ends_sessions` · `e7` |
+| `c11` codes: same browser only, single use, 10 minutes — the claim's "5 tries" limit was deliberately removed (`d7`) | medium | `tests/test_app_signin.py::test_code_is_single_use` · `test_wrong_codes_never_lock_out_the_right_one` · `e3`, delta `b3`; claim text predates `d7` · capped by approved lapse l9 |
+| `c12` server-side sessions, sha256 only, 7 d idle / 30 d cap, logout and password change end them | medium | `tests/test_app_session.py::test_db_never_holds_raw_session_id` · `e4` · capped by approved lapse l4 |
+| `c13` the sign-in email says the right password was entered and how to change it | medium | `tests/test_mail_signin.py::test_signin_body_says_password_entered_and_how_to_change` · `e5` · capped by approved lapse l3 |
+| `c14`/`c38` only wrong password submissions count, per IP (3/15 min) and per email (3/15 min, strict 2/30 min); trusted browsers unlimited; blocks silent | medium | `tests/test_trusted_devices.py::test_correct_passwords_are_not_counted` · `test_strict_mode_two_per_thirty_minutes_after_exhaustion` · `e6`, deltas `b2`, `b4` · capped by approved lapse l9 |
+| `c15` set or reset password by emailed link (identical request screen, single use, 30 min, 12-char minimum, ends sessions) | medium | `tests/test_setpw.py::test_set_password_argon2id_consumes_token_and_ends_sessions` · `e7` · capped by approved lapse l7 |
 | `c16` an Access JWT still grants the approved tier; `/login` works | high | `tests/test_app_session.py::test_access_jwt_alone_still_approved` · live `e20` |
 | `c20` a legacy password under 12 characters still signs in | high | `tests/test_app_signin.py::test_short_legacy_password_still_signs_in` · `e8` |
-| `c24` one guest at a time; busy page before any code is mailed | high | `tests/test_guest_limit.py::test_simultaneous_verifies_admit_exactly_one` · `e10` |
-| `c25` a Resend failure posts one alert per kind per hour; the alert reaches approved users | medium | `tests/test_alerts.py::test_rate_limit_per_kind_and_after_an_hour` · `e11` · live `e21` (Worker path proven; a real Resend failure not forced live; collaborator not yet a recipient) |
+| `c24` one guest at a time; busy page before any code is mailed | medium | `tests/test_guest_limit.py::test_simultaneous_verifies_admit_exactly_one` · `e10` · capped by approved lapse l6 |
+| `c25` a Resend failure posts one alert per kind per hour; the alert reaches approved users | medium | `tests/test_alerts.py::test_rate_limit_per_kind_and_after_an_hour` · `e11` · live `e21` (Worker path proven; a real Resend failure not forced live; collaborator not yet a recipient) · capped by approved lapse l1, l5 |
 | `c27` CSRF proof covers `lens_session`, the pending cookie and `lens_device` | high | `tests/test_app_session.py::test_cross_site_post_with_new_cookie_is_403` · `e12` |
-| `c28` 15 minutes without an action signs a guest off | high | `tests/test_guest_limit.py::test_open_tab_with_no_input_is_signed_off` · `e13` (live config set to 900) |
+| `c28` 15 minutes without an action signs a guest off | medium | `tests/test_guest_limit.py::test_open_tab_with_no_input_is_signed_off` · `e13` (live config set to 900) · capped by approved lapse l6 |
 | `c29` ending a session closes its IRC session within one sweep | high | `tests/test_app_session.py::test_sweep_closes_irc_session_when_app_session_ends` · `e14` |
-| `c30` GET never consumes a set-password token | high | `tests/test_setpw.py::test_get_link_twice_leaves_token_usable` · `e15` |
+| `c30` GET never consumes a set-password token | medium | `tests/test_setpw.py::test_get_link_twice_leaves_token_usable` · `e15` · capped by approved lapse l7 |
 | `c31` a fresh session id at code entry, pending cookie cleared | high | `tests/test_app_signin.py::test_full_signin_reaches_real_mesh` · live `e23` |
 | `c32` `auth.app_signin.enabled: false` restores 0.12.2 | high | `tests/test_app_signin.py::test_switch_off_restores_login_redirect` · `e17` |
-| `c33` counters exist; no log line holds a code, session id or password | high | `tests/test_log_hygiene.py::test_no_secret_value_in_any_log_record` · `e18` |
-| `c34` the sweep removes expired sessions and old tokens after a day | high | `tests/test_app_sessions_store.py::test_sweep_at_day_plus_one_leaves_no_expired_rows` · `e19` |
-| `c37`/`c39` trusted browsers via an unchecked-by-default checkbox | high | `tests/test_trusted_devices.py` · delta `b1` · live sign-in with trust ticked |
+| `c33` counters exist; no log line holds a code, session id or password | medium | `tests/test_log_hygiene.py::test_no_secret_value_in_any_log_record` · `e18` · capped by approved lapse l3 |
+| `c34` the sweep removes expired sessions and old tokens after a day | medium | `tests/test_app_sessions_store.py::test_sweep_at_day_plus_one_leaves_no_expired_rows` · `e19` · capped by approved lapse l4 |
+| `c37`/`c39` trusted browsers via an unchecked-by-default checkbox | medium | `tests/test_trusted_devices.py` · delta `b1` · live sign-in with trust ticked · capped by approved lapse l8 |
 | `c40` new-browser sign-in notice | high | `tests/test_signin_notice.py` · delta `b5` · notice received live |
-| `d9` review fixes (no-provider auto-off, case-insensitive allowlist, base-URL check, 429 wording) | medium | `tests/test_signin_review_fixes.py` · `tests/test_alerts.py`; the deviation and its delta await owner approval |
+| `d9` review fixes (no-provider auto-off, case-insensitive allowlist, base-URL check, 429 wording) | high | `tests/test_signin_review_fixes.py` · `tests/test_alerts.py` · `d9` approved, delta `b6` (proposed) |
 
-Lapse ledger: pending approval (not yet evidence): `l1`–`l9`. `l1` (the
-send_email binding shape was written from memory) now has live evidence:
-Cloudflare accepted the binding and the test alert was delivered. `l9`
-records that the same-IP, multi-browser case was not tested before go-live.
+Lapse ledger (all approved): `l1` binding shape written from memory (now
+backed by live delivery), `l2` weak 'templates unchanged' grader, `l3`–`l6`
+tests not watched failing first, `l7` set-password grader blind to browser
+referrer policy (fixed, regression test added), `l8` trust-year test gap
+(fixed in review), `l9` same-IP multi-browser case untested before go-live
+(fixed in #73 with a regression test).
 
 ## Remaining Work / Follow-up
 
-- Owner adjudication — confirm or reject evidence `e1`–`e23`, deltas
-  `b1`–`b5`, deviation `d9` (then file its delta) and lapses `l1`–`l9`.
+- Owner adjudication — confirm or reject delta `b6` (the review fixes, `d9`).
 - Alert recipients — add the collaborator after their address is verified
   in Cloudflare Email Routing; redeploy with `cf-delivery-alert-deploy.sh
   --apply`.

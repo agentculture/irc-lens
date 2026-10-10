@@ -2,7 +2,7 @@
   "plan_slug": "app-native-sign-in",
   "schema_version": 2,
   "created": "2026-10-10T15:04:29Z",
-  "updated": "2026-10-10T21:33:09Z",
+  "updated": "2026-10-10T21:58:34Z",
   "deviations": [
     {
       "id": "d1",
@@ -116,7 +116,7 @@
       "reason": "owner confirmed the /code-review fixes on #68 ('confirmed as recommended'); filed late at validate-delivery because no record existed",
       "affects": [],
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "classification": null,
       "seq": 32
     }
@@ -137,7 +137,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 9
     },
@@ -156,7 +156,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 10
     },
@@ -175,7 +175,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 11
     },
@@ -194,7 +194,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 12
     },
@@ -213,7 +213,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 13
     },
@@ -232,7 +232,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 14
     },
@@ -251,7 +251,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 15
     },
@@ -270,7 +270,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 16
     },
@@ -289,7 +289,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 17
     },
@@ -308,7 +308,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 18
     },
@@ -327,7 +327,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 19
     },
@@ -346,7 +346,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 20
     },
@@ -365,7 +365,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 21
     },
@@ -384,7 +384,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 22
     },
@@ -403,7 +403,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 23
     },
@@ -422,7 +422,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 24
     },
@@ -441,7 +441,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 25
     },
@@ -460,7 +460,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 26
     },
@@ -479,7 +479,7 @@
         "commit": "cf6bad6"
       },
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 27
     },
@@ -495,7 +495,7 @@
       "outcome": "pass",
       "run": null,
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 28
     },
@@ -511,7 +511,7 @@
       "outcome": "pass",
       "run": null,
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 29
     },
@@ -527,7 +527,7 @@
       "outcome": "pass",
       "run": null,
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 30
     },
@@ -543,7 +543,7 @@
       "outcome": "pass",
       "run": null,
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false,
       "seq": 31
     }
@@ -560,7 +560,7 @@
         "e6"
       ],
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false
     },
     {
@@ -574,7 +574,7 @@
         "e6"
       ],
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false
     },
     {
@@ -588,7 +588,7 @@
         "e3"
       ],
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false
     },
     {
@@ -602,7 +602,7 @@
         "e6"
       ],
       "origin": "llm",
-      "status": "proposed",
+      "status": "approved",
       "superseded": false
     },
     {
@@ -613,6 +613,20 @@
         "d6"
       ],
       "evidence_refs": [],
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false
+    },
+    {
+      "id": "b6",
+      "kind": "added",
+      "behavior_text": "app sign-in turns itself off without a mail provider; allowed_emails compared case-insensitively on every app path; set-password validates the base URL before issuing a token; 429 alerts worded 'quota used up or rate-limited' (tests/test_signin_review_fixes.py, tests/test_alerts.py)",
+      "caused_by": [
+        "d9"
+      ],
+      "evidence_refs": [
+        "e11"
+      ],
       "origin": "llm",
       "status": "proposed",
       "superseded": false

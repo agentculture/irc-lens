@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-10-10T14:30:58Z",
-  "updated": "2026-10-10T21:33:01Z",
+  "updated": "2026-10-10T21:58:30Z",
   "claims": [
     {
       "id": "c1",
@@ -867,7 +867,7 @@
         "t4 cultureflare cf-delivery-alert-deploy.sh"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l2",
@@ -878,7 +878,7 @@
         "t3 tests/test_mail_signin.py"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l3",
@@ -889,7 +889,7 @@
         "t2 tests/test_config_app_signin.py; t3 tests/test_mail_signin.py"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l4",
@@ -900,7 +900,7 @@
         "t1 tests/test_app_sessions_store.py"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l5",
@@ -911,7 +911,7 @@
         "t7 src/irc_lens/alerts.py"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l6",
@@ -922,7 +922,7 @@
         "t9 src/irc_lens/web/sessions.py"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l7",
@@ -933,7 +933,7 @@
         "t6 tests/test_setpw.py"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l8",
@@ -944,7 +944,7 @@
         "c37 add_trusted_device"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l9",
@@ -955,7 +955,7 @@
         "c38 / d7 / irc-lens #73"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     }
   ],
   "obligations": [
