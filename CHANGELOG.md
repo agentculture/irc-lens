@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-10-10
+
+### Changed
+
+- Guest data deletion warns before the **Delete my data** button that it
+  is permanent and nothing is kept, and the done page now says the data was
+  deleted instead of "Done.".
+- The deletion email has its own subject and text (it reused the guest-seat
+  sign-up email), still identical for every address.
+
+### Fixed
+
+- A guest typing `/delete` in the chat is redirected to the deletion page
+  instead of getting "Not in guest view"; `/delete` is listed in the guest
+  palette and help pane as a page link.
+
 ## [0.12.1] - 2026-10-10
 
 ### Fixed

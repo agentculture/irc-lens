@@ -38,6 +38,8 @@ from aiohttp import web
 
 from irc_lens import metrics
 from irc_lens.commands import (
+    DELETE_COMMAND,
+    DELETE_PAGE,
     SANDBOX_COMMAND,
     CommandType,
     ParsedCommand,
@@ -664,6 +666,10 @@ def _sandbox_policy(
     _, backend = _backend_for(request)
     if backend != BACKEND_SANDBOX:
         return None
+    if identity.tier == TIER_GUEST and text.strip().lower() == DELETE_COMMAND:
+        # Deletion is a page (confirmed by an emailed code), not an IRC
+        # command: send the guest there instead of "Not in guest view".
+        return web.Response(status=204, headers={"HX-Redirect": DELETE_PAGE})
     if identity.tier == TIER_GUEST and _message_rate_limited(request, identity):
         metrics.get_metrics().rate_limited()
         return web.json_response(

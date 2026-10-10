@@ -137,6 +137,11 @@ SANDBOX_ALLOWED = frozenset(
 #: Command name typed for the sandbox toggle (approved users on the mesh).
 SANDBOX_COMMAND = "/sandbox"
 
+#: Typed by a guest: opens the data-deletion page (it is a page, not an IRC
+#: command — deletion is confirmed there with an emailed code).
+DELETE_COMMAND = "/delete"
+DELETE_PAGE = "/delete"
+
 
 @dataclass(frozen=True)
 class PaletteEntry:
@@ -160,6 +165,12 @@ PALETTE: tuple[PaletteEntry, ...] = (
 )
 
 
+#: Page links offered only to guests (not the approved user's Guest view).
+_GUEST_ONLY: tuple[PaletteEntry, ...] = (
+    PaletteEntry(DELETE_COMMAND, "Delete my data", True, href=DELETE_PAGE),
+)
+
+
 def palette_for(tier: str, *, sandbox_toggle: bool = False) -> list[PaletteEntry]:
     """Commands to show for *tier* (``approved`` | ``guest`` | ``sandbox_preview``).
 
@@ -167,6 +178,8 @@ def palette_for(tier: str, *, sandbox_toggle: bool = False) -> list[PaletteEntry
     commands that work there. ``/sandbox`` is offered only to approved users
     on the real mesh, and only while guest mode is on (*sandbox_toggle*).
     """
+    if tier == "guest":
+        return [e for e in PALETTE if e.sandbox] + list(_GUEST_ONLY)
     if tier != "approved":
         return [e for e in PALETTE if e.sandbox]
     return [e for e in PALETTE if e.command != SANDBOX_COMMAND or sandbox_toggle]

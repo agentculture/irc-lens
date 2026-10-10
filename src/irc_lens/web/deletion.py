@@ -25,7 +25,7 @@ from pathlib import Path
 from aiohttp import web
 
 from irc_lens import metrics
-from irc_lens.mail import render_token_email
+from irc_lens.mail import PURPOSE_DELETE, render_token_email
 from irc_lens.web import csrf
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import (
@@ -150,7 +150,7 @@ async def post_request(request: web.Request) -> web.Response:
         metrics.get_metrics().rate_limited()
     elif _plausible_email(email) and store.get_guest(email):
         token = store.issue_token(email, purpose=TOKEN_PURPOSE)
-        subject, body = render_token_email(token)
+        subject, body = render_token_email(token, purpose=PURPOSE_DELETE)
         try:
             await asyncio.to_thread(state.get_mailer().send, email, subject, body)
         except Exception as exc:  # noqa: BLE001 -- same page either way

@@ -107,8 +107,9 @@ def _page_text(html: str) -> list[str]:
 
 
 def test_palette_guest_shows_only_sandbox_commands() -> None:
-    cmds = [e.command for e in palette_for("guest")]
-    assert cmds == ["/help", "/who", "/me", "/read"]
+    cmds = ["/help", "/who", "/me", "/read"]
+    assert [e.command for e in palette_for("guest")] == cmds + ["/delete"]
+    # The approved user's Guest view has no guest data to delete.
     assert [e.command for e in palette_for("sandbox_preview")] == cmds
 
 
@@ -136,8 +137,13 @@ def test_palette_descriptions_are_one_to_three_words() -> None:
 
 
 def test_every_palette_sandbox_command_is_allowed_server_side() -> None:
-    """The palette never offers a guest a command the allowlist refuses."""
+    """The palette never offers a guest a command the allowlist refuses.
+
+    Page links (``href``) are not IRC commands; they navigate instead.
+    """
     for e in palette_for("guest"):
+        if e.href:
+            continue
         assert allowed_in_sandbox(parse_command(f"{e.command} x")), e.command
 
 
@@ -151,7 +157,8 @@ async def test_guest_page_palette_lists_only_allowed(env: Env) -> None:
     env.add_guest()
     html = await (await env.client.get("/", headers=env.guest_headers())).text()
     rows = re.findall(r'data-cmd="(/[a-z]+)"', html)
-    assert rows == ["/help", "/who", "/me", "/read"]
+    assert rows == ["/help", "/who", "/me", "/read", "/delete"]
+    assert 'data-cmd="/delete" data-href="/delete"' in html
     for hidden in _SANDBOX_ONLY_HIDDEN:
         assert f'data-cmd="{hidden}"' not in html
 
@@ -474,3 +481,37 @@ async def test_owner_metrics_agent_state_uses_room_membership(env: Env) -> None:
     await env.client.get("/presence", headers=env.guest_headers())  # a poll re-reads WHO
     body = await (await env.client.get("/owner/metrics", headers=env.approved_headers())).json()
     assert body["agent"]["state"] == "online"
+
+
+# -- guest data deletion is a page, reachable from the chat -------------------
+
+
+async def test_guest_typing_delete_is_sent_to_the_deletion_page(env: Env) -> None:
+    env.add_guest()
+    h = env.guest_headers()
+    await env.client.get("/", headers=h)
+    before = len(env.sandbox.received)
+    for text in ("/delete", " /DELETE "):
+        r = await env.client.post("/input", json={"text": text}, headers=h)
+        assert r.status == 204
+        assert r.headers["HX-Redirect"] == "/delete"
+    assert len(env.sandbox.received) == before
+    assert env.mesh.received == []
+
+
+async def test_sandbox_preview_delete_is_still_refused(env: Env) -> None:
+    h = env.approved_headers()
+    await env.client.post("/sandbox/enter", headers=h)
+    await env.client.get("/", headers=h)
+    r = await env.client.post("/input", json={"text": "/delete"}, headers=h)
+    assert r.status == 403
+    assert "HX-Redirect" not in r.headers
+
+
+async def test_guest_help_pane_links_the_deletion_page(env: Env) -> None:
+    env.add_guest()
+    await env.client.get("/", headers=env.guest_headers())
+    session = env.app["registry"].values()[0]
+    session.set_view("help")
+    out = render_fragment("_info.html.j2", session=session)
+    assert '<a href="/delete">/delete</a>' in out
