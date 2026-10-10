@@ -28,6 +28,8 @@
         </div>
         {% elif step == "form" %}
         <form method="post" action="/password/{{ token }}" class="entry-form">
+          {# Lets password managers save the new password for this account. #}
+          <input type="text" name="username" autocomplete="username" value="{{ email }}" hidden>
           <label for="setpw-password">New password</label>
           <input id="setpw-password" name="password" type="password"
                  autocomplete="new-password" required autofocus

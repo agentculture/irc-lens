@@ -538,3 +538,11 @@ async def test_setpw_pages_never_send_no_referrer(env):
         html = await r.text()
         assert r.headers["Referrer-Policy"] == "same-origin"
         assert "no-referrer" not in html
+
+
+async def test_form_carries_username_for_password_managers(env):
+    await env.request_link(ALICE)
+    _base, token = env.link()
+    html = await (await env.client.get(f"/password/{token}")).text()
+    assert 'autocomplete="username"' in html
+    assert f'value="{ALICE}"' in html

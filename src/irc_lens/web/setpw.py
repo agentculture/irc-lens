@@ -114,11 +114,14 @@ def install(app: web.Application) -> None:
     app.router.add_post("/password/{token}", post_token)
 
 
-def _page(step: str, *, status: int = 200, token: str = "", error: str = ""):
+def _page(
+    step: str, *, status: int = 200, token: str = "", error: str = "", email: str = ""
+):
     html = render_fragment(
         "setpw.html.j2",
         step=step,
         token=token,
+        email=email,
         error=error,
         min_len=MIN_PASSWORD_LEN,
         max_len=MAX_PASSWORD_LEN,
@@ -212,9 +215,10 @@ async def get_token(request: web.Request) -> web.Response:  # NOSONAR S7503
     """The new-password form; a GET never uses the token up (c30)."""
     state = _state(request)
     token = request.match_info["token"]
-    if _live_email(request, state.get_store(), token) is None:
+    email = _live_email(request, state.get_store(), token)
+    if email is None:
         return _invalid()
-    return _page("form", token=token)
+    return _page("form", token=token, email=email)
 
 
 @allows_anonymous
@@ -236,7 +240,7 @@ async def post_token(request: web.Request) -> web.Response:
         return _invalid()
     if limited:
         metrics.get_metrics().rate_limited()
-        return _page("form", status=429, token=token, error=ERR_LATER)
+        return _page("form", status=429, token=token, error=ERR_LATER, email=email)
 
     form = await request.post()
     password = str(form.get("password") or "")
@@ -249,7 +253,7 @@ async def post_token(request: web.Request) -> web.Response:
     elif password != confirm:
         error = ERR_MISMATCH
     if error:
-        return _page("form", status=400, token=token, error=error)
+        return _page("form", status=400, token=token, error=error, email=email)
 
     if store.consume_token(token, purpose=TOKEN_PURPOSE) != email:
         return _invalid()
