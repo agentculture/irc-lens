@@ -13,6 +13,7 @@ and streamed to subscribers. Each subscriber owns a bounded queue
 | `chat` | HTML | `_chat_line.html.j2` | append `#chat-log` |
 | `roster` | HTML | `_sidebar.html.j2` | replace `#sidebar` |
 | `info` | HTML | `_info.html.j2` | replace `#info` |
+| `typing` | HTML (empty when nobody is thinking) | `_typing.html.j2` | replace `#typing` |
 | `view` | JSON view state | — | `<body data-view>` |
 | `error` | JSON message | — | `#toast-region` |
 
@@ -34,9 +35,23 @@ Source: `src/irc_lens/session.py`.
 | `_exec_part(channel)` (`/part`) | `roster` + `info` |
 | `_switch_view(name)` (`/help`, `/overview`, `/status`) | `view` + `info` |
 | Inbound `PRIVMSG` to active channel | `chat` |
+| `_exec_chat` in a sandbox room the sandbox agent is in | `typing` ("`<agent>` is thinking") |
+| Inbound `PRIVMSG` from the sandbox agent, `THINKING_TIMEOUT_S` (90 s), room switch (`log`) | `typing` (cleared, or the new room's state) |
 | Inbound `JOIN` / `PART` (server-confirmed) | `roster` |
 | Any `_publish_error` (invalid input, unsupported verb) | `error` |
 | Subscriber queue overflow | one-shot `error` (`events dropped`) |
+
+## "Agent is thinking" (`typing`)
+
+Sandbox sessions (guest and an approved user's Guest view) set
+`Session.thinking_agent` to the sandbox agent's nick. Sending a message in
+a room the agent is in (per the live roster) shows "`<agent>` is
+thinking" with animated dots (static under `prefers-reduced-motion`)
+under the log, until the agent's next message in that room, a 90 s
+timeout, or disconnect. The real mesh never shows it: agents there don't
+answer every message. This is lens-side inference for now; once AgentIRC
+relays IRCv3 `TAGMSG` and the agent sends `+typing`, the same event will
+be driven by the real signal.
 
 ## Wire format
 
@@ -77,6 +92,7 @@ pinned by `tests/test_render.py`.
 | `[data-testid="chat-line"]` | `_chat_line.html.j2` | Chat line (timestamp) |
 | `[data-testid="chat-line-nick"]` | `_chat_line.html.j2` | Nick span |
 | `[data-testid="chat-line-text"]` | `_chat_line.html.j2` | Text span |
+| `[data-testid="typing-slot"]` / `[data-testid="agent-typing"]` | `index.html.j2` / `_typing.html.j2` | "`<agent>` is thinking" slot (polite live region) and its line |
 | `[data-testid="media-embed"]` | `_chat_line/media.js` | Embedded media |
 | `[data-testid="media-placeholder"]` | `_chat_line.html.j2` | Media card |
 | `[data-testid="media-attach"]` | `index.html.j2` | Attach button |

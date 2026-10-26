@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-26
+
+### Added
+
+- **"sbx-ask is thinking" in sandbox rooms.** After a guest (or an approved
+  user's Guest view) sends a message in a room the sandbox agent is in, the
+  room shows "`sbx-ask` is thinking" with animated dots under the log until
+  the agent answers there (or 90 s pass). New SSE event `typing`
+  (`_typing.html.j2`, `#typing`, a polite live region; dots are static
+  under `prefers-reduced-motion`). Never shown on the real mesh. Lens-side
+  for now: the real IRCv3 `TAGMSG +typing` signal needs AgentIRC and the
+  agent first.
+
 ## [0.14.0] - 2026-10-26
 
 ### Changed

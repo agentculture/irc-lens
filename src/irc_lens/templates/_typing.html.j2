@@ -1,0 +1,3 @@
+{#- "<agent> is thinking" line under the chat log (SSE `typing`). Empty
+    when nobody is thinking; the slot itself stays in the page. -#}
+{% if agent %}<div class="lens-typing" data-testid="agent-typing"><span class="lens-typing-nick">{{ agent }}</span> is thinking<span class="lens-typing-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></div>{% endif %}

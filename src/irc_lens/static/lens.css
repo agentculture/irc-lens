@@ -225,6 +225,34 @@ body.lens-sandbox { border-top: 4px solid var(--lens-amber); }
 body[data-view="mesh"] .lens-log  { display: none; }
 body[data-view="mesh"] .lens-mesh { display: block; }
 
+/* "<agent> is thinking": overlays the bottom edge of the log row. */
+.lens-typing-slot {
+  grid-row: 2;
+  grid-column: 1;
+  align-self: end;
+  pointer-events: none;
+  padding: 0 16px 6px;
+  font-family: var(--lens-mono);
+  font-size: 0.85rem;
+}
+.lens-typing {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--lens-surface);
+  border: 1px solid var(--lens-border);
+  color: var(--lens-muted);
+}
+.lens-typing-nick { color: var(--lens-accent); }
+.lens-typing-dots span { animation: lens-typing-blink 1.2s infinite both; }
+.lens-typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.lens-typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes lens-typing-blink {
+  0%, 80%, 100% { opacity: 0.2; }
+  40% { opacity: 1; }
+}
+body[data-view="mesh"] .lens-typing-slot { display: none; }
+
 .lens-media-controls { grid-row: 3; grid-column: 1; padding: 4px 16px 0; display: flex; gap: 8px; }
 .lens-media-controls button {
   background: transparent;
@@ -479,6 +507,7 @@ body[data-conn="down"] .lens-conn { color: var(--lens-down); }
 
 @media (prefers-reduced-motion: reduce) {
   .lens-sidebar { transition: none; }
+  .lens-typing-dots span { animation: none; opacity: 1; }
 }
 
 .lens-empty-hint {

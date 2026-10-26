@@ -46,6 +46,9 @@ REGISTER_TIMEOUT = 15.0
 #: interval catches membership churn that arrives without an observed
 #: JOIN/PART and keeps a freshly-loaded mesh view current.
 MESH_REFRESH_INTERVAL = 10.0
+#: How long the "<agent> is thinking" line may stay up without the agent
+#: answering (the sandbox agent normally answers within ~30 s).
+THINKING_TIMEOUT_S = 90.0
 
 #: The named views the spec's ``info`` event can switch between. ``mesh``
 #: is the irc-lens live agent-mesh graph view — a vanilla-JS port of
@@ -312,6 +315,13 @@ class Session:
         # an approved user on the mesh while guest mode is on.
         self.ui_tier: str = "approved"
         self.sandbox_available: bool = False
+        # Sandbox sessions (guest / sandbox preview) name the sandbox agent
+        # here; after a message is sent in a room the agent is in, the room
+        # shows "<agent> is thinking" until the agent answers (or
+        # THINKING_TIMEOUT_S passes). None: no indicator (the real mesh,
+        # where agents don't answer every message).
+        self.thinking_agent: str | None = None
+        self._thinking: dict[str, asyncio.TimerHandle] = {}
 
         # Cited primitives.
         self.buffer = MessageBuffer()
@@ -456,6 +466,9 @@ class Session:
             raise LensConnectionLost(f"nick rejected: {self._nick_rejection}")
 
     async def disconnect(self) -> None:
+        for handle in self._thinking.values():
+            handle.cancel()
+        self._thinking.clear()
         await self._cancel_mesh_tasks()
         await self._transport.disconnect()
 
@@ -693,6 +706,8 @@ class Session:
             return
         await self.send_privmsg(self.current_channel, text)
         self._publish_chat(self.nick, text)
+        if self._agent_in_room():
+            self._start_thinking(self.current_channel)
 
     async def _exec_send(self, parsed: ParsedCommand) -> None:
         if not parsed.args:
@@ -1074,6 +1089,8 @@ class Session:
         # the transport already drops them from the buffer; mirror.
         if sender.startswith("system-"):
             return
+        if self.thinking_agent and sender.lower() == self.thinking_agent.lower():
+            self._stop_thinking(target)
         # Only publish when the message belongs in the active pane.
         # DMs come addressed to our own nick.
         if target != self.current_channel and target != self.nick:
@@ -1118,6 +1135,47 @@ class Session:
         )
         self.event_bus.publish(SessionEvent(name="chat", data=fragment))
 
+    # -- "<agent> is thinking" ------------------------------------------
+
+    def _agent_in_room(self) -> bool:
+        """True iff a thinking agent is set and is in the active room."""
+        agent = (self.thinking_agent or "").lower()
+        return bool(agent) and any(e.nick.lower() == agent for e in self.roster)
+
+    def thinking_in(self, channel: str) -> str | None:
+        """The agent nick thinking in *channel*, or None."""
+        return self.thinking_agent if channel in self._thinking else None
+
+    def typing_html(self) -> str:
+        """The typing slot's content for the active room."""
+        from irc_lens.web.render import render_fragment
+
+        return render_fragment(
+            "_typing.html.j2", agent=self.thinking_in(self.current_channel)
+        )
+
+    def _start_thinking(self, channel: str) -> None:
+        old = self._thinking.pop(channel, None)
+        if old is not None:
+            old.cancel()
+        loop = asyncio.get_running_loop()
+        self._thinking[channel] = loop.call_later(
+            THINKING_TIMEOUT_S, self._stop_thinking, channel
+        )
+        if channel == self.current_channel:
+            self._publish_typing()
+
+    def _stop_thinking(self, channel: str) -> None:
+        handle = self._thinking.pop(channel, None)
+        if handle is None:
+            return
+        handle.cancel()
+        if channel == self.current_channel:
+            self._publish_typing()
+
+    def _publish_typing(self) -> None:
+        self.event_bus.publish(SessionEvent(name="typing", data=self.typing_html()))
+
     def _publish_log(self, html: str) -> None:
         """Publish a full chat-log replacement (innerHTML of #chat-log).
 
@@ -1126,6 +1184,8 @@ class Session:
         channel's lines. Live `chat` events continue to append after.
         """
         self.event_bus.publish(SessionEvent(name="log", data=html))
+        # The room changed: show that room's thinking state.
+        self._publish_typing()
 
     def _publish_roster(self) -> None:
         from irc_lens.web.render import render_fragment
