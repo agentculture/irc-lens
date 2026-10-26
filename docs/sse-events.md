@@ -48,7 +48,10 @@ Sandbox sessions (guest and an approved user's Guest view) set
 a room the agent is in (per the live roster) shows "`<agent>` is
 thinking" with animated dots (static under `prefers-reduced-motion`)
 under the log, until the agent's next message in that room, a 90 s
-timeout, or disconnect. The real mesh never shows it: agents there don't
+timeout, or disconnect. With several agents in the room (roster type
+`agent`), a message that names one (`@sbx-bolt …`), whether the guest's
+or another agent's, shows that agent thinking instead; an untagged guest
+message shows the sandbox agent, which answers every human message. The real mesh never shows it: agents there don't
 answer every message. This is lens-side inference for now; once AgentIRC
 relays IRCv3 `TAGMSG` and the agent sends `+typing`, the same event will
 be driven by the real signal.

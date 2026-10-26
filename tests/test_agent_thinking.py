@@ -124,3 +124,38 @@ async def test_page_render_and_disconnect() -> None:
     await s.disconnect()
     assert s.thinking_in(ROOM) is None
     assert 'data-testid="agent-typing"' not in render_index(s)
+
+
+# -- several agents: the named one thinks ---------------------------------
+
+BOLT = "sbx-bolt"
+
+
+def _two_agent_session() -> Session:
+    s = _sandbox_session()
+    s.set_roster([*s.roster, EntityItem(nick=BOLT, type="agent")])
+    return s
+
+
+async def test_tagging_an_agent_shows_that_agent() -> None:
+    s = _two_agent_session()
+    await _say(s, "@sbx-bolt what do you think?")
+    assert s.thinking_in(ROOM) == BOLT
+    await _agent_says(s)  # sbx-ask speaking doesn't clear bolt
+    assert s.thinking_in(ROOM) == BOLT
+    await s.dispatch(Message(prefix=f"{BOLT}!b@h", command="PRIVMSG", params=[ROOM, "x"]))
+    assert s.thinking_in(ROOM) is None
+
+
+async def test_untagged_human_message_shows_the_sandbox_agent() -> None:
+    s = _two_agent_session()
+    await _say(s, "hello there")
+    assert s.thinking_in(ROOM) == AGENT
+
+
+async def test_an_agent_naming_another_agent_hands_over() -> None:
+    s = _two_agent_session()
+    await _say(s, "@sbx-bolt ask sbx-ask something")
+    reply = "sbx-ann: sure. @sbx-ask what is culture?"
+    await s.dispatch(Message(prefix=f"{BOLT}!b@h", command="PRIVMSG", params=[ROOM, reply]))
+    assert s.thinking_in(ROOM) == AGENT
