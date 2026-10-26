@@ -1147,20 +1147,26 @@ class Session:
         agent = (self.thinking_agent or "").lower()
         return [e.nick for e in self.roster if e.type == "agent" or e.nick.lower() == agent]
 
+    def _is_agent(self, nick: str) -> bool:
+        return any(n.lower() == nick.lower() for n in self._room_agents())
+
     def _default_agent(self) -> str | None:
         """The sandbox agent, if it is in the active room (it answers every
         message there)."""
         agent = (self.thinking_agent or "").lower()
         return next((n for n in self._room_agents() if n.lower() == agent), None)
 
-    def _agent_named(self, text: str, sender: str) -> str | None:
-        """The first agent in the active room that *text* names (never the
-        sender), or None."""
-        for nick in self._room_agents():
-            if nick.lower() == sender.lower():
-                continue
-            if re.search(rf"(^|\W)@?{re.escape(nick)}\b", text, flags=re.IGNORECASE):
-                return nick
+    def _agent_named(self, text: str, sender: str, *, at_only: bool = False) -> str | None:
+        """The agent in the active room that *text* addresses (never the
+        sender), or None. Mirrors the sandbox agents' own rule: an explicit
+        "@nick" wins; a bare nick counts only when nobody is @-tagged, and
+        not at all with *at_only* (between agents, where a bare nick is just
+        a mention)."""
+        agents = [n for n in self._room_agents() if n.lower() != sender.lower()]
+        for mark in ("@",) if at_only else ("@", "@?"):
+            for nick in agents:
+                if re.search(rf"(^|\W){mark}{re.escape(nick)}\b", text, flags=re.IGNORECASE):
+                    return nick
         return None
 
     def _note_thinking(self, sender: str, target: str, text: str) -> None:
@@ -1171,7 +1177,7 @@ class Session:
         if current is not None and current[0].lower() == sender.lower():
             self._stop_thinking(target)
         if target == self.current_channel:
-            named = self._agent_named(text, sender)
+            named = self._agent_named(text, sender, at_only=self._is_agent(sender))
             if named:
                 self._start_thinking(target, named)
 

@@ -153,6 +153,22 @@ async def test_untagged_human_message_shows_the_sandbox_agent() -> None:
     assert s.thinking_in(ROOM) == AGENT
 
 
+async def test_an_agent_mentioning_another_by_bare_nick_does_not() -> None:
+    """Between agents only "@nick" hands over (a bare nick is a mention):
+    the same rule the sandbox agents apply."""
+    s = _two_agent_session()
+    await _say(s, "@sbx-bolt hi")
+    reply = "sbx-ann: for docs questions, sbx-ask is the one to ask."
+    await s.dispatch(Message(prefix=f"{BOLT}!b@h", command="PRIVMSG", params=[ROOM, reply]))
+    assert s.thinking_in(ROOM) is None
+
+
+async def test_human_at_tag_beats_a_bare_mention() -> None:
+    s = _two_agent_session()
+    await _say(s, "@sbx-bolt please ask sbx-ask for me")
+    assert s.thinking_in(ROOM) == BOLT
+
+
 async def test_an_agent_naming_another_agent_hands_over() -> None:
     s = _two_agent_session()
     await _say(s, "@sbx-bolt ask sbx-ask something")
