@@ -52,7 +52,7 @@ jobs:
           SONAR_HOST_URL: https://sonarcloud.io
 
   playwright:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04  # Playwright has no chromium build for ubuntu-latest (26.04) yet
     permissions:
       contents: read
     steps:

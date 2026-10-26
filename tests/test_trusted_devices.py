@@ -543,6 +543,7 @@ async def test_per_ip_limit_counts_wrong_passwords_only(env: TEnv) -> None:
     await env.pw(BOB, WRONG_PW, ip)  # 2
     await env.pw(ALICE, WRONG_PW, ip)  # 3
     await env.pw(UNKNOWN, WRONG_PW, ip)  # a guest sign-in: not counted
+    await env.drain()  # its guest-code mail, so the next count is Bob's only
     assert await env.mails_after(env.pw(BOB, BOB_PW, ip)) == 0  # 4th: blocked
     # 15 minutes on, the IP has room again.
     env.clock["t"] = T0 + 15 * MIN + 1
