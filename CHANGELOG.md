@@ -46,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CI fails a PR with an unresolved SonarCloud issue.** A code smell leaves
+  the quality gate green, so a new step after the scan
+  (`scripts/sonar-pr-issues.py`, cited verbatim from culture-rules, with its
+  tests) waits for the analysis of the PR's head commit and fails while any
+  issue is OPEN or CONFIRMED; ACCEPTED and FALSE_POSITIVE ones pass.
 - **Guest log out** (`POST /guest/logout`, the guest's Log out button):
   closes the guest's sandbox session, frees the guest seat at once and
   clears `lens_guest`. Before, a guest could only free the seat by deleting
