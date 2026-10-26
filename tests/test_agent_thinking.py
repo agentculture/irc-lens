@@ -175,3 +175,26 @@ async def test_an_agent_naming_another_agent_hands_over() -> None:
     reply = "sbx-ann: sure. @sbx-ask what is culture?"
     await s.dispatch(Message(prefix=f"{BOLT}!b@h", command="PRIVMSG", params=[ROOM, reply]))
     assert s.thinking_in(ROOM) == AGENT
+
+
+# -- review fixes: mirror the agents' hop cap and empty-question rule ------
+
+
+async def test_agent_handover_shows_once_per_human_message() -> None:
+    s = _two_agent_session()
+    await _say(s, "@sbx-bolt ask sbx-ask something")
+    hop1 = Message(prefix=f"{BOLT}!b@h", command="PRIVMSG", params=[ROOM, "@sbx-ask what is X?"])
+    await s.dispatch(hop1)
+    assert s.thinking_in(ROOM) == AGENT
+    await _agent_says(s)  # sbx-ask answers, clears
+    hop2 = Message(prefix=f"{AGENT}!a@h", command="PRIVMSG", params=[ROOM, "@sbx-bolt and you?"])
+    await s.dispatch(hop2)
+    assert s.thinking_in(ROOM) is None  # past the hop cap: bolt won't answer
+    await _say(s, "@sbx-bolt again")  # a human line resets the cap
+    assert s.thinking_in(ROOM) == BOLT
+
+
+async def test_bare_tag_with_nothing_to_answer_shows_nothing() -> None:
+    s = _two_agent_session()
+    await _say(s, "@sbx-ask")
+    assert s.thinking_in(ROOM) is None

@@ -51,7 +51,15 @@ under the log, until the agent's next message in that room, a 90 s
 timeout, or disconnect. With several agents in the room (roster type
 `agent`), a message that names one (`@sbx-bolt …`), whether the guest's
 or another agent's, shows that agent thinking instead; an untagged guest
-message shows the sandbox agent, which answers every human message. The real mesh never shows it: agents there don't
+message shows the sandbox agent, which answers every human message. The
+lens mirrors the sandbox agents' loop guard (culture `max_agent_hops`): an
+explicit `@nick` wins over a bare nick, between agents only `@nick` hands
+over, at most `MAX_AGENT_HOPS` (1) agent-to-agent handover shows an
+indicator per human message, and a bare `@nick` with nothing else (which
+the agents ignore) shows none. Known limits until the real `+typing`
+signal: a message tagging two agents shows only the first one, and the
+indicator can't know when an agent drops a question it received (a full
+queue, a crashed agent); the 90 s timeout covers those. The real mesh never shows it: agents there don't
 answer every message. This is lens-side inference for now; once AgentIRC
 relays IRCv3 `TAGMSG` and the agent sends `+typing`, the same event will
 be driven by the real signal.

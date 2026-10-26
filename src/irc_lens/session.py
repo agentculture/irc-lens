@@ -50,6 +50,9 @@ MESH_REFRESH_INTERVAL = 10.0
 #: How long the "<agent> is thinking" line may stay up without the agent
 #: answering (the sandbox agent normally answers within ~30 s).
 THINKING_TIMEOUT_S = 90.0
+#: Agent-to-agent handovers that show an indicator per room after each human
+#: message: the sandbox agents' own ``max_agent_hops`` default (culture).
+MAX_AGENT_HOPS = 1
 
 #: The named views the spec's ``info`` event can switch between. ``mesh``
 #: is the irc-lens live agent-mesh graph view — a vanilla-JS port of
@@ -326,6 +329,8 @@ class Session:
         self.thinking_agent: str | None = None
         # channel -> (thinking agent nick, timeout handle)
         self._thinking: dict[str, tuple[str, asyncio.TimerHandle]] = {}
+        # channel -> agent-to-agent handovers shown since the last human line
+        self._agent_hops: dict[str, int] = {}
 
         # Cited primitives.
         self.buffer = MessageBuffer()
@@ -710,8 +715,9 @@ class Session:
             return
         await self.send_privmsg(self.current_channel, text)
         self._publish_chat(self.nick, text)
+        self._agent_hops.pop(self.current_channel, None)  # a human spoke
         agent = self._agent_named(text, self.nick) or self._default_agent()
-        if agent:
+        if agent and self._has_question(text, agent):
             self._start_thinking(self.current_channel, agent)
 
     async def _exec_send(self, parsed: ParsedCommand) -> None:
@@ -1169,6 +1175,13 @@ class Session:
                     return nick
         return None
 
+    @staticmethod
+    def _has_question(text: str, agent: str) -> bool:
+        """Whether anything is left once the agent's tag is removed (the
+        agents ignore a bare "@nick")."""
+        rest = re.sub(rf"@?{re.escape(agent)}[:,]?\s*", "", text, flags=re.IGNORECASE)
+        return bool(rest.strip())
+
     def _note_thinking(self, sender: str, target: str, text: str) -> None:
         """Inbound message in a sandbox session: the thinking agent spoke
         (clear), and/or it names another agent in the room (that one
@@ -1176,10 +1189,22 @@ class Session:
         current = self._thinking.get(target)
         if current is not None and current[0].lower() == sender.lower():
             self._stop_thinking(target)
-        if target == self.current_channel:
-            named = self._agent_named(text, sender, at_only=self._is_agent(sender))
-            if named:
-                self._start_thinking(target, named)
+        from_agent = self._is_agent(sender)
+        if not from_agent:
+            self._agent_hops.pop(target, None)  # a human spoke
+        if target != self.current_channel:
+            return
+        named = self._agent_named(text, sender, at_only=from_agent)
+        if not named or not self._has_question(text, named):
+            return
+        if from_agent:
+            # Mirrors the agents' hop cap: past it the tagged agent stays
+            # quiet, so no indicator.
+            hops = self._agent_hops.get(target, 0)
+            if hops >= MAX_AGENT_HOPS:
+                return
+            self._agent_hops[target] = hops + 1
+        self._start_thinking(target, named)
 
     def thinking_in(self, channel: str) -> str | None:
         """The agent nick thinking in *channel*, or None."""
