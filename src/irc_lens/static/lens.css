@@ -225,6 +225,46 @@ body.lens-sandbox { border-top: 4px solid var(--lens-amber); }
 body[data-view="mesh"] .lens-log  { display: none; }
 body[data-view="mesh"] .lens-mesh { display: block; }
 
+/* "<agent> is thinking": overlays the bottom edge of the log row. */
+.lens-typing-slot {
+  grid-row: 2;
+  grid-column: 1;
+  align-self: end;
+  pointer-events: none;
+  padding: 0 16px 10px;
+  font-family: var(--lens-mono);
+  font-size: 0.9rem;
+}
+.lens-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6ch;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--lens-surface);
+  border: 1px solid var(--lens-input-border);
+  color: var(--lens-fg-soft);
+  box-shadow: 0 2px 10px rgb(0 0 0 / 35%);
+}
+.lens-typing-nick { color: var(--lens-accent); }
+.lens-typing-dots { display: inline-flex; gap: 4px; margin-left: 2px; }
+/* The dots are text (".") for non-CSS readers; drawn here as circles. */
+.lens-typing-dots span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--lens-accent);
+  font-size: 0;
+  animation: lens-typing-bounce 1.2s infinite ease-in-out both;
+}
+.lens-typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+.lens-typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+@keyframes lens-typing-bounce {
+  0%, 70%, 100% { transform: translateY(0); opacity: 0.35; }
+  35% { transform: translateY(-4px); opacity: 1; }
+}
+body[data-view="mesh"] .lens-typing-slot { display: none; }
+
 .lens-media-controls { grid-row: 3; grid-column: 1; padding: 4px 16px 0; display: flex; gap: 8px; }
 .lens-media-controls button {
   background: transparent;
@@ -479,6 +519,7 @@ body[data-conn="down"] .lens-conn { color: var(--lens-down); }
 
 @media (prefers-reduced-motion: reduce) {
   .lens-sidebar { transition: none; }
+  .lens-typing-dots span { animation: none; opacity: 1; }
 }
 
 .lens-empty-hint {

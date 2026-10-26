@@ -22,6 +22,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -46,6 +47,12 @@ REGISTER_TIMEOUT = 15.0
 #: interval catches membership churn that arrives without an observed
 #: JOIN/PART and keeps a freshly-loaded mesh view current.
 MESH_REFRESH_INTERVAL = 10.0
+#: How long the "<agent> is thinking" line may stay up without the agent
+#: answering (the sandbox agent normally answers within ~30 s).
+THINKING_TIMEOUT_S = 90.0
+#: Agent-to-agent handovers that show an indicator per room after each human
+#: message: the sandbox agents' own ``max_agent_hops`` default (culture).
+MAX_AGENT_HOPS = 1
 
 #: The named views the spec's ``info`` event can switch between. ``mesh``
 #: is the irc-lens live agent-mesh graph view — a vanilla-JS port of
@@ -312,6 +319,18 @@ class Session:
         # an approved user on the mesh while guest mode is on.
         self.ui_tier: str = "approved"
         self.sandbox_available: bool = False
+        # Sandbox sessions (guest / sandbox preview) name the sandbox agent
+        # here; after a message is sent in a room the agent is in, the room
+        # shows "<agent> is thinking" until the agent answers (or
+        # THINKING_TIMEOUT_S passes). A message that names another agent in
+        # the room (the guest's or an agent's) shows that agent instead.
+        # None: no indicator (the real mesh, where agents don't answer every
+        # message).
+        self.thinking_agent: str | None = None
+        # channel -> (thinking agent nick, timeout handle)
+        self._thinking: dict[str, tuple[str, asyncio.TimerHandle]] = {}
+        # channel -> agent-to-agent handovers shown since the last human line
+        self._agent_hops: dict[str, int] = {}
 
         # Cited primitives.
         self.buffer = MessageBuffer()
@@ -456,6 +475,9 @@ class Session:
             raise LensConnectionLost(f"nick rejected: {self._nick_rejection}")
 
     async def disconnect(self) -> None:
+        for _agent, handle in self._thinking.values():
+            handle.cancel()
+        self._thinking.clear()
         await self._cancel_mesh_tasks()
         await self._transport.disconnect()
 
@@ -693,6 +715,10 @@ class Session:
             return
         await self.send_privmsg(self.current_channel, text)
         self._publish_chat(self.nick, text)
+        self._agent_hops.pop(self.current_channel, None)  # a human spoke
+        agent = self._agent_named(text, self.nick) or self._default_agent()
+        if agent and self._has_question(text, agent):
+            self._start_thinking(self.current_channel, agent)
 
     async def _exec_send(self, parsed: ParsedCommand) -> None:
         if not parsed.args:
@@ -1074,6 +1100,8 @@ class Session:
         # the transport already drops them from the buffer; mirror.
         if sender.startswith("system-"):
             return
+        if self.thinking_agent:
+            self._note_thinking(sender, target, text)
         # Only publish when the message belongs in the active pane.
         # DMs come addressed to our own nick.
         if target != self.current_channel and target != self.nick:
@@ -1118,6 +1146,102 @@ class Session:
         )
         self.event_bus.publish(SessionEvent(name="chat", data=fragment))
 
+    # -- "<agent> is thinking" ------------------------------------------
+
+    def _room_agents(self) -> list[str]:
+        """Agents in the active room: roster agents plus the sandbox agent."""
+        agent = (self.thinking_agent or "").lower()
+        return [e.nick for e in self.roster if e.type == "agent" or e.nick.lower() == agent]
+
+    def _is_agent(self, nick: str) -> bool:
+        return any(n.lower() == nick.lower() for n in self._room_agents())
+
+    def _default_agent(self) -> str | None:
+        """The sandbox agent, if it is in the active room (it answers every
+        message there)."""
+        agent = (self.thinking_agent or "").lower()
+        return next((n for n in self._room_agents() if n.lower() == agent), None)
+
+    def _agent_named(self, text: str, sender: str, *, at_only: bool = False) -> str | None:
+        """The agent in the active room that *text* addresses (never the
+        sender), or None. Mirrors the sandbox agents' own rule: an explicit
+        "@nick" wins; a bare nick counts only when nobody is @-tagged, and
+        not at all with *at_only* (between agents, where a bare nick is just
+        a mention)."""
+        agents = [n for n in self._room_agents() if n.lower() != sender.lower()]
+        for mark in ("@",) if at_only else ("@", "@?"):
+            for nick in agents:
+                if re.search(rf"(^|\W){mark}{re.escape(nick)}\b", text, flags=re.IGNORECASE):
+                    return nick
+        return None
+
+    @staticmethod
+    def _has_question(text: str, agent: str) -> bool:
+        """Whether anything is left once the agent's tag is removed (the
+        agents ignore a bare "@nick")."""
+        rest = re.sub(rf"@?{re.escape(agent)}[:,]?\s*", "", text, flags=re.IGNORECASE)
+        return bool(rest.strip())
+
+    def _note_thinking(self, sender: str, target: str, text: str) -> None:
+        """Inbound message in a sandbox session: the thinking agent spoke
+        (clear), and/or it names another agent in the room (that one
+        thinks next)."""
+        current = self._thinking.get(target)
+        if current is not None and current[0].lower() == sender.lower():
+            self._stop_thinking(target)
+        from_agent = self._is_agent(sender)
+        if not from_agent:
+            self._agent_hops.pop(target, None)  # a human spoke
+        if target != self.current_channel:
+            return
+        named = self._agent_named(text, sender, at_only=from_agent)
+        if not named or not self._has_question(text, named):
+            return
+        if from_agent:
+            # Mirrors the agents' hop cap: past it the tagged agent stays
+            # quiet, so no indicator.
+            hops = self._agent_hops.get(target, 0)
+            if hops >= MAX_AGENT_HOPS:
+                return
+            self._agent_hops[target] = hops + 1
+        self._start_thinking(target, named)
+
+    def thinking_in(self, channel: str) -> str | None:
+        """The agent nick thinking in *channel*, or None."""
+        entry = self._thinking.get(channel)
+        return entry[0] if entry else None
+
+    def typing_html(self) -> str:
+        """The typing slot's content for the active room."""
+        from irc_lens.web.render import render_fragment
+
+        return render_fragment(
+            "_typing.html.j2", agent=self.thinking_in(self.current_channel)
+        )
+
+    def _start_thinking(self, channel: str, agent: str) -> None:
+        old = self._thinking.pop(channel, None)
+        if old is not None:
+            old[1].cancel()
+        loop = asyncio.get_running_loop()
+        self._thinking[channel] = (
+            agent,
+            loop.call_later(THINKING_TIMEOUT_S, self._stop_thinking, channel),
+        )
+        if channel == self.current_channel:
+            self._publish_typing()
+
+    def _stop_thinking(self, channel: str) -> None:
+        entry = self._thinking.pop(channel, None)
+        if entry is None:
+            return
+        entry[1].cancel()
+        if channel == self.current_channel:
+            self._publish_typing()
+
+    def _publish_typing(self) -> None:
+        self.event_bus.publish(SessionEvent(name="typing", data=self.typing_html()))
+
     def _publish_log(self, html: str) -> None:
         """Publish a full chat-log replacement (innerHTML of #chat-log).
 
@@ -1126,6 +1250,8 @@ class Session:
         channel's lines. Live `chat` events continue to append after.
         """
         self.event_bus.publish(SessionEvent(name="log", data=html))
+        # The room changed: show that room's thinking state.
+        self._publish_typing()
 
     def _publish_roster(self) -> None:
         from irc_lens.web.render import render_fragment

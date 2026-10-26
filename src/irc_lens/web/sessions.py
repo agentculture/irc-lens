@@ -309,6 +309,9 @@ class SessionRegistry:
         # the routes and never reads this attribute.
         is_guest = identity.principal.startswith(GUEST_PRINCIPAL_PREFIX)
         session.ui_tier = "guest" if is_guest else "sandbox_preview"
+        # The sandbox agent answers every message in a sandbox room, so the
+        # room can show "<agent> is thinking" until it does.
+        session.thinking_agent = metrics.get_presence().nick
         for command in ("PRIVMSG", "JOIN", "PART", "QUIT"):
             session._transport.add_listener(command, _presence_listener)
         own, others = self._rooms_for(identity, is_guest)

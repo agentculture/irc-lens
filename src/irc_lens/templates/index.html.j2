@@ -74,6 +74,10 @@
              history from the IRCd's SQLite store. #}
           {{ chat_log_html|safe }}
         </div>
+        {# "<agent> is thinking" (sandbox rooms). Overlays the bottom of the
+           log; filled by the SSE `typing` event. Polite live region: screen
+           readers hear "sbx-ask is thinking" once, not every dot. #}
+        <div id="typing" class="lens-typing-slot" data-testid="typing-slot" role="status" aria-live="polite">{% if session.typing_html is defined %}{{ session.typing_html()|safe }}{% endif %}</div>
         {# Live agent-mesh graph (mesh.js / window.LensMesh). Shares the
            center column's content row with the chat log; CSS shows exactly
            one based on <body data-view>. The input form below stays usable

@@ -65,6 +65,11 @@
     lensLog()?.pin();
   });
   src.addEventListener("roster", (e) => swap(sidebar, e.data));
+  // `typing` replaces the "<agent> is thinking" slot under the log.
+  const typing = $("typing");
+  src.addEventListener("typing", (e) => {
+    if (typing) typing.innerHTML = e.data;
+  });
   src.addEventListener("info",   (e) => swap(info, e.data));
   // `mesh` carries the live agent-mesh graph snapshot (katvan's mesh.json
   // shape) as JSON. Hand it to the canvas renderer (mesh.js, which exposes
