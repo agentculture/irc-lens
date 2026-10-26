@@ -757,17 +757,6 @@ def _legacy_guest_flow(request: web.Request) -> None:
         raise web.HTTPNotFound()
 
 
-def _trust_guest_browser(store: GuestStore, request: web.Request, form, email: str):
-    """"Trust this browser" for a guest: a fresh ``lens_device`` (returned)
-    when ticked, else keep an existing trust fresh. None when nothing new."""
-    device = app_session.read_device_cookie(request)
-    if form.get("trust") == "on":
-        return store.add_trusted_device(email, previous_raw=device)
-    if store.is_trusted_device(device, email):
-        store.touch_trusted_device(device, email)
-    return None
-
-
 async def _post_code_guest(
     request: web.Request,
     state: EntryState,
@@ -805,8 +794,10 @@ async def _post_code_guest(
     try:
         versions = await legal.current_legal_versions(cfg)
     except legal.LegalVersionsUnavailable as exc:
+        # An outage, not a failed sign-in: no failed_sign_in count.
         logger.warning(_LOG_ENTRY_BLOCKED, exc)
-        return await wrong(503, ERR_LATER)
+        await _pad(started, state.signin_floor_s)
+        return _page(state, "signin_code", status=503, email=email, error=ERR_LATER)
     rows = store.get_guest(email)
     returning = bool(rows) and legal.consent_is_current(store, email, versions)
     registry = request.app["registry"]
@@ -826,7 +817,9 @@ async def _post_code_guest(
         return busy_page(state)
     if outcome == "wrong":
         return await wrong()
-    new_device = _trust_guest_browser(store, request, form, email)
+    # "Trust this browser" is ignored for guests: a lens_device trusted for
+    # a guest email would skip the password-attempt limits if that email
+    # were approved later. (The checkbox stays on the shared code screen.)
     await _pad(started, state.signin_floor_s)
     if returning:
         store.record_guest(email, rows[-1][1], ip)
@@ -840,8 +833,6 @@ async def _post_code_guest(
         welcome = store.issue_token(email, purpose=WELCOME_PURPOSE)
         resp = _page(state, "welcome", email=email, nickname=nick, welcome=welcome)
     app_session.clear_signin_cookie(resp)
-    if new_device is not None:
-        app_session.issue_device_cookie(resp, new_device)
     logger.info("guest code accepted returning=%s", returning)
     return resp
 
@@ -901,11 +892,17 @@ async def post_welcome(request: web.Request) -> web.Response:
     registry = request.app["registry"]
     principal = GUEST_PRINCIPAL_PREFIX + email
     async with registry.guest_lock:
-        if not registry.guest_slot_free(principal, cfg.guest_max_guests):
-            return busy_page(state)
-        if store.consume_token(token, purpose=WELCOME_PURPOSE) != email:
-            return expired()
-        registry.try_reserve_guest(principal, cfg.guest_max_guests)
+        # Seat taken while the form was filled in: the form comes back with
+        # the busy message and its token unused, so "Enter" works again once
+        # the seat frees (the mailed code is already spent).
+        busy = not registry.guest_slot_free(principal, cfg.guest_max_guests)
+        if not busy:
+            if store.consume_token(token, purpose=WELCOME_PURPOSE) != email:
+                return expired()
+            registry.try_reserve_guest(principal, cfg.guest_max_guests)
+    if busy:
+        metrics.get_metrics().guest_busy()
+        return again(MSG_BUSY, 503)
     store.record_guest(email, NICK_PREFIX + nick, ip)
     store.record_consent(
         email,

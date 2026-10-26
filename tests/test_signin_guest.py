@@ -398,3 +398,46 @@ async def test_enter_key_default_is_the_forward_button(env: Env) -> None:
     assert _first_submit(code_page, "/entry/code") == "Verify"
     welcome = await (await env.code(ANN, code, pending)).text()
     assert _first_submit(welcome, "/entry/welcome") == "Enter"
+
+
+# -- review fixes ---------------------------------------------------------------
+
+
+async def test_seat_taken_during_welcome_keeps_the_form_and_token(env: Env) -> None:
+    """The mailed code is spent once the welcome form shows; if the seat
+    fills meanwhile, the form comes back with its token so Enter works again
+    once the seat frees (no new sign-in needed)."""
+    pending, code = await env.sign_in_to_code(ANN)
+    token = welcome_of(await (await env.code(ANN, code, pending)).text())
+    await env.enter(BOB, "bob")  # takes the only seat
+    busy = await env.welcome(ANN, token, "ann")
+    html = await busy.text()
+    assert busy.status == 503
+    assert BUSY in html
+    assert welcome_of(html) == token
+    await env.post("/guest/logout", {}, env.guest_cookie(BOB))
+    assert (await env.welcome(ANN, token, "ann")).status == 303
+
+
+async def test_guests_never_get_a_trusted_browser(env: Env) -> None:
+    pending, code = await env.sign_in_to_code(ANN)
+    cookie = f"{app_session.SIGNIN_COOKIE_NAME}={pending}"
+    resp = await env.post("/entry/code", {"email": ANN, "code": code, "trust": "on"}, cookie)
+    assert resp.status == 200
+    assert app_session.DEVICE_COOKIE_NAME not in resp.cookies
+    assert env.store._all("SELECT 1 FROM trusted_devices WHERE email=?", (ANN,)) == []
+
+
+async def test_legal_outage_is_not_a_failed_sign_in(env: Env, monkeypatch) -> None:
+    from irc_lens import legal, metrics
+
+    async def down(_cfg):
+        raise legal.LegalVersionsUnavailable("down")
+
+    monkeypatch.setattr(legal, "current_legal_versions", down)
+    pending, code = await env.sign_in_to_code(ANN)
+    before = metrics.get_metrics().snapshot()["failed_sign_ins"]
+    resp = await env.code(ANN, code, pending)
+    assert resp.status == 503
+    assert entry.ERR_LATER in await resp.text()
+    assert metrics.get_metrics().snapshot()["failed_sign_ins"] == before

@@ -200,8 +200,13 @@ it empty. We'll email you a code.* (true for everyone, so it reveals nothing).
    sandbox session, frees the seat at once and clears `lens_guest`
    (`303 /`, or `HX-Redirect: /` for htmx).
 
-**Trust this browser** works for guests too (it only exempts the browser
-from the attempt limits for that email). The Enter key submits the forward
+**Trust this browser** is ignored for guests (the checkbox stays on the
+shared code screen): a browser trusted for a guest email would skip the
+password-attempt limits if that email were approved later. If the guest seat
+fills while a first-time guest is on the welcome form, **Enter** brings the
+form back with the busy message and its token unused, so it works again once
+the seat frees. A legal-versions outage answers `Try again later` (503)
+without counting a failed sign-in. The Enter key submits the forward
 button (Verify / Enter) on every step, not Back.
 
 **Rollback switch.** `auth.app_signin.enabled: false` restores 0.12.2: a
