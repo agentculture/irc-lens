@@ -714,11 +714,7 @@ wheels = [
 
 [[package]]
 name = "irc-lens"
-<<<<<<< HEAD
-version = "0.14.0"
-=======
 version = "0.15.0"
->>>>>>> 4d8aa52 (Show "sbx-ask is thinking" in sandbox rooms (0.15.0))
 source = { editable = "." }
 dependencies = [
     { name = "agentfront", extra = ["mcp"] },
