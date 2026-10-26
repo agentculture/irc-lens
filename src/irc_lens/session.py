@@ -818,6 +818,7 @@ class Session:
                         [],
                         media_embed_prefixes=self.media_embed_prefixes,
                         media_remote_embeds=self.media_remote_embeds,
+                        agent_nicks=self.defuse_agents(),
                     )
                 )
             return
@@ -843,6 +844,7 @@ class Session:
                 media_embed_prefixes=self.media_embed_prefixes,
                 media_remote_embeds=self.media_remote_embeds,
                 hide_system=self.ui_tier in ("guest", "sandbox_preview"),
+                agent_nicks=self.defuse_agents(),
             )
         )
 
@@ -1143,10 +1145,17 @@ class Session:
             msg={"nick": nick, "text": text, "ts_display": ts_display, "kind": kind},
             media_embed_prefixes=self.media_embed_prefixes,
             media_remote_embeds=self.media_remote_embeds,
+            agent_nicks=self.defuse_agents(),
         )
         self.event_bus.publish(SessionEvent(name="chat", data=fragment))
 
     # -- "<agent> is thinking" ------------------------------------------
+
+    def defuse_agents(self) -> tuple[str, ...]:
+        """Agents whose defused tags the chat log marks: the room's agents
+        in a sandbox session, none elsewhere (the defusing is a sandbox-agent
+        convention)."""
+        return tuple(self._room_agents()) if self.thinking_agent else ()
 
     def _room_agents(self) -> list[str]:
         """Agents in the active room: roster agents plus the sandbox agent."""

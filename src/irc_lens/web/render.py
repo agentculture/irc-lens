@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-from irc_lens.web.media import classify_url, render_message_html
+from irc_lens.web.media import classify_url, render_chat_text, render_message_html
 
 if TYPE_CHECKING:
     from irc_lens.session import Session
@@ -226,6 +226,7 @@ _env.filters["strftime"] = _strftime
 _env.filters["linkify"] = render_message_html
 _env.globals["static_url"] = static_url
 _env.globals["media_items"] = media_items
+_env.globals["chat_text"] = render_chat_text
 
 
 def render_fragment(template: str, **ctx: Any) -> str:
@@ -284,12 +285,19 @@ def _normalize_history_entry(entry: Any) -> dict:
     }
 
 
+def agent_nicks_for(session: Any) -> tuple[str, ...]:
+    """The session's room agents for defused-tag rendering ("()" if none)."""
+    fn = getattr(session, "defuse_agents", None)
+    return tuple(fn()) if callable(fn) else ()
+
+
 def render_chat_log(
     entries: list,
     *,
     media_embed_prefixes: tuple["MediaOrigin", ...] = (),
     media_remote_embeds: str = "click",
     hide_system: bool = False,
+    agent_nicks: tuple[str, ...] = (),
 ) -> str:
     """Render multiple chat lines as a single HTML blob for innerHTML
     replacement of `#chat-log`. Used by the `log` SSE event publish on
@@ -316,6 +324,7 @@ def render_chat_log(
             msg=m,
             media_embed_prefixes=media_embed_prefixes,
             media_remote_embeds=media_remote_embeds,
+            agent_nicks=agent_nicks,
         )
         for m in msgs
     ]
@@ -476,6 +485,7 @@ def render_index(
                 entries,
                 media_embed_prefixes=session.media_embed_prefixes,
                 media_remote_embeds=session.media_remote_embeds,
+                agent_nicks=agent_nicks_for(session),
             )
         else:
             chat_log_html = ""

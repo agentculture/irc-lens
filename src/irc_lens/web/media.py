@@ -109,6 +109,58 @@ def render_message_html(text: str) -> Markup:
     return Markup(linked)
 
 
+#: Marker the culture sandbox agents use for a defused tag (culture 14.7.0
+#: ``_defuse_peer_tags``): "@", a zero-width space, then a peer's nick.
+#: Coupled to that convention on purpose; the lens only applies it to
+#: messages *from* agents in the room (see ``render_chat_text``).
+ZWSP = "\u200b"
+
+
+def render_chat_text(text: str, agents: tuple[str, ...] = ()) -> tuple[Markup, list[str]]:
+    """Render a chat message like :func:`render_message_html`, plus defused tags.
+
+    *agents* are the nicks of the agents in the room, and is non-empty only
+    when the message itself comes from one of them. Each defused tag to one
+    of those nicks -- "@", ZWSP, the nick, ending where the agents' own
+    ``@nick\b`` check ends -- is wrapped in a red ``<span>`` (ZWSP kept, so
+    it stays defused) and its nick is returned for the note under the line.
+    Escape first; then URLs become ``<a>`` and only the text *between* URLs
+    is searched for defused tags, so the only markup this adds is the
+    ``<a>`` wrapper and that ``<span>``, never inside an attribute. One pass
+    produces both the markup and the nicks, so the two cannot disagree.
+    """
+    escaped = str(escape(text))
+    nicks: list[str] = []
+    pattern = None
+    if agents:
+        names = "|".join(re.escape(str(escape(a))) for a in sorted(agents, key=len, reverse=True))
+        pattern = re.compile("@" + ZWSP + rf"({names})\b", re.IGNORECASE)
+
+    def mark(segment: str) -> str:
+        if pattern is None:
+            return segment
+
+        def span(match: "re.Match[str]") -> str:
+            nick = match.group(1)
+            if nick.lower() not in (n.lower() for n in nicks):
+                nicks.append(nick)
+            return (
+                '<span class="lens-defused-tag" data-testid="defused-tag" '
+                f'title="Not a real tag">@{ZWSP}{nick}</span>'
+            )
+
+        return pattern.sub(span, segment)
+
+    out: list[str] = []
+    pos = 0
+    for url in _URL_RE.finditer(escaped):
+        out.append(mark(escaped[pos : url.start()]))
+        out.append(_anchor(url))
+        pos = url.end()
+    out.append(mark(escaped[pos:]))
+    return Markup("".join(out)), nicks
+
+
 def compose_media_message(url: str, caption: str = "") -> str:
     """Compose the plain-text PRIVMSG body for an uploaded media URL.
 

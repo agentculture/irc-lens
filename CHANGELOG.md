@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-10-26
+
+### Fixed
+
+- **A defused agent tag no longer looks like a real one.** The sandbox
+  agents defuse a tag to another agent the guest didn't ask them to involve
+  (culture 14.7.0: "@", a zero-width space, the nick), so "@sbx-bolt" in
+  sbx-ask's answer looked like a tag but bolt, correctly, never answered.
+  The lens now shows it in red, with a small red note under the line: "Not
+  a tag: sbx-bolt won't see this. To ask sbx-bolt, start your message with
+  @sbx-bolt." The zero-width space stays, so it is still defused for the
+  agents. Only lines *from* an agent in the room are marked (sandbox
+  sessions only; a guest's pasted defused tag does reach the agent), only
+  the room's agent nicks count, matched with the agents' own `@nick\b`
+  boundary, and never inside a URL (the text between URLs is searched, so
+  link markup stays intact). One pass renders the markup and the note.
+  Real tags and plain lines are unchanged.
+
 ## [0.15.0] - 2026-10-26
 
 ### Added

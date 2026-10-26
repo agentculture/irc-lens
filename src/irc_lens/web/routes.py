@@ -53,6 +53,7 @@ from irc_lens.web.entry import client_ip
 from irc_lens.web.events import format_sse
 from irc_lens.web.identity import TIER_ANONYMOUS, TIER_GUEST, Identity
 from irc_lens.web.render import (
+    agent_nicks_for,
     render_chat_log,
     render_fragment,
     render_index,
@@ -557,6 +558,7 @@ async def get_index(request: web.Request) -> web.Response:
                 media_embed_prefixes=session.media_embed_prefixes,
                 media_remote_embeds=session.media_remote_embeds,
                 hide_system=getattr(session, "ui_tier", None) in ("guest", "sandbox_preview"),
+                agent_nicks=agent_nicks_for(session),
             )
     _, backend = _backend_for(request)
     presence = _sandbox_state(session) if backend == BACKEND_SANDBOX else None
