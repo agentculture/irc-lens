@@ -69,8 +69,8 @@ SECRET = b"s" * 32
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 T0 = 1_800_000_000.0
 COPY = (
-    "If your email and password are right, a code is on its way. "
-    "Nothing after a minute? Go back and re-enter your password."
+    "Check your email for a code. "
+    "Nothing after a minute? Go back and check your email and password."
 )
 CODE_WRONG = entry.ERR_CODE
 
@@ -238,8 +238,11 @@ def _shape(resp, body: str, email: str) -> tuple:
 async def test_signin_four_cases_identical_and_floored(env: Env) -> None:
     env.state.signin_floor_s = entry.SIGNIN_FLOOR_S  # the real floor
     # Use up the per-IP sign-in budget of 198.51.100.99 (3 per 15 minutes).
+    # (Recorded directly: the only approved email here is Alice, whose own
+    # budget the warm-up must not spend, and unknown emails are guest
+    # sign-ins, which are not counted.)
     for _ in range(entry.SIGNIN_IP_ATTEMPTS_PER_15MIN):
-        await env.signin(UNKNOWN, "x", ip="198.51.100.99")
+        env.store.record_attempt(entry.SIGNIN_IP_KIND, "i:198.51.100.99")
     env.mail.sent.clear()
     cases = [
         ("unknown", UNKNOWN, PW, "198.51.100.1"),
@@ -261,9 +264,11 @@ async def test_signin_four_cases_identical_and_floored(env: Env) -> None:
     assert len(set(shapes.values())) == 1, "every sign-in answer must be identical"
     assert len(pendings) == 4, "a fresh pending value every time"
     await env.drain()
-    # Only the right (non-limited) case mailed, exactly once.
-    assert [(to, subj) for to, subj, _ in env.mail.sent] == [
-        (ALICE, "Your chat.culture.dev sign-in code")
+    # The right (non-limited) case mailed a sign-in code and the unknown
+    # email a guest code; the wrong password and the blocked one nothing.
+    assert sorted((to, subj) for to, subj, _ in env.mail.sent) == [
+        (ALICE, "Your chat.culture.dev sign-in code"),
+        (UNKNOWN, "Your chat.culture.dev code"),
     ]
 
 

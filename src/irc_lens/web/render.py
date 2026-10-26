@@ -466,7 +466,8 @@ def render_index(
     preview) so the room header can render the agent-offline line.
 
     `show_logout` renders the header's Log out button (approved users
-    signed in through an app session; never for guests).
+    signed in through an app session, and guests, whose button posts to
+    ``/guest/logout``).
     """
     if chat_log_html is None:
         if session.current_channel:

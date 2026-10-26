@@ -86,6 +86,9 @@ def _config(jwks: FakeJWKS, mesh, sandbox, tmp_path, legal_url: str) -> LensConf
         guest_rate_messages_per_min=50,
         guest_max_guests=1,
         guest_idle_close_s=IDLE_S,
+        # The 0.12.2 Guest mode button flow (still the rollback path). The
+        # same limits through Sign in: tests/test_signin_guest.py.
+        app_signin_enabled=False,
     )
 
 

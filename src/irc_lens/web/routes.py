@@ -564,9 +564,12 @@ async def get_index(request: web.Request) -> web.Response:
         session,
         chat_log_html=chat_log_html,
         presence=presence,
-        # Log out only means something for an app-session sign-in.
-        show_logout=request["identity"].is_approved
-        and app_session.via_app_session(request),
+        # Log out means something for an app-session sign-in and for a
+        # guest (it frees the guest seat).
+        show_logout=(
+            request["identity"].is_approved and app_session.via_app_session(request)
+        )
+        or request["identity"].tier == TIER_GUEST,
     )
     return web.Response(text=body, content_type=_HTML)
 
