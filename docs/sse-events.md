@@ -103,6 +103,7 @@ pinned by `tests/test_render.py`.
 | `[data-testid="chat-line"]` | `_chat_line.html.j2` | Chat line (timestamp) |
 | `[data-testid="chat-line-nick"]` | `_chat_line.html.j2` | Nick span |
 | `[data-testid="chat-line-text"]` | `_chat_line.html.j2` | Text span |
+| `[data-testid="defused-tag"]` / `[data-testid="defused-note"]` | `media.render_message_html` / `_chat_line.html.j2` | A defused agent tag ("@", zero-width space, nick) in red, and the red "Not a tag" note under its line |
 | `[data-testid="typing-slot"]` / `[data-testid="agent-typing"]` | `index.html.j2` / `_typing.html.j2` | "`<agent>` is thinking" slot (polite live region) and its line |
 | `[data-testid="media-embed"]` | `_chat_line/media.js` | Embedded media |
 | `[data-testid="media-placeholder"]` | `_chat_line.html.j2` | Media card |

@@ -18,7 +18,7 @@ from urllib.parse import urlsplit
 
 from jinja2 import Environment, PackageLoader, select_autoescape
 
-from irc_lens.web.media import classify_url, render_message_html
+from irc_lens.web.media import classify_url, defused_tags, render_message_html
 
 if TYPE_CHECKING:
     from irc_lens.session import Session
@@ -226,6 +226,7 @@ _env.filters["strftime"] = _strftime
 _env.filters["linkify"] = render_message_html
 _env.globals["static_url"] = static_url
 _env.globals["media_items"] = media_items
+_env.globals["defused_tags"] = defused_tags
 
 
 def render_fragment(template: str, **ctx: Any) -> str:

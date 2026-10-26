@@ -86,6 +86,32 @@ def _anchor(match: "re.Match[str]") -> str:
     return f'<a href="{url}" target="_blank" rel="noopener noreferrer">{url}</a>'
 
 
+#: A tag an agent deliberately defused: "@", a zero-width space, the nick.
+#: The sandbox agents (culture ``_defuse_peer_tags``) write it when they name
+#: another agent the guest didn't ask them to involve: it reads like a tag
+#: but no agent treats it as one, so the lens shows it in red with a note.
+ZWSP = "\u200b"
+_DEFUSED_TAG_RE = re.compile("@" + ZWSP + r"([A-Za-z0-9_\-\[\]\\`^{}|]+)")
+
+
+def defused_tags(text: str) -> list[str]:
+    """Nicks *text* names with a defused tag, in order, without repeats."""
+    seen: list[str] = []
+    for nick in _DEFUSED_TAG_RE.findall(text or ""):
+        if nick not in seen:
+            seen.append(nick)
+    return seen
+
+
+def _defused_span(match: "re.Match[str]") -> str:
+    # The zero-width space stays inside the span: copied text is still a
+    # defused tag (for an agent) and a bare mention (for a guest).
+    return (
+        '<span class="lens-defused-tag" data-testid="defused-tag" '
+        f'title="Not a real tag">@{ZWSP}{match.group(1)}</span>'
+    )
+
+
 def render_message_html(text: str) -> Markup:
     """Escape `text`, then linkify any `http`/`https` URLs within it.
 
@@ -106,7 +132,9 @@ def render_message_html(text: str) -> Markup:
     """
     escaped = str(escape(text))
     linked = _URL_RE.sub(_anchor, escaped)
-    return Markup(linked)
+    # Nick characters are never escaped, so the match runs on escaped text
+    # and only adds this function's own <span>.
+    return Markup(_DEFUSED_TAG_RE.sub(_defused_span, linked))
 
 
 def compose_media_message(url: str, caption: str = "") -> str:

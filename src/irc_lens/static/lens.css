@@ -350,6 +350,13 @@ body[data-view="mesh"] .lens-typing-slot { display: none; }
 .lens-chat-line--action { font-style: italic; color: var(--lens-muted); }
 .lens-chat-ts   { color: var(--lens-muted); margin-right: 0.6ch; }
 .lens-chat-nick { color: var(--lens-accent); margin-right: 0.5ch; }
+/* A defused "@nick" (an agent named another agent without tagging it). */
+.lens-defused-tag { color: var(--lens-down); }
+.lens-defused-note {
+  color: var(--lens-down);
+  font-size: 0.78rem;
+  margin: 0.1em 0 0.2em;
+}
 
 /* Chat-line media embeds (media-support design doc, "Rendering path").
    Lens-hosted and auto-embedded remote media render directly here;
