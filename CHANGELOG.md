@@ -21,12 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   code. Before, a visitor without a password pressed Sign in, saw "a code is
   on its way" and never got one, and the Guest mode path buried the code mail
   three screens deep behind a nickname form.
-- **Guest sign-ins never use up an approved user's password attempts.** A
-  guest submission is taken back from the per-IP limit and the email's
-  budget like a correct password (found in a real-browser click-through: two
-  guests and one typo from a shared IP silently blocked the owner's right
-  password). Guest mail is capped by `rate_limits.entry_per_min` per email
-  and per IP instead; over it nothing is mailed and the page is the same.
+- **Guest sign-ins never use up an approved user's password attempts, and
+  guest mail reveals nothing about them.** The password-attempt limits (per
+  IP, per-email budget) count approved emails only (found in a real-browser
+  click-through: two guests and one typo from a shared IP silently blocked
+  the owner's right password). Guest mail has its own cap,
+  `rate_limits.entry_per_min` per email and per IP, counted for every
+  submission alike, so an attacker's own inbox can't tell whether some
+  other email is approved (found in review: with a refund-based fix, 3
+  wrong passwords then a guest sign-in from the same IP did). Over the cap
+  nothing is mailed and the page is the same.
 - **Nickname and consent are a one-time form after the code**
   (`POST /entry/welcome`). A returning guest whose consent matches the
   current Terms/Privacy versions goes straight in; a version change asks once

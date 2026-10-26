@@ -129,7 +129,8 @@ user signs in inside the app, without Cloudflare Access:
   with no blocked attempt (table `signin_budget`). Untrusted browsers are
   also limited per IP to 3 wrong password submissions per 15 minutes (fixed;
   `rate_limits.password_attempts_per_15min` stays the guest and
-  rollback-path limit).
+  rollback-path limit). Both count submissions for approved emails only; a
+  sign-in for any other email is a guest sign-in and is not counted.
 - **A correct password is not counted.** Each submission is counted before
   the password is checked (so the limit check stays atomic and a blocked one
   is never checked), and taken back when it turns out right. The count is
@@ -173,11 +174,12 @@ it empty. We'll email you a code.* (true for everyone, so it reveals nothing).
    time floor as every other sign-in, so nothing tells a guest from an
    approved user before the code. An approved email with a wrong password,
    a banned email or IP, an implausible address and a blocked attempt mail
-   nothing. A guest submission is not a wrong password: like a correct
-   one it is taken back from the per-IP limit and the email's budget, so
+   nothing. The password-attempt limits count approved emails only, so
    guests on a shared IP never use up an approved user's attempts. Guest
-   mail is capped by `rate_limits.entry_per_min` per email and per IP
-   instead; over it nothing is mailed and the page is the same.
+   mail has its own cap, `rate_limits.entry_per_min` per email and per IP,
+   counted for **every** submission alike (approved or not), so a guest's
+   inbox can't reveal whether another email is approved. Over the cap
+   nothing is mailed and the page is the same.
 2. `POST /entry/code` with the guest code: a wrong, expired, reused or
    other-browser code is the one error `Wrong or expired code`, exactly as
    for approved users. Only after a right code:
