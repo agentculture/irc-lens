@@ -111,6 +111,7 @@ ERR_CONSENT = "Consent required"
 ERR_BOT = "Verification failed"
 ERR_LATER = "Try again later"
 ERR_EXPIRED = "That took too long. Sign in again."
+_LOG_ENTRY_BLOCKED = "guest entry blocked: %s"
 #: Shown while guest_mode.max_guests guests are active (c24); exact wording.
 MSG_BUSY = "The sandbox is busy. Try again in a few minutes."
 
@@ -756,6 +757,17 @@ def _legacy_guest_flow(request: web.Request) -> None:
         raise web.HTTPNotFound()
 
 
+def _trust_guest_browser(store: GuestStore, request: web.Request, form, email: str):
+    """"Trust this browser" for a guest: a fresh ``lens_device`` (returned)
+    when ticked, else keep an existing trust fresh. None when nothing new."""
+    device = app_session.read_device_cookie(request)
+    if form.get("trust") == "on":
+        return store.add_trusted_device(email, previous_raw=device)
+    if store.is_trusted_device(device, email):
+        store.touch_trusted_device(device, email)
+    return None
+
+
 async def _post_code_guest(
     request: web.Request,
     state: EntryState,
@@ -793,7 +805,7 @@ async def _post_code_guest(
     try:
         versions = await legal.current_legal_versions(cfg)
     except legal.LegalVersionsUnavailable as exc:
-        logger.warning("guest entry blocked: %s", exc)
+        logger.warning(_LOG_ENTRY_BLOCKED, exc)
         return await wrong(503, ERR_LATER)
     rows = store.get_guest(email)
     returning = bool(rows) and legal.consent_is_current(store, email, versions)
@@ -814,12 +826,7 @@ async def _post_code_guest(
         return busy_page(state)
     if outcome == "wrong":
         return await wrong()
-    device = app_session.read_device_cookie(request)
-    new_device = None
-    if form.get("trust") == "on":
-        new_device = store.add_trusted_device(email, previous_raw=device)
-    elif store.is_trusted_device(device, email):
-        store.touch_trusted_device(device, email)
+    new_device = _trust_guest_browser(store, request, form, email)
     await _pad(started, state.signin_floor_s)
     if returning:
         store.record_guest(email, rows[-1][1], ip)
@@ -889,7 +896,7 @@ async def post_welcome(request: web.Request) -> web.Response:
     try:
         versions = await legal.current_legal_versions(cfg)
     except legal.LegalVersionsUnavailable as exc:
-        logger.warning("guest entry blocked: %s", exc)
+        logger.warning(_LOG_ENTRY_BLOCKED, exc)
         return again(ERR_LATER, 503)
     registry = request.app["registry"]
     principal = GUEST_PRINCIPAL_PREFIX + email
@@ -1055,7 +1062,7 @@ async def post_verify(request: web.Request) -> web.Response:
     try:
         versions = await legal.current_legal_versions(cfg)
     except legal.LegalVersionsUnavailable as exc:
-        logger.warning("guest entry blocked: %s", exc)
+        logger.warning(_LOG_ENTRY_BLOCKED, exc)
         return _page(
             state,
             "code",

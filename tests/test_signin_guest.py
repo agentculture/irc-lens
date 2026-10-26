@@ -246,7 +246,8 @@ async def test_guest_mail_reveals_nothing_about_approved_emails(env: Env) -> Non
     approved = await _guest_mailed_after_probing(env, APPROVED, "198.51.100.1")
     env.store._clock = clock
     unknown = await _guest_mailed_after_probing(env, BOB, "198.51.100.2")
-    assert approved is True and unknown is True
+    assert approved is True
+    assert unknown is True
 
 
 async def test_guest_mail_capped_per_minute(env: Env) -> None:
@@ -282,7 +283,8 @@ async def test_wrong_guest_code_is_the_one_error(env: Env) -> None:
     assert resp.status == 401
     assert entry.ERR_CODE in html
     assert 'action="/entry/code"' in html
-    assert BUSY not in html and 'name="nickname"' not in html
+    assert BUSY not in html
+    assert 'name="nickname"' not in html
 
 
 async def test_busy_only_after_a_right_code_and_code_kept(env: Env) -> None:
@@ -310,7 +312,8 @@ async def test_first_guest_code_opens_the_welcome_form_then_the_sandbox(
     html = await page.text()
     assert page.status == 200
     assert 'action="/entry/welcome"' in html
-    assert 'name="nickname"' in html and 'name="consent"' in html
+    assert 'name="nickname"' in html
+    assert 'name="consent"' in html
     assert csrf.GUEST_COOKIE_NAME not in page.cookies  # not in yet
     resp = await env.welcome(ANN, welcome_of(html), "ann")
     assert resp.status == 303
