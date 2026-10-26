@@ -18,7 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   The lens now shows it in red, with a small red note under the line: "Not
   a tag: sbx-bolt won't see this. To ask sbx-bolt, start your message with
   @sbx-bolt." The zero-width space stays, so it is still defused for the
-  agents. Real tags and plain lines are unchanged.
+  agents. Only lines *from* an agent in the room are marked (sandbox
+  sessions only; a guest's pasted defused tag does reach the agent), only
+  the room's agent nicks count, matched with the agents' own `@nick\b`
+  boundary, and never inside a URL (the text between URLs is searched, so
+  link markup stays intact). One pass renders the markup and the note.
+  Real tags and plain lines are unchanged.
 
 ## [0.15.0] - 2026-10-26
 

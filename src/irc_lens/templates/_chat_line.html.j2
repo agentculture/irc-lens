@@ -20,14 +20,18 @@
   {% if msg.kind == 'action' %}
     <span data-testid="chat-line-text" class="lens-chat-text">* {{ msg.nick }} {{ msg.text|linkify }}</span>
   {% else %}
+    {# Defused tags (a sandbox agent naming another agent without tagging
+       it) are marked only on lines FROM an agent in the room: `agent_nicks`
+       is set by sandbox sessions, and a guest's pasted "@<ZWSP>nick" does
+       reach that agent, so it is never marked. One pass (`chat_text`)
+       returns the markup and the defused nicks for the note. #}
+    {% set _agents = agent_nicks if (agent_nicks is defined and msg.nick in agent_nicks) else () %}
+    {% set _rendered = chat_text(msg.text, _agents) %}
     <span data-testid="chat-line-nick" class="lens-chat-nick">{{ msg.nick }}</span>
-    <span data-testid="chat-line-text" class="lens-chat-text">{{ msg.text|linkify }}</span>
-  {% endif %}
-  {# An agent named another agent without tagging it (a defused "@nick",
-     shown in red by `linkify`): say so, and how to reach that agent. #}
-  {% set _defused = defused_tags(msg.text) %}
-  {% if _defused %}
-  <div class="lens-defused-note" data-testid="defused-note">Not a tag: {{ _defused|join(", ") }} won't see this. To ask {{ _defused[0] }}, start your message with @{{ _defused[0] }}.</div>
+    <span data-testid="chat-line-text" class="lens-chat-text">{{ _rendered[0] }}</span>
+    {% if _rendered[1] %}
+    <div class="lens-defused-note" data-testid="defused-note">Not a tag: {{ _rendered[1]|join(" and ") }} won't see this. To ask {{ "it" if _rendered[1]|length == 1 else "one of them" }}, start your message with {% for n in _rendered[1] %}@{{ n }}{{ " or " if not loop.last }}{% endfor %}.</div>
+    {% endif %}
   {% endif %}
   {# `media_embed_prefixes`/`media_remote_embeds` are optional context
      vars — session.py/render.py thread them through from Session's
