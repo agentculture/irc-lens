@@ -464,12 +464,16 @@ async def test_logout_button_hidden_for_access_jwt_user(env: Env) -> None:
     assert 'data-testid="logout"' not in html
 
 
-def test_logout_button_never_rendered_for_guests() -> None:
+def test_guest_logout_button_posts_to_guest_logout() -> None:
     from irc_lens.session import Session as S
 
     s = S(host="127.0.0.1", port=1, nick="sbx-gus")
     s.ui_tier = "guest"
-    assert 'data-testid="logout"' not in render_index(s, show_logout=True)
+    html = render_index(s, show_logout=True)
+    assert 'data-testid="logout"' in html
+    assert 'action="/guest/logout"' in html
     s.ui_tier = "approved"
-    assert 'data-testid="logout"' in render_index(s, show_logout=True)
+    html = render_index(s, show_logout=True)
+    assert 'data-testid="logout"' in html
+    assert 'action="/logout"' in html
     assert 'data-testid="logout"' not in render_index(s)

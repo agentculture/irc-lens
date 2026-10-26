@@ -30,6 +30,9 @@
           <label for="entry-email">Email</label>
           <input id="entry-email" name="email" type="email" autocomplete="email"
                  inputmode="email" required autofocus maxlength="254">
+          {% if error %}
+          <p class="entry-error" role="alert">{{ error }}</p>
+          {% endif %}
           <div class="entry-actions">
             <button type="submit" class="btn btn-primary">Continue</button>
           </div>
@@ -47,18 +50,28 @@
                  class="entry-username-hidden">
           <label for="entry-password">Password</label>
           <input id="entry-password" name="password" type="password"
-                 autocomplete="current-password" autofocus maxlength="1024">
+                 autocomplete="current-password" autofocus maxlength="1024"
+                 {%- if app_signin %} aria-describedby="entry-password-hint"{% endif %}>
+          {% if app_signin %}
+          <p id="entry-password-hint" class="entry-note">No password? Leave it empty. We'll email you a code.</p>
+          {% endif %}
           {% if site_key %}
           <div class="cf-turnstile" data-sitekey="{{ site_key }}"></div>
           {% endif %}
           {% if error %}
           <p class="entry-error" role="alert">{{ error }}</p>
           {% endif %}
+          {% if app_signin %}
+          <div class="entry-actions">
+            <button type="submit" class="btn btn-primary">Sign in</button>
+          </div>
+          {% else %}
           <div class="entry-actions entry-actions-split">
             <button type="submit" class="btn btn-primary">Sign in</button>
             <button type="submit" class="btn btn-outline" formaction="/entry/guest"
                     formnovalidate>Guest mode</button>
           </div>
+          {% endif %}
           <p class="entry-consent"><a href="/password">Set or reset password</a></p>
         </form>
 
@@ -91,9 +104,43 @@
           {% if error %}
           <p class="entry-error" role="alert">{{ error }}</p>
           {% endif %}
-          <div class="entry-actions entry-actions-split">
+          {# Primary first in the DOM: the Enter key fires the first submit button. #}
+          <div class="entry-actions entry-actions-split entry-actions-reverse">
+            <button type="submit" class="btn btn-primary">Enter</button>
             <button type="submit" class="btn btn-outline" formaction="/entry/email"
                     formnovalidate>Back</button>
+          </div>
+        </form>
+
+        {% elif step == "welcome" %}
+        <form method="post" action="/entry/welcome" class="entry-form">
+          <div class="entry-chip">
+            <span class="entry-chip-email">{{ email }}</span>
+          </div>
+          <input type="hidden" name="email" value="{{ email }}">
+          <input type="hidden" name="welcome" value="{{ welcome }}">
+          <p class="entry-note">Welcome. Pick a nickname for the sandbox. You only do this once.</p>
+          <label for="entry-nickname">Nickname</label>
+          <div class="entry-prefixed">
+            <span class="entry-prefix" aria-hidden="true">{{ nick_prefix }}</span>
+            <input id="entry-nickname" name="nickname" type="text" value="{{ nickname }}"
+                   autocomplete="nickname" autocapitalize="none" spellcheck="false"
+                   required minlength="2" maxlength="{{ nick_max }}" autofocus
+                   aria-describedby="entry-nickname-hint">
+          </div>
+          <p id="entry-nickname-hint" class="entry-note">2&ndash;{{ nick_max }} letters, digits or _.</p>
+          <label class="entry-consent">
+            <input type="checkbox" name="consent" value="on" required>
+            <span>I agree to the <a href="{{ terms_url }}" target="_blank" rel="noopener noreferrer">Terms</a> and <a href="{{ privacy_url }}" target="_blank" rel="noopener noreferrer">Privacy Policy</a></span>
+          </label>
+          <label class="entry-consent">
+            <input type="checkbox" name="train" value="on" {%- if train %} checked{% endif %}>
+            <span>Use my conversations to improve culture.dev's models (optional)</span>
+          </label>
+          {% if error %}
+          <p class="entry-error" role="alert">{{ error }}</p>
+          {% endif %}
+          <div class="entry-actions">
             <button type="submit" class="btn btn-primary">Enter</button>
           </div>
         </form>
@@ -115,7 +162,7 @@
           </div>
           <input type="hidden" name="email" value="{{ email }}">
           {% if signin %}
-          <p class="entry-note">If your email and password are right, a code is on its way. Nothing after a minute? Go back and re-enter your password.</p>
+          <p class="entry-note">Check your email for a code. Nothing after a minute? Go back and check your email and password.</p>
           {% else %}
           <input type="hidden" name="nickname" value="{{ nickname }}">
           {% if train %}
@@ -135,10 +182,10 @@
           <p class="entry-error" role="alert">{{ error }}</p>
           {% endif %}
           {% if signin %}
-          <div class="entry-actions entry-actions-split">
+          <div class="entry-actions entry-actions-split entry-actions-reverse">
+            <button type="submit" class="btn btn-primary">Verify</button>
             <button type="submit" class="btn btn-outline" formaction="/entry/email"
                     formnovalidate>Back</button>
-            <button type="submit" class="btn btn-primary">Verify</button>
           </div>
           {% else %}
           <div class="entry-actions">

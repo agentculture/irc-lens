@@ -50,6 +50,7 @@ async def app_env(
     config = dataclasses.replace(
         _config(jwks, mesh, sandbox, tmp_path, legal_server),
         app_signin_base_url="https://lens.example.com",
+        app_signin_enabled=True,
     )
 
     def mesh_factory(nick: str) -> Session:
@@ -136,20 +137,35 @@ async def test_no_secret_value_in_any_log_record(app_env, caplog) -> None:
     )
     assert r.status == 200
 
-    # -- guest flow: code -> verify -> page -> message -----------------------
+    # -- guest flow: sign in -> code -> welcome -> page -> message -----------
     r = await client.post(
-        "/entry/guest/start",
-        data={"email": ANN, "nickname": "ann", "consent": "on"},
-        headers=SAME_ORIGIN,
+        "/entry/signin",
+        data={"email": ANN, "password": ""},
+        headers={**IP, **SAME_ORIGIN},
         allow_redirects=False,
     )
     assert r.status == 200
+    gpending = r.cookies[app_session.SIGNIN_COOKIE_NAME].value
+    secrets_seen["guest lens_signin"] = gpending
     await _drain(app)
     gcode = _code(mail)
     secrets_seen["guest code"] = gcode
     r = await client.post(
-        "/entry/verify",
-        data={"email": ANN, "nickname": "ann", "code": gcode},
+        "/entry/code",
+        data={"email": ANN, "code": gcode},
+        headers={
+            **IP,
+            **SAME_ORIGIN,
+            "Cookie": f"{app_session.SIGNIN_COOKIE_NAME}={gpending}",
+        },
+        allow_redirects=False,
+    )
+    assert r.status == 200
+    welcome = re.search(r'name="welcome" value="([^"]+)"', await r.text()).group(1)
+    secrets_seen["welcome token"] = welcome
+    r = await client.post(
+        "/entry/welcome",
+        data={"email": ANN, "welcome": welcome, "nickname": "ann", "consent": "on"},
         headers=SAME_ORIGIN,
         allow_redirects=False,
     )

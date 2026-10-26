@@ -249,8 +249,10 @@ async def test_trusted_browser_signs_in_after_20_blocked_attempts(env: TEnv) -> 
             assert r.status == 401
     assert mails == 0, "blocked attempts mail nothing, even with the right password"
     # Also from an IP whose per-IP budget is gone.
+    # (Wrong passwords for an approved email: an unknown email is a guest
+    # sign-in and is not counted.)
     for _ in range(4):
-        await env.pw(UNKNOWN, WRONG_PW, "198.51.100.50")
+        await env.pw(BOB, WRONG_PW, "198.51.100.50")
     r = await env.full_signin(ALICE, PW, "198.51.100.50", device=device)
     assert r.status == 303
     assert app_session.SESSION_COOKIE_NAME in r.cookies
@@ -517,8 +519,10 @@ async def test_budget_is_per_email(env: TEnv) -> None:
 
 async def test_per_ip_password_limit_still_applies_to_untrusted(env: TEnv) -> None:
     ip = "198.51.100.60"
-    for i in range(3):  # different unknown emails: no per-email budget used
-        await env.pw(f"x{i}@example.org", WRONG_PW, ip)
+    # Bob's wrong passwords: Alice's budget stays unused (an unknown email
+    # is a guest sign-in and is not counted).
+    for _ in range(3):
+        await env.pw(BOB, WRONG_PW, ip)
     assert await env.mails_after(env.pw(ALICE, PW, ip)) == 0  # 4th from the IP
     assert await env.mails_after(env.pw(ALICE, PW, "198.51.100.59")) == 1
     # A trusted browser at the same IP is not limited.
@@ -535,9 +539,10 @@ async def test_per_ip_limit_counts_wrong_passwords_only(env: TEnv) -> None:
         await env.enter(f"z{i}@example.org", "nope", pending, ip)
     assert (await env.enter(ALICE, code, pending, ip)).status == 303
     await env.drain()  # the new-browser notice (c40)
-    await env.pw(UNKNOWN, WRONG_PW, ip)  # 1
+    await env.pw(ALICE, WRONG_PW, ip)  # 1
     await env.pw(BOB, WRONG_PW, ip)  # 2
-    await env.pw(UNKNOWN, WRONG_PW, ip)  # 3
+    await env.pw(ALICE, WRONG_PW, ip)  # 3
+    await env.pw(UNKNOWN, WRONG_PW, ip)  # a guest sign-in: not counted
     assert await env.mails_after(env.pw(BOB, BOB_PW, ip)) == 0  # 4th: blocked
     # 15 minutes on, the IP has room again.
     env.clock["t"] = T0 + 15 * MIN + 1

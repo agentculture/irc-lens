@@ -159,10 +159,55 @@ Approved users are still exactly the `allowed_emails` list: there is no
 sign-up and no account creation. The Cloudflare Access `/login` path keeps
 working as break-glass.
 
+### Guests sign in with just their email
+
+With app sign-in on, **Sign in is the only entry**: there is no Guest mode
+button. A guest has no password; the password page says *No password? Leave
+it empty. We'll email you a code.* (true for everyone, so it reveals nothing).
+
+1. `POST /entry/signin` with an email that is **not** in `allowed_emails`
+   ignores whatever was typed as the password and mails a **guest code** (the
+   guest template, "Your chat.culture.dev code", valid 15 minutes) from a
+   background task, bound to that browser's `lens_signin` cookie like a
+   sign-in code. The response is the same code screen, status, cookie and
+   time floor as every other sign-in, so nothing tells a guest from an
+   approved user before the code. An approved email with a wrong password,
+   a banned email or IP, an implausible address and a blocked attempt mail
+   nothing. A guest submission is not a wrong password: like a correct
+   one it is taken back from the per-IP limit and the email's budget, so
+   guests on a shared IP never use up an approved user's attempts. Guest
+   mail is capped by `rate_limits.entry_per_min` per email and per IP
+   instead; over it nothing is mailed and the page is the same.
+2. `POST /entry/code` with the guest code: a wrong, expired, reused or
+   other-browser code is the one error `Wrong or expired code`, exactly as
+   for approved users. Only after a right code:
+   - the guest seat is taken: the busy page; the code is **not** used up,
+     so it works again once the seat frees;
+   - a returning guest whose consent matches the current Terms/Privacy
+     versions: `lens_guest` cookie and 303 `/`, straight in;
+   - otherwise: the **one-time welcome form**, nickname (`sbx-` prefix)
+     plus Terms/Privacy consent and the optional training opt-in, carrying
+     a single-use 15-minute `welcome` token.
+3. `POST /entry/welcome` checks the token (bound to the email; a stale or
+   foreign token sends the visitor back to the start with `That took too
+   long. Sign in again.`), the consent box and the nickname (a form error
+   keeps the token), re-checks the seat under the lock, then records the
+   guest and its consent, sets `lens_guest` and 303s to `/`. When the
+   Terms/Privacy version changes, a returning guest gets the form once more.
+4. `POST /guest/logout` (the guest's **Log out** button) closes the guest's
+   sandbox session, frees the seat at once and clears `lens_guest`
+   (`303 /`, or `HX-Redirect: /` for htmx).
+
+**Trust this browser** works for guests too (it only exempts the browser
+from the attempt limits for that email). The Enter key submits the forward
+button (Verify / Enter) on every step, not Back.
+
 **Rollback switch.** `auth.app_signin.enabled: false` restores 0.12.2: a
 correct password answers `303 /login` (wrong ones `Email or password is
-wrong`), `/entry/code` and `POST /logout` do not exist, `lens_session` is
-not read, and the set-password routes are not mounted.
+wrong`), `/entry/code`, `/entry/welcome`, `POST /logout` and
+`POST /guest/logout` do not exist, `lens_session` is not read, the
+set-password routes are not mounted, and guests use the Guest mode button
+flow (`/entry/guest*`, `/entry/verify`) again.
 
 ## Delivery alerts
 
@@ -238,11 +283,13 @@ With guest mode on, anonymous visitors get the entry card
 | `GET /entry` | Email + Continue (`get_entry`, also served on `/` for anonymous visitors) |
 | `POST /entry/email` | The password window — identical for every address |
 | `POST /entry/signin` | Password step. With app sign-in on (default): always the same code screen, whatever the email or password (see [App sign-in](#app-sign-in)). With `auth.app_signin.enabled: false` (0.12.2 behavior): approved email + correct password → 303 `/login`; otherwise `Email or password is wrong` |
-| `POST /entry/code` | App sign-in code step: the emailed code plus the `lens_signin` cookie → `lens_session` cookie, 303 `/`; any failure is the one error `Wrong or expired code`. 404 with the switch off |
-| `POST /entry/guest` | Nickname (`sbx-` prefix) + Terms/Privacy consent + optional training opt-in |
-| `POST /entry/guest/start` | Emails a single-use, 15-minute code (one fixed template; the mail says "code", matching the Code field) |
+| `POST /entry/code` | App sign-in code step: the emailed code plus the `lens_signin` cookie → approved: `lens_session` cookie, 303 `/`; guest: busy page, straight in, or the one-time welcome form (see [Guests sign in with just their email](#guests-sign-in-with-just-their-email)); any failure is the one error `Wrong or expired code`. 404 with the switch off |
+| `POST /entry/welcome` | One-time guest form after a first guest code: nickname + consent → guest recorded, `lens_guest` cookie, 303 `/`. 404 with the switch off |
+| `POST /guest/logout` | Guest log out: closes the sandbox session, frees the seat, clears `lens_guest` |
+| `POST /entry/guest` | Rollback switch off only (404 otherwise): nickname (`sbx-` prefix) + Terms/Privacy consent + optional training opt-in |
+| `POST /entry/guest/start` | Rollback switch off only: emails a single-use, 15-minute code (one fixed template; the mail says "code", matching the Code field) |
 | `GET /login` | Post-SSO return target (Cloudflare Access forwards the user here): always 303 `/`, `Cache-Control: no-store`, any tier, never 404 and never reveals approval; served even with guest mode off |
-| `POST /entry/verify` | Code check → guest + consent recorded, `lens_guest` cookie, 303 `/` |
+| `POST /entry/verify` | Rollback switch off only: code check → guest + consent recorded, `lens_guest` cookie, 303 `/` |
 
 The `/entry*` routes answer 404 while `guest_mode.enabled` is false. Sign-in failures are
 indistinguishable: an unknown email still pays one (dummy) argon2id verify, and
@@ -309,12 +356,16 @@ with no open browser tab.
 
 At most `max_guests` guests are active at once: a guest with an open sandbox
 session, or one whose code was just verified (the slot is held for 120 s until
-the browser opens the chat). While the sandbox is full, a visitor who picks
-Guest mode sees `The sandbox is busy. Try again in a few minutes.` and no code
-is emailed (the `guest_busy` counter counts these pages). Code verification
+the browser opens the chat). With app sign-in on, a guest is mailed a code
+even while the sandbox is full (the browser can't be told it's a guest
+before the code) and sees `The sandbox is busy. Try again in a few minutes.`
+after a right code; the code stays usable. With the rollback switch off, a
+visitor who picks Guest mode sees the busy page and no code is emailed (the
+`guest_busy` counter counts these pages). Code verification
 re-checks the limit under a lock, so two guests verifying at once cannot both
 get in; the refused one sees the busy page and their code is not used up. A
-slot frees when the guest deletes their data or is signed off for idleness.
+slot frees when the guest logs out, deletes their data or is signed off for
+idleness.
 A signed-off guest's cookie still works: they rejoin their room if a slot is
 free, otherwise they see the busy page; no new code is sent. An approved
 user's Guest view never counts toward the limit and is never refused.

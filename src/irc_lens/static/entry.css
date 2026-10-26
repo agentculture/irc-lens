@@ -221,6 +221,9 @@ html, body {
 
 .entry-actions .btn { flex: 1 1 0; }
 
+/* Primary button first in the DOM (the Enter key's default), shown on the right. */
+.entry-actions-reverse { flex-direction: row-reverse; }
+
 .btn {
   min-height: 44px;
   padding: 10px 16px;

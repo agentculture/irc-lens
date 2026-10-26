@@ -337,21 +337,41 @@ class GuestStore:
             (_hash_token(pending), _hash_token(token)),
         )
 
-    def verify_signin_token(self, email: str, token: str, pending: str) -> bool:
-        """True exactly once for a live ``signin`` token bound to *pending*.
+    def verify_signin_token(
+        self, email: str, token: str, pending: str, *, purpose: str = "signin"
+    ) -> bool:
+        """True exactly once for a live *purpose* token bound to *pending*.
 
         Like :meth:`verify_token` (single use, TTL, email) plus the binding
         made by :meth:`bind_signin`; one atomic UPDATE, so a code from
         another browser, a reused code and an expired code all fail alike.
+        The guest code mailed by sign-in uses the same binding (``guest``).
         """
         n = self._run(
             "UPDATE tokens SET used=1 WHERE token_hash=? AND email=? "
-            "AND purpose='signin' AND used=0 AND issued + ttl > ? "
+            "AND purpose=? AND used=0 AND issued + ttl > ? "
             "AND token_hash IN (SELECT token_hash FROM signin_pending "
             "WHERE pending_hash=?)",
-            (_hash_token(token), email, self._now(), _hash_token(pending)),
+            (_hash_token(token), email, purpose, self._now(), _hash_token(pending)),
         )
         return n == 1
+
+    def peek_signin_token(
+        self, email: str, token: str, pending: str, *, purpose: str
+    ) -> bool:
+        """:meth:`verify_signin_token` without using the token up.
+
+        Lets a caller refuse a *valid* code for another reason (the guest
+        seat is busy) and leave it usable for a retry.
+        """
+        rows = self._all(
+            "SELECT 1 FROM tokens WHERE token_hash=? AND email=? "
+            "AND purpose=? AND used=0 AND issued + ttl > ? "
+            "AND token_hash IN (SELECT token_hash FROM signin_pending "
+            "WHERE pending_hash=?)",
+            (_hash_token(token), email, purpose, self._now(), _hash_token(pending)),
+        )
+        return bool(rows)
 
     # -- approved-user app sessions (id stored only as sha256) -------------
     def create_session(self, email: str) -> str:

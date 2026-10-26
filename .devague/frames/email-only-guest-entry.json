@@ -1,0 +1,328 @@
+{
+  "slug": "email-only-guest-entry",
+  "title": "email-only guest entry",
+  "schema_version": 6,
+  "status": "drafting",
+  "created": "2026-10-26T15:50:36Z",
+  "updated": "2026-10-26T16:35:24Z",
+  "claims": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "Anyone can enter chat.culture.dev with just their email: they type it, a code lands in their inbox, and they're in the sandbox as a guest -- no password, no account setup",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c2",
+      "kind": "requirement",
+      "text": "An email-only visitor (not in auth.allowed_emails, no password) reaches a code mail without needing to discover the 'Guest mode' secondary button: today POST /entry/email always renders the password window (entry.py post_email) and the only email-only path is the outline 'Guest mode' button beside 'Sign in' (entry.html.j2:59)",
+      "origin": "llm",
+      "status": "proposed",
+      "honesty_conditions": [],
+      "hard_questions": [
+        {
+          "id": "q1",
+          "text": "Which UX shape? (A) step 1 offers 'Continue with email only' that skips the password window and goes straight to nickname+consent+code; (B) keep one flow, and Sign in with an UNKNOWN email mails a guest code to that mailbox (browser answer unchanged, so c3 holds) with nickname/consent collected after the code; (C) keep the flow, just promote 'Guest mode' (primary button / copy saying 'no password? use Guest mode')",
+          "resolved": true,
+          "blocking": false,
+          "resolution": "B (user, 2026-10-26): Sign in is the only entry. An email that is not an approved (signed) user gets a guest code mailed on Sign in; the code screen and the code itself look the same for both tiers. The Guest mode button goes away."
+        }
+      ],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c3",
+      "kind": "boundary",
+      "text": "Approved-user sign-in stays oracle-free: the page, status, timing floor and lens_signin cookie for /entry/signin must stay identical for approved vs unknown emails (entry.py _post_signin_app docstring, obligation o4). Only the mailbox may learn anything",
+      "origin": "llm",
+      "status": "proposed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c4",
+      "kind": "assumption",
+      "text": "The existing guest pipeline (POST /entry/guest -> /entry/guest/start -> /entry/verify, guest_store tokens, lens_guest cookie, sbx-* nick, consent v1.1) is the 'anonymous account'; the feature reuses it rather than inventing a new account tier",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c5",
+      "kind": "requirement",
+      "text": "Gmail plus-aliases (you+test@gmail.com) work end-to-end as distinct guests: _norm_email only strips+lowercases (keeps '+'), _plausible_email accepts it, and guest_store keys guests/tokens/consent by the full normalized address -- so a +test alias is a clean test identity separate from the owner's approved address",
+      "origin": "llm",
+      "status": "proposed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c6",
+      "kind": "boundary",
+      "text": "One guest at a time stays (config guest_mode.max_guests: 1, ~/.config/irc-lens/config.yaml:45); an email-only visitor arriving while the seat is taken gets the busy page and no code (entry.py post_guest_start c24 check) -- the feature does not raise capacity",
+      "origin": "llm",
+      "status": "proposed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c7",
+      "kind": "non_goal",
+      "text": "Set-or-reset-password (/password) stays approved-only: setpw.py post_password mails a link only when email is in allowed_lower(config); email-only visitors get no password and no account upgrade",
+      "origin": "llm",
+      "status": "proposed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c8",
+      "kind": "requirement",
+      "text": "The code mail goes out at most one screen after the visitor gives their email. Today the guest route is email -> password window -> Guest mode -> nickname + two checkboxes + Enter, and only that last submit (POST /entry/guest/start) sends mail; a visitor who stops at any earlier screen, or whose Enter is blocked by browser validation (nickname pattern [A-Za-z0-9_-]{2,16}, required consent box), gets nothing and sees no explanation",
+      "origin": "llm",
+      "status": "proposed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c9",
+      "kind": "requirement",
+      "text": "Sign in only: one entry flow. If the email is not a signed (approved) user, Sign in mails a guest code; the code screen and the key look the same for both",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c10",
+      "kind": "boundary",
+      "text": "The visitor must not be able to tell whether they are a guest or a signed user until after they pass the emailed code: every screen, status and timing up to and including the code screen is the same for both",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c11",
+      "kind": "requirement",
+      "text": "Consent is a one-time form shown after the emailed code is accepted, and only to a guest who hasn't consented yet; a returning guest who already consented goes straight in",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c12",
+      "kind": "assumption",
+      "text": "Nickname is collected on that same one-time post-code form (today it's asked before the code on /entry/guest), and the existing consents row (record_consent against current legal versions) is what makes it one-time. If the Terms/Privacy version changes, the guest is asked once more",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c13",
+      "kind": "assumption",
+      "text": "A guest has no password: their credential is the code mailed to them. Whatever they type in the Password field (or nothing) is ignored for a non-approved email; Sign in mails the code and the guest types it into the Code field on the next screen, the same screen an approved user sees",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "For a guest the password field is ignored: anything or nothing typed still mails a guest code, because the emailed code is the guest's credential",
+          "kind": "assumption",
+          "reason": "user 2026-10-26: 'the credential is the email they sent'"
+        }
+      ]
+    },
+    {
+      "id": "c14",
+      "kind": "requirement",
+      "text": "A guest can log out: ends their sandbox session, frees the guest seat and clears the lens_guest cookie (today POST /logout is approved-only and a closed tab holds the seat until the 15-min idle reaper)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c15",
+      "kind": "decision",
+      "text": "Guest credential is a single-use code: every Sign in by a non-approved email mails a fresh one-time code, typed on the same code screen approved users see; returning guests get a new code each time (no reusable guest password)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    }
+  ],
+  "open_vagueness": [
+    {
+      "id": "v1",
+      "text": "Guest token mail delivery on the live 0.13.1 deploy is unexercised since the app sign-in cutover (zero /entry/guest* in the journal; last proven guest mail was the 2026-10-10 live test on 0.12.x). Verify with a real email+test alias -- sends a real mail, so needs the owner's go",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v2",
+      "text": "post_guest_start awaits the mail send inside the request (entry.py ~748), unlike sign-in's background task -- if shape (B) merges the paths, the guest mail must move to the background task too or response time becomes an approved/unknown oracle",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    }
+  ],
+  "scope_entries": [
+    {
+      "id": "s1",
+      "surface": "irc-lens journal (culture-console-spark.service, last 14 days)",
+      "finding": "Zero POST /entry/guest* requests in 14 days; 2026-10-26 anonymous visitors went /entry/email -> /entry/signin (17:20, 17:46) and got the code screen, but no code was issued. The reported 'no email' is the oracle-free sign-in working as designed for an unapproved email, not a mail failure. [seeds mis-linked at record time: this finding seeded c2, not c1]",
+      "seeds": [
+        "c1"
+      ]
+    },
+    {
+      "id": "s2",
+      "surface": "src/irc_lens/web/entry.py _post_signin_app (lines 582-631)",
+      "finding": "Code is issued and mailed ONLY for an email in auth.allowed_emails with the right password; every other case renders signin_code ('If your email and password are right, a code is on its way') and mails nothing. Any change routing unknown emails to a guest code must keep the browser-visible answer identical. [seeds mis-linked: seeded c3, not c2]",
+      "seeds": [
+        "c2"
+      ]
+    },
+    {
+      "id": "s3",
+      "surface": "src/irc_lens/web/entry.py post_guest / post_guest_start / post_verify (691-840)",
+      "finding": "Guest path already does email-only: nickname + Terms/Privacy consent, then a single-use 15-min token mailed via render_token_email for any plausible, unbanned email (rate-limited per email/IP); verify records the guest keyed by the full email. Fully built, just unreached from the default flow. [seeds mis-linked: seeded c4, not c3]",
+      "seeds": [
+        "c3"
+      ]
+    },
+    {
+      "id": "s4",
+      "surface": "src/irc_lens/web/entry.py _norm_email / _plausible_email (282-289)",
+      "finding": "No plus-stripping or Gmail dot-folding: ori.nachum+test@gmail.com is a distinct key from the approved ori.nachum@gmail.com, so it lands in the guest tier, not the approved tier -- matches the user's proposed test recipe",
+      "seeds": [
+        "c5"
+      ]
+    },
+    {
+      "id": "s5",
+      "surface": "~/.config/irc-lens/config.yaml (live)",
+      "finding": "app_signin enabled (line 16), guest_mode block present (line 37), max_guests 1 (line 45). Guest store ~/.local/share/irc-lens/guests.db: 0 guests, 0 bans, 1 password row (owner) -- no stale guest is holding the seat, so the busy page is not the cause today",
+      "seeds": [
+        "c6"
+      ]
+    },
+    {
+      "id": "s6",
+      "surface": "src/irc_lens/web/setpw.py post_password (178-200)",
+      "finding": "Same 'check your email' page for every address; link mailed only for allowed_emails. Also silent for unknown emails -- a second dead end for an anonymous visitor who tries 'Set or reset password' hoping to get in",
+      "seeds": [
+        "c7"
+      ]
+    },
+    {
+      "id": "s7",
+      "surface": "src/irc_lens/templates/entry.html.j2 (password step, 38-63; code step, 109-146)",
+      "finding": "Password step shows Sign in (primary) + Guest mode (outline, formnovalidate) + 'Set or reset password'. Nothing tells a no-password visitor that Guest mode is the email-only route; the signin_code note ('If your email and password are right...') reads as 'your code is coming'. Shape of the fix (A/B/C) is a user decision",
+      "seeds": [
+        "q1"
+      ]
+    },
+    {
+      "id": "s8",
+      "surface": "irc-lens journal 2026-10-26 17:50 (user's Guest mode retry)",
+      "finding": "User reported 'tried the guest mode button and no help'. The journal shows POST /entry/guest 200 at 17:50:13 (the nickname+consent page was served) and NO /entry/guest/start afterwards, so the token mail was never requested. Either Enter was never pressed or browser-side validation (pattern/required in entry.html.j2:75-81) stopped the submit without a server round-trip. No Turnstile env is set in the service drop-in, so Turnstile isn't blocking it",
+      "seeds": [
+        "c8"
+      ]
+    },
+    {
+      "id": "s9",
+      "surface": "live chat.culture.dev, Playwright Chromium run 2026-10-26 17:56 (email ori.nachum+test@gmail.com)",
+      "finding": "Guest path works end-to-end up to the code: email -> Guest mode -> nickname 'oritest' + consent -> Enter -> Code screen; guests.db tokens row (purpose guest) issued 17:56:43, no 'mail not sent' warning. User's 17:50 attempt produced only POST /entry/guest and nothing after, so their submit never left the browser. Latent trap found in entry.html.j2: on the guest step (95-97) and the code step (139-141) the FIRST submit button is 'Back' (formaction=/entry/email), so pressing the Enter key implicitly submits Back, not Enter/Verify -- shape B must make the forward action the default button",
+      "seeds": [
+        "c8",
+        "c9"
+      ]
+    },
+    {
+      "id": "s10",
+      "surface": "src/irc_lens/web/routes.py _consent_current / _guest_consent_gate (255-290) + CONSENT_PATH /consent",
+      "finding": "A post-entry consent gate already exists (obligation o8): a guest without current consent (legal.consent_is_current against current_legal_versions) is 302'd to /consent, which entry.py serves via get_entry. The one-time post-code consent form can hang off this gate instead of a new mechanism; a version bump already re-asks",
+      "seeds": [
+        "c11",
+        "c12"
+      ]
+    },
+    {
+      "id": "s11",
+      "surface": "live chat.culture.dev guest round-trip 2026-10-26 17:56-18:04 (ori.nachum+test@gmail.com)",
+      "finding": "Guest token mail delivered via Resend from no-reply@culture.dev to the +test alias (user pasted it, arrived 17:56). Verify -> 303 / -> guest console as sbx-oritest in private room #g-20064e6ccd with sbx-ask listed online. The existing guest pipeline works end-to-end on 0.13.1; shape B reuses it (supports parked v1 being answered)",
+      "seeds": [
+        "c4",
+        "c5"
+      ]
+    },
+    {
+      "id": "s12",
+      "surface": "staging click-through 2026-10-26 18:27 (local lens, real Chromium)",
+      "finding": "Found a shared-IP lockout the unit tests missed: guest sign-ins counted as wrong passwords against the per-IP limit (3/15 min), so 2 guest sign-ins + 1 wrong approved password from one IP silently blocked the approved user's right password. Fixed: guest submissions are refunded like correct passwords; guest mail is capped by rate_limits.entry_per_min per email and IP instead. Re-run after the fix: guests g1/g2 mailed, approved wrong pw mailed nothing, approved right pw mailed a sign-in code and reached the mesh",
+      "seeds": [
+        "c9",
+        "c10"
+      ]
+    }
+  ],
+  "lapses": [],
+  "obligations": []
+}

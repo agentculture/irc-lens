@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-26
+
+### Changed
+
+- **Guests sign in with just their email, through Sign in.** The Guest mode
+  button is gone: with app sign-in on, Sign in is the only entry. An email
+  that is not an approved user gets a single-use guest code mailed on Sign in
+  (whatever was typed as the password; the page now says *No password? Leave
+  it empty. We'll email you a code.*), from a background task and bound to
+  the browser, on the same code screen, status, cookie and time floor as an
+  approved sign-in, so nothing tells a guest from a signed user before the
+  code. Before, a visitor without a password pressed Sign in, saw "a code is
+  on its way" and never got one, and the Guest mode path buried the code mail
+  three screens deep behind a nickname form.
+- **Guest sign-ins never use up an approved user's password attempts.** A
+  guest submission is taken back from the per-IP limit and the email's
+  budget like a correct password (found in a real-browser click-through: two
+  guests and one typo from a shared IP silently blocked the owner's right
+  password). Guest mail is capped by `rate_limits.entry_per_min` per email
+  and per IP instead; over it nothing is mailed and the page is the same.
+- **Nickname and consent are a one-time form after the code**
+  (`POST /entry/welcome`). A returning guest whose consent matches the
+  current Terms/Privacy versions goes straight in; a version change asks once
+  more.
+- **"Sandbox busy" only after a right code.** The guest code is mailed even
+  while the seat is taken; the busy page comes after the code, which stays
+  usable for a retry.
+- The code-screen note now reads "Check your email for a code. Nothing after
+  a minute? Go back and check your email and password." for everyone.
+- With `auth.app_signin.enabled: false` (rollback) the 0.12.2 Guest mode
+  button flow is unchanged; with app sign-in on, `/entry/guest`,
+  `/entry/guest/start` and `/entry/verify` answer 404.
+
+### Added
+
+- **Guest log out** (`POST /guest/logout`, the guest's Log out button):
+  closes the guest's sandbox session, frees the guest seat at once and
+  clears `lens_guest`. Before, a guest could only free the seat by deleting
+  their data or waiting out the 15-minute idle sign-off.
+
+### Fixed
+
+- **The Enter key submits Verify / Enter, not Back.** On the code and guest
+  steps the first submit button in the form was Back, so pressing Enter in
+  the code or nickname field went back a step. The forward button is now
+  first in the DOM (shown on the right).
+- The email step shows its error line (used by an expired welcome form).
+
 ## [0.13.1] - 2026-10-10
 
 ### Fixed
