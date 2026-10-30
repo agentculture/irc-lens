@@ -18,7 +18,7 @@
   <body class="entry">
     <main class="entry-layout">
       <section class="entry-hero" aria-labelledby="entry-heading">
-        <h1 id="entry-heading">Ask CULTURE.DEV.</h1>
+        <h1 id="entry-heading">Ask CULTURE.DEV<sup class="entry-tm">&trade;</sup>.</h1>
         <ol class="entry-transcript" aria-label="Transcript">
           <li><span class="nick nick-guest">sbx-maya</span><span class="msg">what is the all-backends rule?</span></li>
           <li><span class="nick nick-agent">sbx-ask</span><span class="msg">A feature added to one enforced backend (claude, codex, colleague) must reach all of them. A feature in only one backend is a bug.</span></li>
@@ -43,7 +43,6 @@
 
         {% elif step == "password" %}
         <form method="post" action="/entry/signin" class="entry-form">
-          <p class="entry-brand" data-testid="entry-brand">CULTURE.DEV&trade;</p>
           <div class="entry-chip">
             <span class="entry-chip-email">{{ email }}</span>
             <a href="/entry" class="entry-chip-change">Change</a>

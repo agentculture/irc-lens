@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-10-30
+
+### Fixed
+
+- The entry page's first screen now carries the trademark sign: the hero
+  reads "Ask CULTURE.DEV™." (the most prominent CULTURE.DEV use on the
+  sign-in page), not only the later password step. The ™ is a small
+  superscript (`&trade;`, the same entity the chat wordmark uses), so it
+  no longer fills a full monospace cell at heading size.
+- The password step no longer repeats the mark: its separate
+  "CULTURE.DEV™" line is gone now that the hero carries the ™ on every
+  entry step (one ™ per surface).
+
 ## [0.16.0] - 2026-10-30
 
 First irc-lens release exposing the CULTURE.DEV brand on chat.culture.dev —
