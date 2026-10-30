@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-10-30
+
+### Fixed
+
+- The entry page's first screen now carries the trademark sign: the hero
+  reads "Ask CULTURE.DEV™." (the most prominent CULTURE.DEV use on the
+  sign-in page), not only the later password step.
+
 ## [0.16.0] - 2026-10-30
 
 First irc-lens release exposing the CULTURE.DEV brand on chat.culture.dev —
