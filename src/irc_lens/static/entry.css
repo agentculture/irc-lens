@@ -43,6 +43,16 @@ html, body {
   padding: 48px 32px;
 }
 
+/* --- brand line on the sign-in step (CULTURE.DEV trademark use) -------- */
+
+.entry-brand {
+  margin: 0 0 16px;
+  font-family: var(--entry-mono);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--entry-accent);
+}
+
 /* --- left: heading + static transcript ------------------------------- */
 
 .entry-hero h1 {
