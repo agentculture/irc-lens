@@ -198,7 +198,8 @@ async def test_get_entry_renders_step_one(h):
     html = await resp.text()
     assert 'action="/entry/email"' in html
     assert 'name="email"' in html
-    assert "Ask culture." in html
+    assert "Ask CULTURE.DEV." in html
+    assert "<title>CULTURE.DEV</title>" in html
     assert "/static/entry.css" in html
     assert "script-src 'self'" in resp.headers["Content-Security-Policy"]
 
@@ -668,7 +669,8 @@ async def test_no_explanatory_prose(h):
         await (await _request_token(h, ip="10.5.0.1")).text(),
     ]
     transcript = {
-        "Ask culture.",
+        "Ask CULTURE.DEV.",
+        "CULTURE.DEV™",
         "sbx-maya",
         "sbx-ask",
         "what is the all-backends rule?",
