@@ -199,7 +199,7 @@ def test_notice_kinds_render_pinned_text_and_testid(
     # The notice is page content, never an exception path: still a full
     # standalone document, and never a table (there is no payload).
     assert "<!doctype html>" in out
-    assert "<title>residents — irc-lens</title>" in out
+    assert "<title>Residents — CULTURE.DEV</title>" in out
     assert 'data-testid="residents-table"' not in out
 
 

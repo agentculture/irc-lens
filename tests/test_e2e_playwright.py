@@ -361,3 +361,37 @@ async def test_remote_media_placeholder_click_to_load_swaps_to_embed(
             )
         finally:
             await browser.close()
+
+
+async def test_phone_header_keeps_wordmark_visible(seeded_lens_client: TestClient) -> None:
+    """At 390px the compact header still shows the wordmark and doesn't overflow."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        try:
+            page = await browser.new_page(viewport={"width": 390, "height": 800})
+            await page.goto(_url(seeded_lens_client))
+            wordmark = page.locator(".lens-header .lens-wordmark")
+            await expect(wordmark).to_be_visible(timeout=_LOCATOR_TIMEOUT_MS)
+            overflow = await page.evaluate(
+                "() => { const h = document.querySelector('.lens-header');"
+                " return h.scrollWidth - h.clientWidth; }"
+            )
+            assert overflow <= 0
+        finally:
+            await browser.close()
+
+
+async def test_phone_header_wordmark_text_is_culture_dev(
+    seeded_lens_client: TestClient,
+) -> None:
+    """Text half of the check; green only once the template says CULTURE.DEV (t1)."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch()
+        try:
+            page = await browser.new_page(viewport={"width": 390, "height": 800})
+            await page.goto(_url(seeded_lens_client))
+            await expect(page.locator(".lens-header .lens-wordmark")).to_contain_text(
+                "CULTURE.DEV", timeout=_LOCATOR_TIMEOUT_MS
+            )
+        finally:
+            await browser.close()

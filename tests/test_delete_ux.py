@@ -80,3 +80,18 @@ def test_guest_mail_unchanged_by_default():
 def test_unknown_mail_purpose_rejected():
     with pytest.raises(AfiError):
         render_token_email("tok-1", purpose="other")
+
+
+async def test_delete_page_title_is_culture_dev(env):
+    env.store.record_consent(EMAIL, IP, tos_version="t", privacy_version="p")
+    page = await env.client.post("/delete/request", data={"email": EMAIL})
+    assert "<title>CULTURE.DEV</title>" in await page.text()
+
+
+def test_setpw_template_title_is_culture_dev():
+    from pathlib import Path
+
+    import irc_lens
+
+    src = (Path(irc_lens.__file__).parent / "templates" / "setpw.html.j2").read_text()
+    assert "<title>CULTURE.DEV</title>" in src

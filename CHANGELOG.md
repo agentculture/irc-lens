@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-30
+
+First irc-lens release exposing the CULTURE.DEV brand on chat.culture.dev —
+first-use evidence for the chat surface of the CULTURE.DEV trademark (culture
+spec `docs/specs/2026-10-30-culture-dev-on-all-public-surfaces.md`).
+
+### Added
+
+- Page `<title>`s, the entry hero ("Ask CULTURE.DEV."), a CULTURE.DEV™ brand
+  line on the sign-in step, the chat header wordmark (CULTURE.DEV™, logo alt
+  `CULTURE.DEV`), og/description meta, and the notice "CULTURE.DEV is a
+  trademark of Ori Nachum." in the chat UI.
+- `TRADEMARKS.md`.
+
+### Changed
+
+- Phone layout (≤760px) keeps the CULTURE.DEV wordmark visible (logo and
+  identity hide first).
+- Emails sign off "The CULTURE.DEV team"; the documented sender is
+  `CULTURE.DEV <no-reply@culture.dev>`. Subjects keep the hostname.
+- PyPI summary names CULTURE.DEV.
+
 ## [0.15.1] - 2026-10-26
 
 ### Fixed

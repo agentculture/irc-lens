@@ -104,7 +104,7 @@ def render_token_email(
         "after that you can request a fresh one from the same page.\n\n"
         "If you did not ask for a guest seat, you can ignore this email "
         "— nothing else needs doing.\n\n"
-        "The Culture team\n"
+        "The CULTURE.DEV team\n"
     )
     if purpose == PURPOSE_DELETE:
         return _DELETE_SUBJECT, _delete_body(token, ttl_s)
@@ -121,7 +121,7 @@ def _signin_body(token: str, ttl_s: int) -> str:
         f"The code works once and expires in {_human_duration(ttl_s)}.\n\n"
         "If this wasn't you, someone may know your password: use "
         "'Set or reset password' on the sign-in page to change it.\n\n"
-        "The Culture team\n"
+        "The CULTURE.DEV team\n"
     )
 
 
@@ -158,7 +158,7 @@ def render_signin_notice(*, ip: str, user_agent: object, when: float) -> tuple[s
         "If it wasn't you, someone knows your password and can read your "
         "email: use 'Set or reset password' on the sign-in page now. That "
         "signs out every session and untrusts every browser.\n\n"
-        "The Culture team\n"
+        "The CULTURE.DEV team\n"
     )
     return NOTICE_SUBJECT, body
 
@@ -208,7 +208,7 @@ def render_link_email(
         f"The link works once and expires in {_human_duration(ttl_s)}.\n\n"
         "If you did not ask for this, you can ignore this email "
         "— your password stays the same.\n\n"
-        "The Culture team\n"
+        "The CULTURE.DEV team\n"
     )
     return _SETPW_SUBJECT, body
 
@@ -225,7 +225,7 @@ def _delete_body(token: str, ttl_s: int) -> str:
         "after that you can request a fresh one from the same page.\n\n"
         "If you did not ask to delete anything, you can ignore this email "
         "— nothing will be deleted.\n\n"
-        "The Culture team\n"
+        "The CULTURE.DEV team\n"
     )
 
 

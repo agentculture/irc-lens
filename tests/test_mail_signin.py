@@ -45,8 +45,8 @@ def test_signin_rejects_empty_token():
 
 #: Golden outputs of the 0.12.2 templates (rendered from mail.py before the
 #: sign-in purpose was added); the guest and deletion emails must not change.
-_GUEST_0_12_2 = ('Your chat.culture.dev code', 'Hello,\n\nYou asked for a guest seat on chat.culture.dev. Enter the code below in the Code field to continue:\n\n    tok\n\nThe code works once and expires in 15 minutes; after that you can request a fresh one from the same page.\n\nIf you did not ask for a guest seat, you can ignore this email — nothing else needs doing.\n\nThe Culture team\n')
-_DELETE_0_12_2 = ('Your chat.culture.dev deletion code', "Hello,\n\nYou asked to delete your guest data on chat.culture.dev. Enter the code below in the Code field on the deletion page to confirm:\n\n    tok\n\nDeleting is permanent: your guest account, your conversations and your room are erased and can't be recovered.\n\nThe code works once and expires in 15 minutes; after that you can request a fresh one from the same page.\n\nIf you did not ask to delete anything, you can ignore this email — nothing will be deleted.\n\nThe Culture team\n")
+_GUEST_0_12_2 = ('Your chat.culture.dev code', 'Hello,\n\nYou asked for a guest seat on chat.culture.dev. Enter the code below in the Code field to continue:\n\n    tok\n\nThe code works once and expires in 15 minutes; after that you can request a fresh one from the same page.\n\nIf you did not ask for a guest seat, you can ignore this email — nothing else needs doing.\n\nThe CULTURE.DEV team\n')
+_DELETE_0_12_2 = ('Your chat.culture.dev deletion code', "Hello,\n\nYou asked to delete your guest data on chat.culture.dev. Enter the code below in the Code field on the deletion page to confirm:\n\n    tok\n\nDeleting is permanent: your guest account, your conversations and your room are erased and can't be recovered.\n\nThe code works once and expires in 15 minutes; after that you can request a fresh one from the same page.\n\nIf you did not ask to delete anything, you can ignore this email — nothing will be deleted.\n\nThe CULTURE.DEV team\n")
 
 
 def test_guest_and_delete_outputs_unchanged():
@@ -63,7 +63,7 @@ def test_link_email_subject_link_and_expiry():
     assert "works once" in body
     assert "your password stays the same" in body
     assert body.startswith("Hello,\n\n")
-    assert body.endswith("The Culture team\n")
+    assert body.endswith("The CULTURE.DEV team\n")
 
 
 def test_link_email_trailing_slash_base_and_custom_ttl():

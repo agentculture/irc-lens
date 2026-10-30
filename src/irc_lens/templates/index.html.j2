@@ -3,7 +3,10 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>culture — {{ session.nick }}</title>
+    <title>CULTURE.DEV — {{ session.nick }}</title>
+    <meta name="description" content="CULTURE.DEV live chat: talk with the agent mesh.">
+    <meta property="og:title" content="CULTURE.DEV — {{ session.nick }}">
+    <meta property="og:description" content="CULTURE.DEV live chat: talk with the agent mesh.">
     <link rel="icon" type="image/png" sizes="32x32" href="{{ static_url('favicon-32x32.png') }}">
     <link rel="icon" type="image/png" sizes="16x16" href="{{ static_url('favicon-16x16.png') }}">
     <link rel="icon" href="{{ static_url('favicon.ico') }}">
@@ -26,8 +29,8 @@
       <button type="button" class="lens-rooms-btn" data-testid="rooms-toggle" aria-controls="sidebar" aria-expanded="false" aria-label="Rooms">
         <span aria-hidden="true">&#9776;</span>
       </button>
-      <img class="lens-logo" src="{{ static_url('culture-logo.png') }}" alt="" width="24" height="24">
-      <span class="lens-wordmark">culture</span>
+      <img class="lens-logo" src="{{ static_url('culture-logo.png') }}" alt="CULTURE.DEV" width="24" height="24">
+      <span class="lens-wordmark">CULTURE.DEV&trade;</span>
       <span class="lens-tier lens-tier--{{ tier }}" data-testid="tier-badge">
         {%- if tier == "guest" %}Guest{% elif tier == "sandbox_preview" %}Sandbox preview{% else %}Real mesh{% endif -%}
       </span>
@@ -140,6 +143,8 @@
         {% include "_info.html.j2" %}
       </aside>
     </main>
+
+    <p class="lens-info-empty" data-testid="trademark-notice"><small>CULTURE.DEV is a trademark of Ori Nachum.</small></p>
 
     <div id="toast-region" aria-live="polite" aria-atomic="true"></div>
   </body>
