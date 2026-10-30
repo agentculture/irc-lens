@@ -73,3 +73,9 @@ To host irc-lens behind Cloudflare Access on your own domain, see
 ## License
 
 See [LICENSE](LICENSE).
+
+## Trademarks
+
+CULTURE.DEV is a trademark of Ori Nachum. irc-lens serves the CULTURE.DEV live
+chat at chat.culture.dev; the license does not grant trademark rights — see
+[TRADEMARKS.md](TRADEMARKS.md).
