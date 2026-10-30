@@ -21,7 +21,7 @@ guest_mode:
   legal_version_url: https://culture.dev/legal/version.json
   mail:                     # sender for guest token emails
     provider: none
-    from: ""
+    from: "CULTURE.DEV <no-reply@culture.dev>"
     api_key_env: IRC_LENS_MAIL_API_KEY            # env var holding the provider key
     alert_url: ""             # optional delivery-alert webhook (https; http only for 127.0.0.1/localhost)
     alert_secret_env: ""      # env var holding the alert webhook secret
