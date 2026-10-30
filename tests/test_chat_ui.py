@@ -200,6 +200,11 @@ async def test_guest_header_nick_badge_room_no_host_port(env: Env) -> None:
     html = await (await env.client.get("/", headers=env.guest_headers())).text()
     assert 'data-testid="tier-badge">Guest<' in html
     assert 'data-testid="identity">sbx-gus<' in html
+    assert "<title>CULTURE.DEV — sbx-gus</title>" in html
+    assert '<span class="lens-wordmark">CULTURE.DEV&trade;</span>' in html
+    assert 'alt="CULTURE.DEV"' in html
+    assert 'property="og:title"' in html
+    assert "CULTURE.DEV is a trademark of Ori Nachum." in html
     assert 'data-testid="header-room"' in html
     assert f"{env.sandbox.host}:{env.sandbox.port}" not in html
     assert "@" + env.sandbox.host not in html
@@ -299,7 +304,11 @@ async def test_ui_strings_are_at_most_four_words(env: Env, who: str) -> None:
         if who == "preview":
             await env.client.post("/sandbox/enter", headers=headers)
     html = await (await env.client.get("/", headers=headers)).text()
-    long = [t for t in _page_text(html) if len(t.split()) > 4]
+    long = [
+        t
+        for t in _page_text(html)
+        if len(t.split()) > 4 and t != "CULTURE.DEV is a trademark of Ori Nachum."
+    ]  # mandated notice
     assert long == []
 
 
@@ -344,7 +353,9 @@ async def test_sandbox_preview_also_enforces_allowlist(env: Env) -> None:
     r = await env.client.post("/input", json={"text": "/join #x"}, headers=h)
     assert r.status == 403
     # The automatic private-room JOINs are expected; /join #x is not.
-    assert not any(l.command == "JOIN" and l.params[:1] == ["#x"] for l in env.sandbox.received)
+    assert not any(
+        l.command == "JOIN" and l.params[:1] == ["#x"] for l in env.sandbox.received
+    )
 
 
 async def test_guest_view_may_switch_between_guest_rooms(env: Env) -> None:
@@ -477,11 +488,17 @@ async def test_owner_metrics_agent_state_uses_room_membership(env: Env) -> None:
     env.add_guest()
     await env.client.get("/", headers=env.guest_headers())
     room = "#g-" + env.store.room_id("gus@example.org")
-    body = await (await env.client.get("/owner/metrics", headers=env.approved_headers())).json()
+    body = await (
+        await env.client.get("/owner/metrics", headers=env.approved_headers())
+    ).json()
     assert body["agent"]["state"] == "offline"
     env.sandbox.channel_members[room].add("sbx-ask")
-    await env.client.get("/presence", headers=env.guest_headers())  # a poll re-reads WHO
-    body = await (await env.client.get("/owner/metrics", headers=env.approved_headers())).json()
+    await env.client.get(
+        "/presence", headers=env.guest_headers()
+    )  # a poll re-reads WHO
+    body = await (
+        await env.client.get("/owner/metrics", headers=env.approved_headers())
+    ).json()
     assert body["agent"]["state"] == "online"
 
 
