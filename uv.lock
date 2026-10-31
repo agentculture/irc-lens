@@ -714,7 +714,7 @@ wheels = [
 
 [[package]]
 name = "irc-lens"
-version = "0.16.1"
+version = "0.17.0"
 source = { editable = "." }
 dependencies = [
     { name = "agentfront", extra = ["mcp"] },

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-10-31
+
+### Added
+
+- Email-keyed permissions: admins have full access; other approved users reach only the mesh channels granted to them, at read or write/ask, and nothing by default. Approval, roles and grants live in the lens store (one-time import of the old allowlist) and take effect without a restart.
+- In-app admin page (/admin): add or invite users, set roles and channel grants, approve n-hour agent extensions. Invited users become approved on their first sign-in. Matching `irc-lens access` CLI verbs.
+- Personal agents over MCP: every human (admin, approved or guest) may connect one agent to the remote MCP endpoint (streamable HTTP, path from config) with a credential issued at /agent-credential. The agent has exactly its human's permissions, its own lens-held IRC connection in a reserved nick namespace, and only its own human can reach it. Lines from anyone else that DM or @-address it are withheld, and every delivered line is marked owner or not-owner.
+- Switches: an agent kill switch and a fail-closed off switch (enabled / legacy before migration / admins-only after). Refusals and grant/credential events are audited, and owner metrics show counts.
+- docs/permissions.md and docs/deployment-permissions.md (restricting the mesh IRCd, plus a verify script).
+
+### Changed
+
+- Admin-only: the sandbox guest view, owner metrics and the residents page. /topic, /kick, /invite and /icon are admin-only, and listing views are filtered to the viewer's grants.
+- Sign-in, set-password and the guests CLI decide approval from the store when permissions are enabled.
+- Guests: bans, deletion, retention and idle sign-off also cover the guest's agent, and the consent record names it.
+- The auth log line carries a hashed `who=` instead of the email. No log line carries an email.
+
 ## [0.16.1] - 2026-10-30
 
 ### Fixed
