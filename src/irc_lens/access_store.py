@@ -7,7 +7,10 @@ table or row is touched.
 
 Tables:
 
-* ``users(email, role, state)`` -- one row per known human.
+* ``users(email, role, state, nickname)`` -- one row per known human.
+  ``nickname`` is the name the person chose (or an admin set), unique
+  without case, NULL until chosen; never derived from the email. Added to
+  older stores by :func:`_migrate`.
 * ``grants(email, resource_kind, resource, level)`` -- generic resource
   grants. ``resource_kind`` is ``'channel'`` today; a later
   ``'library_tag'`` kind needs no schema change.
@@ -35,6 +38,7 @@ from contextlib import closing, contextmanager
 from pathlib import Path
 from typing import Callable, Iterable, Iterator, TypeVar
 
+from irc_lens import nickname as nickname_rules
 from irc_lens.guest_store import email_hash
 
 _T = TypeVar("_T")
@@ -66,6 +70,33 @@ CREATE TABLE IF NOT EXISTS audit (
     target TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS admin_imports (email_hash TEXT PRIMARY KEY);
 """
+
+_USER_FIELDS = ("email", "role", "state", "nickname")
+_USER_SELECT = "SELECT email, role, state, nickname FROM users"
+
+
+def _migrate(con: sqlite3.Connection) -> None:
+    """Additive, idempotent upgrades of an existing store."""
+    cols = {row[1] for row in con.execute("PRAGMA table_info(users)")}
+    if "nickname" not in cols:
+        con.execute("ALTER TABLE users ADD COLUMN nickname TEXT")
+    con.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS users_nickname_idx "
+        "ON users (nickname COLLATE NOCASE)"
+    )
+
+
+class NicknameError(ValueError):
+    """A nickname the store refuses; :attr:`reason` says why.
+
+    ``invalid``, ``reserved`` or ``taken`` (see :mod:`irc_lens.nickname`), or
+    ``no-user`` for an address the store does not know. The message never
+    names the email.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(f"nickname refused: {reason}")
+        self.reason = reason
 
 
 #: Backstop lifetime of a cached read, in seconds. The cache is normally
@@ -117,6 +148,7 @@ class AccessStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as con:
             con.executescript(_SCHEMA)
+            _migrate(con)
         # Hot-path read cache (finding 6): the grant check runs on every
         # received channel line, so get_user/grants_for answer from memory
         # while the database is unchanged. Keyed by query; each entry keeps
@@ -290,18 +322,50 @@ class AccessStore:
         email = _norm(email)
         rows = self._cached(
             ("user", email),
-            lambda: self._hot_all(
-                "SELECT email, role, state FROM users WHERE email=?", (email,)
-            ),
+            lambda: self._hot_all(_USER_SELECT + " WHERE email=?", (email,)),
         )
         if not rows:
             return None
-        return dict(zip(("email", "role", "state"), rows[0]))
+        return dict(zip(_USER_FIELDS, rows[0]))
 
     def list_users(self) -> list[dict[str, str]]:
         """Every known user, ordered by email."""
-        rows = self._all("SELECT email, role, state FROM users ORDER BY email")
-        return [dict(zip(("email", "role", "state"), r)) for r in rows]
+        rows = self._all(_USER_SELECT + " ORDER BY email")
+        return [dict(zip(_USER_FIELDS, r)) for r in rows]
+
+    def set_nickname(self, email: str, raw: str, *, actor: str | None) -> str:
+        """Give *email* the nickname *raw*; return the stored form.
+
+        The guest character rules apply (:mod:`irc_lens.nickname`), plus no
+        reserved name, nothing in the agent namespace, and no other user's
+        nickname (case-insensitive; the unique index backs the check).
+        Raises :class:`NicknameError`. The audit row's target is the
+        nickname, never the address: ``nickname.set`` for a first choice,
+        ``nickname.rename`` for a change; re-setting the same one is a no-op.
+        """
+        email = _norm(email)
+        refusal = nickname_rules.approved_refusal(raw)
+        if refusal is not None:
+            raise NicknameError(refusal)
+        nick = nickname_rules.sanitize_nickname(raw) or ""
+        with self._tx() as con:
+            row = con.execute(
+                "SELECT nickname FROM users WHERE email=?", (email,)
+            ).fetchone()
+            if row is None:
+                raise NicknameError("no-user")
+            if row[0] == nick:
+                return nick
+            other = con.execute(
+                "SELECT 1 FROM users WHERE nickname=? COLLATE NOCASE AND email<>?",
+                (nick, email),
+            ).fetchone()
+            if other is not None:
+                raise NicknameError(nickname_rules.REFUSAL_TAKEN)
+            con.execute("UPDATE users SET nickname=? WHERE email=?", (nick, email))
+            action = "nickname.set" if row[0] is None else "nickname.rename"
+            self._audit(con, actor, action, nick)
+        return nick
 
     def admin_count(self) -> int:
         """How many users are approved admins right now."""

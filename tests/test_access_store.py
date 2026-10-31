@@ -90,6 +90,7 @@ def test_user_role_state(store: AccessStore) -> None:
         "email": ALICE,
         "role": "member",
         "state": "approved",
+        "nickname": None,
     }
     store.set_user("ALICE@Example.com", role="admin", state="approved", actor=BOB)
     assert store.get_user(ALICE)["role"] == "admin"
@@ -241,7 +242,12 @@ def test_extension(db: Path) -> None:
 def test_import_admins_once(store: AccessStore) -> None:
     assert store.import_admins([ALICE, "Bob@Example.org"]) == 2
     for e in (ALICE, BOB):
-        assert store.get_user(e) == {"email": e, "role": "admin", "state": "approved"}
+        assert store.get_user(e) == {
+            "email": e,
+            "role": "admin",
+            "state": "approved",
+            "nickname": None,
+        }
     assert store.import_admins([ALICE, BOB]) == 0
     # a later demotion survives a re-run
     store.set_user(ALICE, role="member", state="approved", actor=BOB)
