@@ -160,10 +160,10 @@ Lapse ledger evidence (all approved):
 
 ## Remaining Work / Follow-up
 
-- `t3` / c31 — restrict the linked servers: bind the remaining all-interfaces server to its tailnet address, and decide whether to add a source firewall (allow only the mesh peers) on every linked server. Owner decision pending.
+- `t3` / c31 — restrict the linked servers so the mesh also works with no internet: host firewall (or an IRCd source allowlist) admitting only mesh peers, and links over LAN addresses — culture#508 (the owner's chosen direction).
 - `d5` — move the 26 legacy host literals into config: irc-lens#83.
-- Presence lag — a guest signed off for idleness still sees "online" (irc-lens#75); the member-roster lag seen in staging is related but has no issue yet.
-- Test isolation — `tests/test_guest_admin.py::test_passwd_stdin_sets_argon2id_hash` reads the operator's real config; it needs a tmp `HOME`/config fixture (issue to file).
-- culture — after a failed first handshake, this host's server did not retry the link to a peer until restarted; and its server was stopped once while culture's full test suite was finishing (suspected test touching the real pidfile). Both to file as culture issues.
-- Mesh operations — keyrings on headless servers start locked after a reboot, which drops their links until unlocked; the owner wants linking machines kept easy, so a CLI move for keyring unlock and link-secret exchange is proposed (today a helper script does it).
+- Presence lag — a guest signed off for idleness still sees "online" (irc-lens#75); the member-list lag noted in staging was not recorded and needs reproduction — #90 (related: #60).
+- Test isolation — `tests/test_guest_admin.py::test_passwd_stdin_sets_argon2id_hash` reads the operator's real config; it needs a tmp `HOME`/config fixture — #89.
+- culture — after a failed first handshake, this host's server did not retry the link to a peer until restarted (culture#510); its server was stopped once while culture's full test suite was finishing, suspected test touching the real pidfile (culture#511); a Python 3.13-only test failure (culture#512).
+- Mesh operations — keyrings on headless servers start locked after a reboot, which drops their links until unlocked; the owner wants linking machines kept easy, so CLI moves for headless keyring unlock and link-secret exchange are proposed — culture#509 (today a helper script does it).
 - c24 (audience) carries no instruction — non-blocking convergence warning.
