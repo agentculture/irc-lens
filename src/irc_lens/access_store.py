@@ -167,19 +167,28 @@ class AccessStore:
 
     def remove_grant(
         self, email: str, resource_kind: str, resource: str, *, actor: str | None
-    ) -> None:
+    ) -> int:
+        """Delete the grant on exactly *resource*; return the rows removed.
+
+        0 means there was no such grant (the resource is matched exactly, so
+        ``#ops`` never removes ``#Ops``); nothing changed and nothing is
+        audited, so callers can say "no such grant" instead of claiming a
+        revocation.
+        """
         email = _norm(email)
         with self._tx() as con:
-            con.execute(
+            n = con.execute(
                 "DELETE FROM grants WHERE email=? AND resource_kind=? AND resource=?",
                 (email, resource_kind, resource),
-            )
-            self._audit(
-                con,
-                actor,
-                "grant.remove",
-                f"{email_hash(email)}:{resource_kind}:{resource}",
-            )
+            ).rowcount
+            if n:
+                self._audit(
+                    con,
+                    actor,
+                    "grant.remove",
+                    f"{email_hash(email)}:{resource_kind}:{resource}",
+                )
+        return n
 
     def grants_for(
         self, email: str, resource_kind: str | None = None

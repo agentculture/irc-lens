@@ -73,6 +73,21 @@ def test_grants_add_list_revoke_applies_live(db, capsys):
     assert not access.can_read(EMAIL, "#room", store=live)
 
 
+def test_grants_revoke_of_a_missing_grant_is_an_error(db, capsys):
+    """Finding 2: ``grants revoke`` of a channel that was never granted (here
+    a case variant) must not claim success; the real grant stays."""
+    run(db, "users", "add", EMAIL)
+    assert run(db, "grants", "add", EMAIL, "#Ops", "--level", "write") == 0
+    capsys.readouterr()
+    assert run(db, "grants", "revoke", EMAIL, "#ops") != 0
+    captured = capsys.readouterr()
+    assert "revoked" not in captured.out
+    assert "no such grant" in captured.err
+    assert AccessStore(db).grants_for(EMAIL) == [("channel", "#Ops", "write")]
+    assert run(db, "grants", "revoke", EMAIL, "#Ops") == 0
+    assert AccessStore(db).grants_for(EMAIL) == []
+
+
 def test_grants_rejects_bad_level(db):
     assert run(db, "grants", "add", EMAIL, "#room", "--level", "god") != 0
     assert AccessStore(db).grants_for(EMAIL) == []

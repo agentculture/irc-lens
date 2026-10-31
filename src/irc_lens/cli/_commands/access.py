@@ -118,7 +118,15 @@ def cmd_grants_list(args: argparse.Namespace) -> int:
 
 def cmd_grants_revoke(args: argparse.Namespace) -> int:
     email = _email(args)
-    _open_store(args).remove_grant(email, CHANNEL_KIND, args.channel, actor=None)
+    if not _open_store(args).remove_grant(
+        email, CHANNEL_KIND, args.channel, actor=None
+    ):
+        raise AfiError(
+            code=EXIT_USER_ERROR,
+            message=f"no such grant: {args.channel} for {email}",
+            remediation="channel names match exactly, case included; "
+            "see: irc-lens grants list <email>",
+        )
     print(f"revoked {args.channel} from {email}")
     return 0
 

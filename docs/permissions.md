@@ -95,6 +95,11 @@ irc-lens extend user@example.com --days 2
 irc-lens extend user@example.com --clear
 ```
 
+Revoking a grant that does not exist (for example `#ops` when the grant is
+on `#Ops`) changes nothing and says "no such grant": the CLI exits 1 and
+`/admin` answers 400. A grant is one row per person and channel; setting it
+again changes its level in place.
+
 Every verb opens the store, makes one change and exits. Output names only the
 address you typed, plus counts, channels and levels.
 

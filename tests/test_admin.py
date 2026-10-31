@@ -295,6 +295,18 @@ async def test_grant_visible_on_next_action_without_restart(env: Env) -> None:
     assert not access.can_read(MEMBER, "#lab", store=env.access)
 
 
+async def test_revoke_of_a_missing_grant_says_so(env: Env) -> None:
+    """Finding 2: revoking a channel the user was never granted (a case
+    variant here) is refused, not reported as 'Grant revoked.'."""
+    env.access.set_grant(MEMBER, "channel", "#Ops", "write", actor=None)
+    r = await env.post(
+        "/admin/grants", env.jwt(ADMIN), email=MEMBER, channel="#ops", level="revoke"
+    )
+    assert r.status == 400
+    assert "No such grant" in await r.text()
+    assert env.access.grants_for(MEMBER) == [("channel", "#Ops", "write")]
+
+
 async def test_bad_grant_rejected(env: Env) -> None:
     for data in (
         {"email": MEMBER, "channel": "lab", "level": "read"},

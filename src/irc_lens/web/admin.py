@@ -223,7 +223,10 @@ async def post_grant(request: web.Request) -> web.Response:
     ):
         return _refuse(request, "Enter a channel such as #general.")
     if level == "revoke":
-        store.remove_grant(email, CHANNEL_KIND, channel, actor=admin.principal)
+        if not store.remove_grant(email, CHANNEL_KIND, channel, actor=admin.principal):
+            return _refuse(
+                request, "No such grant (channel names match exactly, case included)."
+            )
         return _see_other("revoke")
     if level not in LEVELS:
         return _refuse(request, "Unknown level.")
