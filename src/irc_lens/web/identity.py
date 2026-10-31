@@ -29,12 +29,23 @@ TIER_GUEST = "guest"
 TIER_ANONYMOUS = "anonymous"
 TIERS = frozenset({TIER_APPROVED, TIER_GUEST, TIER_ANONYMOUS})
 
+#: Role carried by an approved identity when email permissions are enabled
+#: (read from the access store on every request). Empty = no role known
+#: (legacy allowlist, dev mode, service tokens, guests, anonymous).
+ROLE_ADMIN = "admin"
+
 
 class Identity(NamedTuple):
     principal: str
     nick: str
     raw_jwt_subject: str
     tier: str = TIER_ANONYMOUS
+    role: str = ""
+
+    @property
+    def is_admin(self) -> bool:
+        """True only for an approved identity whose store role is admin."""
+        return self.tier == TIER_APPROVED and self.role == ROLE_ADMIN
 
     @property
     def is_approved(self) -> bool:
