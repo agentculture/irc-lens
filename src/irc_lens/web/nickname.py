@@ -289,10 +289,13 @@ def _expected_nick(app: web.Application, principal: str, backend: str) -> str | 
 
 
 def _stale(app: web.Application, principal: str, backend: str, session: Any) -> bool:
+    current = getattr(session, "nick", None)
+    if not isinstance(current, str):
+        return False  # not a connection with a nick (nothing to compare)
     expected = _expected_nick(app, principal, backend)
     if expected is None:
         return False
-    return str(getattr(session, "nick", "")).casefold() != expected.casefold()
+    return current.casefold() != expected.casefold()
 
 
 async def sweep_once(app: web.Application) -> list[tuple[str, str]]:
