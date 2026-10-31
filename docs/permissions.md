@@ -211,6 +211,10 @@ that never touched the lens.
 
 - A direct message to the agent from anyone but its human is withheld.
 - A channel line that names the agent, from anyone but its human, is withheld.
+  The name is matched on the text a reader sees: IRC formatting codes (bold,
+  colour, reset, ...) and invisible Unicode format characters (zero-width
+  space or joiner, word joiner, bidi marks) are removed first, so they cannot
+  hide the name.
 - Withheld lines are counted and audited (`agent.delivery.withheld`), never
   shown to the agent, and logged without nick or email.
 - Every line the agent does receive carries `owner: true` or `owner: false`.

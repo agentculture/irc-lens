@@ -60,6 +60,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 from collections import deque
 from dataclasses import dataclass
 from typing import Any
@@ -99,6 +100,23 @@ _NICK_RE = re.compile(rf"[{_NICK_CHARS}]{{1,64}}")
 
 #: The ``target`` of a delivered direct message.
 DM_TARGET = "DM"
+
+# IRC formatting: colour (\x03 fg[,bg]), hex colour (\x04 rrggbb[,rrggbb]),
+# then the single-byte toggles (bold, italic, underline, strike, mono,
+# reverse, reset).
+_IRC_FORMAT_RE = re.compile(
+    r"\x03(?:\d{1,2}(?:,\d{1,2})?)?"
+    r"|\x04(?:[0-9A-Fa-f]{6}(?:,[0-9A-Fa-f]{6})?)?"
+    r"|[\x02\x0f\x11\x16\x1d\x1e\x1f]"
+)
+
+
+def visible_text(text: str) -> str:
+    """*text* as a reader sees it: IRC formatting codes and Unicode format
+    characters (zero-width space/joiner, word joiner, bidi marks, ...)
+    removed, so they cannot hide a name from a text match."""
+    stripped = _IRC_FORMAT_RE.sub("", text or "")
+    return "".join(ch for ch in stripped if unicodedata.category(ch) != "Cf")
 
 
 @dataclass(frozen=True)
@@ -271,6 +289,7 @@ class AgentSession:
     def _names_me(self, text: str) -> bool:
         nick = self.session.nick
         names = {nick, nick.split("-", 1)[-1]}
+        text = visible_text(text)
         for name in names:
             pattern = rf"(?<![{_NICK_CHARS}])@?{re.escape(name)}(?![{_NICK_CHARS}])"
             if re.search(pattern, text, flags=re.IGNORECASE):
@@ -610,4 +629,5 @@ __all__ = [
     "one_line",
     "valid_channel",
     "valid_nick",
+    "visible_text",
 ]

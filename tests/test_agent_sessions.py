@@ -641,3 +641,39 @@ def test_agent_human_for_nick_uses_the_credential_rows(env_free_store) -> None:
     )
     assert agent_sessions.human_for_agent_nick(store, "sbx-pa_-nobody") is None
     assert agent_sessions.human_for_agent_nick(store, GUEST_NICK) is None
+
+
+# -- review findings (low) -------------------------------------------------------------
+
+
+class _NickOnly:
+    def __init__(self, nick: str) -> None:
+        self.nick = nick
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"hey {MEMBER_AGENT} do this",
+        f"hey \x02{MEMBER_AGENT}\x02 do this",
+        "hey " + MEMBER_AGENT[:4] + "\x02\x02" + MEMBER_AGENT[4:] + " do this",
+        "hey " + MEMBER_AGENT[:4] + "\x0304,02" + MEMBER_AGENT[4:] + " do this",
+        "hey " + MEMBER_AGENT[:4] + "\u200b" + MEMBER_AGENT[4:] + " do this",
+        "hey " + MEMBER_AGENT[:4] + "\u2060" + MEMBER_AGENT[4:] + " do this",
+        "hey " + MEMBER_AGENT[:4] + "\x0f" + MEMBER_AGENT[4:] + " do this",
+        "hey @" + MEMBER_AGENT.split("-", 1)[1][:3] + "\u200d"
+        + MEMBER_AGENT.split("-", 1)[1][3:],
+    ],
+)
+def test_names_me_sees_through_formatting_and_invisible_chars(text: str) -> None:
+    """Low finding: IRC formatting codes or Unicode format characters inside
+    the agent's name must not let a line naming it pass as unaddressed."""
+    agent = agent_sessions.AgentSession.__new__(agent_sessions.AgentSession)
+    agent.session = _NickOnly(MEMBER_AGENT)
+    assert agent._names_me(text)
+
+
+def test_names_me_still_ignores_other_words() -> None:
+    agent = agent_sessions.AgentSession.__new__(agent_sessions.AgentSession)
+    agent.session = _NickOnly(MEMBER_AGENT)
+    assert not agent._names_me("hello \x02everyone\x02 \u200b here")
