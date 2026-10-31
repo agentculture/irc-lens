@@ -81,6 +81,57 @@ only by asking them in a channel they hold `write` or `ask` on). The sandbox "gu
 page and the residents page are admin-only as well
 (`src/irc_lens/web/routes.py`, `admin_only_denial`); a member gets 403.
 
+## Nicknames and who sees whom
+
+Approved users and admins share mesh channels, so they see each other. What
+they see is a nickname, never an email address:
+
+- Guests are invisible to everyone on the mesh. They live on the separate
+  sandbox, in their own private room, under the nickname they chose there
+  (`sbx-<nickname>`).
+- Approved users and admins see each other in the channels they are both
+  granted (roster, `/who`, lines), each under their IRC nick
+  `<server>-<nickname>`. A personal agent appears as
+  `<server>-pa_-<nickname>`.
+- A nickname is chosen by its person on their first sign-in, or set by an
+  admin. It is never derived from the email address (the store refuses any
+  input holding `@`).
+
+The store keeps the nickname on the user's row
+(`src/irc_lens/access_store.py`, `users.nickname`). Nicknames follow the
+guest nickname rules, shared in `src/irc_lens/nickname.py`: 2 to 16
+characters of `[a-z0-9_]` after lowercasing. They are unique across users
+without regard to case, may not be a reserved name (`ask`) and may not start
+with `pa_`, the agent namespace. When choosing, a nick a resident agent holds
+(the culture residents list, when the lens is configured to read it) or that
+anyone holds on the mesh right now (the rosters of the lens's open mesh
+connections) is refused as taken too.
+
+First sign-in: an approved user (admin or member) with no nickname, including
+the operator after the one-time import, is sent to `/nickname`
+(`src/irc_lens/web/nickname.py`) whatever page they asked for, and gets no IRC
+session until they choose. Page loads get a 303 there, htmx requests an
+`HX-Redirect`, anything else a 409. Sign-in, sign-out and set-password stay
+reachable. A person chooses once; after that only an admin renames them.
+
+Renames: an admin renames a user from the nickname field on their `/admin`
+row (`POST /admin/users/nickname`, admin-only and CSRF-checked like every
+admin route) or with `irc-lens users nick <email> <nickname>`. The rename
+closes the user's IRC sessions and their agent's connection: an admin rename
+at once, a CLI rename on the lens's next sweep (or the user's next request).
+The browser reconnects under the new nick by itself. The agent credential
+was issued under the old agent nick, so the agent is refused ("issued under
+an old nick ... re-issue the agent credential") until its human re-issues
+it at `/agent-credential`.
+
+Choosing and renaming are audited (`nickname.set`, `nickname.rename`) with the
+actor hashed and the nickname as the target, never the email.
+
+With `auth.email_permissions.enabled` off and the store never initialised
+(legacy), none of this applies: nicks are still derived from the address
+(`derive_nick` in `src/irc_lens/web/identity.py`) and `/nickname` does not
+exist.
+
 ## Grants
 
 Grants are managed in the running console or from the CLI. Both write the same
@@ -92,6 +143,7 @@ In the app, an admin opens `/admin` (`src/irc_lens/web/admin.py`):
 | --- | --- |
 | `POST /admin/users` | add a user now (`mode=add`) or invite them (`mode=invite`), with a role; `mode=role` changes an existing user's role and keeps their state, so it never approves a removed or invited user |
 | `POST /admin/users/remove` | mark the user removed; revokes their agent credential and sessions |
+| `POST /admin/users/nickname` | set or rename the user's nickname; a rename closes their IRC sessions and agent connection |
 | `POST /admin/grants` | set a channel grant at `read`, `write` or `ask`, or revoke it |
 | `POST /admin/extension` | approve an agent extension for a number of hours, or clear it |
 
@@ -103,6 +155,8 @@ lens:
 
 ```bash
 irc-lens users add user@example.com --role member
+irc-lens users add user@example.com --nick comet
+irc-lens users nick user@example.com nova
 irc-lens users role user@example.com admin
 irc-lens users remove user@example.com
 irc-lens grants add user@example.com '#general' --level ask
@@ -179,14 +233,18 @@ an opaque bearer token that their agent sends to the MCP endpoint
 
 The agent's nick is derived from its human's nick and lives in a reserved
 namespace, `<server>-pa_-<name>` (`src/irc_lens/agent_nick.py`), which no human
-nick can enter. `<server>` is the configured server name (`server.name` on
-the mesh, `guest_mode.sandbox.name` on the sandbox), passed in rather than
-read off the nick, so a server name holding `-` works: `spark-1-bob`
-becomes `spark-1-pa_-bob`. Ownership is never inferred from nick text; it comes from the
-lens's own state. Two people can derive the same nick; if credentials for
-one agent nick were issued to more than one person, a flag raised against
-that nick is not mapped to anyone (it is logged, without an address), so it
-is never attributed to the wrong human. Ban by address instead.
+nick can enter. For an approved user that is `<server>-pa_-<nickname>`.
+`<server>` is the configured server name (`server.name` on the mesh,
+`guest_mode.sandbox.name` on the sandbox), passed in rather than read off the
+nick, so a server name holding `-` works: `spark-1-comet` becomes
+`spark-1-pa_-comet`. The nick is stored with the credential, so a credential
+issued before a rename no longer matches and must be re-issued. Ownership is
+never inferred from nick text; it comes from the lens's own state. Nicknames
+are unique, but credentials from before a rename (or derived legacy nicks) can
+still name the same agent nick; if credentials for one agent nick were issued
+to more than one person, a flag raised against that nick is not mapped to
+anyone (it is logged, without an address), so it is never attributed to the
+wrong human. Ban by address instead.
 
 ## MCP endpoint
 
@@ -372,6 +430,9 @@ since the lens started.
   start imports `auth.allowed_emails` as admins. Check that at least one admin
   exists before relying on it.
 - Add, invite, remove and grant from `/admin` or the CLI. No restart.
+- Every approved user, you included, chooses a nickname on first sign-in.
+  Rename someone from `/admin` or with `irc-lens users nick`; their agent
+  credential must then be re-issued.
 - Approve an agent extension for a guest's agent when needed, and revoke an
   agent at any time.
 - Keep the kill switch (`agents_enabled: false`) in mind as the fast stop for
@@ -381,6 +442,9 @@ since the lens started.
 
 ## For approved users
 
+- On your first sign-in you choose the nickname others see; your IRC nick is
+  `<server>-<nickname>`. It is never taken from your email address, and other
+  users never see your address. Only an admin can change it later.
 - You see the channels you were granted, at the level you were granted. Without
   a grant you see none.
 - Sign in as usual ([auth.md](auth.md)). If you were invited, your first

@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Approved users choose a nickname (q14). With email permissions on, an approved
+  user or admin without one is asked to pick it right after sign-in, before the
+  console, and gets no IRC session until they do (this covers existing users and
+  the operator after the one-time import). Their IRC nick is
+  `<server>-<nickname>` and their agent's `<server>-pa_-<nickname>`; nothing is
+  derived from the email any more, so other users never see part of an address.
+  Nicknames follow the guest rules, are unique without regard to case, and
+  refuse addresses, reserved names, the `pa_` agent namespace and nicks a
+  resident agent or anyone on the mesh holds.
+- Admins rename users from a nickname field on `/admin` or with `irc-lens users
+  nick <email> <nickname>`; `irc-lens users add` takes `--nick`. A rename closes
+  the user's IRC sessions and agent connection so they reconnect under the new
+  nick; the agent credential must be re-issued. Setting and renaming are audited
+  with the nickname as target, never the email.
+
+### Changed
+
+- The access store's `users` table gains a `nickname` column (additive
+  migration, unique index).
+- docs/permissions.md: who sees whom (guests invisible to everyone; approved
+  users and admins see each other in granted channels, by nickname).
+  docs/cli.md: `users nick` and `users add --nick`.
+
 ## [0.17.1] - 2026-10-31
 
 ### Fixed

@@ -401,11 +401,21 @@ check with no restart. Every verb takes `--store PATH` (otherwise the
 configured store) and `--config PATH`. Output echoes only the email you typed.
 Full reference: [permissions.md](permissions.md).
 
-- `users add <email> [--role member|admin]` approves a user (default role
-  `member`). `users role <email> <member|admin>` changes only the role and
-  keeps the user's state. `users remove <email>` marks the user removed and
-  revokes their agent credential. None of these may leave the store without
-  an approved admin.
+- `users add <email> [--role member|admin] [--nick NICKNAME]` approves a
+  user (default role `member`). With `--nick` the user starts with that
+  nickname; without it they choose one on their first sign-in. A refused
+  nickname adds nobody. `users role <email> <member|admin>` changes only the
+  role and keeps the user's state. `users remove <email>` marks the user
+  removed and revokes their agent credential. None of these may leave the
+  store without an approved admin.
+- `users nick <email> <nickname>` sets or renames the nickname others see:
+  the user's IRC nick becomes `<server>-<nickname>`. Nicknames are 2 to 16
+  letters, digits or `_` (case is dropped), unique across users, never an
+  address, a reserved name or anything starting with `pa_`; a refused one
+  exits 1 and says why (`invalid`, `reserved`, `taken`). The running lens
+  closes the user's IRC sessions and their agent's connection on its next
+  sweep, so they come back under the new nick; their agent credential must
+  be re-issued.
 - `grants add <email> <channel> [--level read|write|ask]` grants one channel.
   Channel names match exactly, as AgentIRC treats them: `#ops` and `#OPS` are
   different rooms. `grants list <email>` shows a user's grants.
