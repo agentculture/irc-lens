@@ -483,7 +483,12 @@ def render_index(
     (signed-in humans while email permissions are on; web/agent_auth.py).
     """
     if chat_log_html is None:
-        if session.current_channel:
+        # The buffer is unfiltered: read it only for a channel the viewer
+        # may read right now (a revoked grant must not leak on reload).
+        may = getattr(session, "may", None)
+        if session.current_channel and (
+            may is None or may("read", session.current_channel, audit=False)
+        ):
             entries = session.buffer.read(session.current_channel, limit=200)
             chat_log_html = render_chat_log(
                 entries,

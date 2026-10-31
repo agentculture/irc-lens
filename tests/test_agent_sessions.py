@@ -293,6 +293,7 @@ async def test_browser_logout_does_not_tear_the_agent_down(env: Env) -> None:
 
 
 async def test_guest_agent_joins_only_its_humans_room(env: Env) -> None:
+    await env.human_online(env.guest())  # a guest's agent runs only with its human
     token = await env.issue(env.guest())
     me = await env.ok(token, "whoami")
     assert me["nick"] == GUEST_AGENT and me["tier"] == "guest"
@@ -458,6 +459,30 @@ async def test_ungranted_channel_refused_before_any_irc_line(env: Env) -> None:
     assert not any(ln.startswith("PRIVMSG") for ln in sent)
 
 
+async def test_case_variant_of_a_granted_channel_is_refused(env: Env) -> None:
+    """AgentIRC channel names are case-sensitive: a grant on ``#ops`` does
+    not reach ``#OPS`` or ``#Ops``, which are other, ungranted rooms."""
+    token = await env.issue(env.jwt(MEMBER))
+    await env.ok(token, "whoami")
+    before = env.sent_by(env.mesh, MEMBER_AGENT)
+    for variant in ("#OPS", "#Ops"):
+        assert "not permitted" in await env.refused(token, "join", channel=variant)
+        assert "not permitted" in await env.refused(
+            token, "send", target=variant, text="hi"
+        )
+    sent = env.sent_by(env.mesh, MEMBER_AGENT)[len(before) :]
+    assert not any("#OPS" in ln or "#Ops" in ln for ln in sent)
+
+
+async def test_whoami_never_lists_a_revoked_channel(env: Env) -> None:
+    """Finding 3: ``whoami`` lists only channels the human may still list."""
+    token = await env.issue(env.jwt(MEMBER))
+    await env.ok(token, "join", channel="#ops")
+    assert (await env.ok(token, "whoami"))["joined"] == ["#ops"]
+    env.access.remove_grant(MEMBER, "channel", "#ops", actor=None)
+    assert (await env.ok(token, "whoami"))["joined"] == []
+
+
 async def test_revoked_grant_bites_on_the_next_send(env: Env) -> None:
     token = await env.issue(env.jwt(MEMBER))
     await env.ok(token, "join", channel="#ops")
@@ -536,6 +561,7 @@ async def test_guest_agent_shares_the_guests_rate_limit(env: Env) -> None:
 
 
 async def test_guest_agent_gets_the_guest_allowlist(env: Env) -> None:
+    await env.human_online(env.guest())  # a guest's agent runs only with its human
     token = await env.issue(env.guest())
     assert "Not in guest view" in await env.refused(token, "join", channel="#lobby")
     assert "Not in guest view" in await env.refused(token, "part", channel="#lobby")
@@ -549,6 +575,7 @@ async def test_guest_agent_gets_the_guest_allowlist(env: Env) -> None:
 
 
 async def test_guest_agent_sends_are_in_the_humans_input_log(env: Env) -> None:
+    await env.human_online(env.guest())  # a guest's agent runs only with its human
     token = await env.issue(env.guest())
     await env.ok(token, "send", text="what is a sandbox?")
     kinds = [(k, p) for k, p, _ts in env.guests.inputs_for(GUEST)]
@@ -558,6 +585,7 @@ async def test_guest_agent_sends_are_in_the_humans_input_log(env: Env) -> None:
 
 
 async def test_guest_agent_delete_is_refused_like_the_page_redirect(env: Env) -> None:
+    await env.human_online(env.guest())  # a guest's agent runs only with its human
     token = await env.issue(env.guest())
     msg = await env.refused(token, "send", text="/delete")
     assert "/delete" in msg or "page" in msg
@@ -613,3 +641,61 @@ def test_agent_human_for_nick_uses_the_credential_rows(env_free_store) -> None:
     )
     assert agent_sessions.human_for_agent_nick(store, "sbx-pa_-nobody") is None
     assert agent_sessions.human_for_agent_nick(store, GUEST_NICK) is None
+
+
+# -- review findings (low) -------------------------------------------------------------
+
+
+class _NickOnly:
+    def __init__(self, nick: str) -> None:
+        self.nick = nick
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"hey {MEMBER_AGENT} do this",
+        f"hey \x02{MEMBER_AGENT}\x02 do this",
+        "hey " + MEMBER_AGENT[:4] + "\x02\x02" + MEMBER_AGENT[4:] + " do this",
+        "hey " + MEMBER_AGENT[:4] + "\x0304,02" + MEMBER_AGENT[4:] + " do this",
+        "hey " + MEMBER_AGENT[:4] + "\u200b" + MEMBER_AGENT[4:] + " do this",
+        "hey " + MEMBER_AGENT[:4] + "\u2060" + MEMBER_AGENT[4:] + " do this",
+        "hey " + MEMBER_AGENT[:4] + "\x0f" + MEMBER_AGENT[4:] + " do this",
+        "hey @"
+        + MEMBER_AGENT.split("-", 1)[1][:3]
+        + "\u200d"
+        + MEMBER_AGENT.split("-", 1)[1][3:],
+    ],
+)
+def test_names_me_sees_through_formatting_and_invisible_chars(text: str) -> None:
+    """Low finding: IRC formatting codes or Unicode format characters inside
+    the agent's name must not let a line naming it pass as unaddressed."""
+    agent = agent_sessions.AgentSession.__new__(agent_sessions.AgentSession)
+    agent.session = _NickOnly(MEMBER_AGENT)
+    assert agent._names_me(text)
+
+
+def test_names_me_still_ignores_other_words() -> None:
+    agent = agent_sessions.AgentSession.__new__(agent_sessions.AgentSession)
+    agent.session = _NickOnly(MEMBER_AGENT)
+    assert not agent._names_me("hello \x02everyone\x02 \u200b here")
+
+
+def test_ambiguous_agent_nick_maps_to_nobody(tmp_path: Path, caplog) -> None:
+    """Low finding: two humans can derive the same agent nick (MEMBER and
+    NAMESAKE here). A flag against that nick must not be attributed to
+    either: the mapping refuses, and the log names no address."""
+    from irc_lens.access_store import AccessStore
+
+    assert derive_nick("testsrv", NAMESAKE) == MEMBER_NICK
+    store = AccessStore(tmp_path / "guests.db")
+    store.issue_agent_credential(MEMBER, MEMBER_AGENT, ttl=3600, actor=None)
+    assert agent_sessions.human_for_agent_nick(store, MEMBER_AGENT) == MEMBER
+    store.issue_agent_credential(MEMBER, MEMBER_AGENT, ttl=3600, actor=None)
+    assert agent_sessions.human_for_agent_nick(store, MEMBER_AGENT) == MEMBER
+    store.issue_agent_credential(NAMESAKE, MEMBER_AGENT, ttl=3600, actor=None)
+    with caplog.at_level("WARNING"):
+        assert agent_sessions.human_for_agent_nick(store, MEMBER_AGENT) is None
+    assert "ambiguous" in caplog.text
+    assert MEMBER not in caplog.text and NAMESAKE not in caplog.text
+    assert "example" not in caplog.text

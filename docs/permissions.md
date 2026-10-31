@@ -28,6 +28,11 @@ An admin passes every channel check. A member passes a check only through a
 **grant**: a row of (email, resource kind, resource, level). Today the kind is
 always `channel`; the table is generic, so a later kind needs no schema change.
 
+A channel grant matches the channel name exactly, case included. AgentIRC
+keys channels by their exact name, so `#ops` and `#OPS` are two different
+rooms, and a grant on one never opens the other. Email addresses are
+compared case-insensitively.
+
 | Level | List and read history | See live lines | Send, ask agents |
 | --- | --- | --- | --- |
 | `read` | yes | yes | no |
@@ -42,9 +47,13 @@ The policy is default-deny and pure (`src/irc_lens/access.py`):
 
 - A member with no grants has no channels: nothing is listed, joined, read or
   sent.
-- Every answer is derived from the store's current rows on every call and is
-  never cached, so revoking a grant takes effect on the next action, with no
-  restart.
+- Every answer is derived from the store's current rows, so revoking a
+  grant takes effect on the next action, with no restart. Because the check
+  runs on every received channel line, the store keeps repeated reads in
+  memory only while the database file is unchanged: SQLite's change
+  counter, bumped by any committed write from the lens or the CLI,
+  invalidates them, and a 5-second lifetime is the backstop. A read error is
+  never cached and answers "no".
 - Anything unexpected (unknown or unapproved person, missing store, read error)
   answers "no". An audit failure never turns a refusal into an approval.
 - Guests receive no grants. They live on the sandbox, separate from the mesh.
@@ -66,7 +75,7 @@ In the app, an admin opens `/admin` (`src/irc_lens/web/admin.py`):
 
 | Route | Does |
 | --- | --- |
-| `POST /admin/users` | add a user now (`mode=add`) or invite them (`mode=invite`), with a role |
+| `POST /admin/users` | add a user now (`mode=add`) or invite them (`mode=invite`), with a role; `mode=role` changes an existing user's role and keeps their state, so it never approves a removed or invited user |
 | `POST /admin/users/remove` | mark the user removed; revokes their agent credential and sessions |
 | `POST /admin/grants` | set a channel grant at `read`, `write` or `ask`, or revoke it |
 | `POST /admin/extension` | approve an agent extension for a number of hours, or clear it |
@@ -90,13 +99,26 @@ irc-lens extend user@example.com --days 2
 irc-lens extend user@example.com --clear
 ```
 
+Revoking a grant that does not exist (for example `#ops` when the grant is
+on `#Ops`) changes nothing and says "no such grant": the CLI exits 1 and
+`/admin` answers 400. A grant is one row per person and channel; setting it
+again changes its level in place.
+
+Like `/admin`, `users role`, `users add` and `users remove` refuse a change
+that would leave no approved admin.
+
 Every verb opens the store, makes one change and exits. Output names only the
 address you typed, plus counts, channels and levels.
 
 `config.yaml` no longer holds the approved list. With
 `auth.email_permissions.enabled: true`, `auth.allowed_emails` is read once to
 import its entries as admins (an import ledger makes that idempotent, so a
-later demotion is never undone by a restart) and is then ignored.
+later demotion is never undone by a restart) and is then ignored. The first
+start that succeeds marks the store initialised even when it imported
+nobody (for example an empty list and an admin added with
+`irc-lens users add --role admin`), so later starts never import the list
+and switching the feature off is admins-only, never legacy. A first start
+refused for having no admin does not mark it.
 
 ## Invites
 
@@ -123,7 +145,9 @@ an opaque bearer token that their agent sends to the MCP endpoint
   closed. A human never has two active credentials.
 - A credential expires after `auth.email_permissions.agent_credential_ttl_days`
   days (default 30). It can also be revoked from the CLI
-  (`irc-lens agents revoke`) or by removing the person.
+  (`irc-lens agents revoke <email>`, which revokes both the approved and the
+  guest credential of that address) or by removing the person. The live
+  agent connection is closed by the next agent sweep.
 - It is bound to its human through a credential key: the email for an approved
   member, `guest:<email>` for a guest, so a guest's credential can never
   resolve to a member's rows even when the two share an address.
@@ -134,14 +158,19 @@ an opaque bearer token that their agent sends to the MCP endpoint
 The agent's nick is derived from its human's nick and lives in a reserved
 namespace, `<server>-pa_-<name>` (`src/irc_lens/agent_nick.py`), which no human
 nick can enter. Ownership is never inferred from nick text; it comes from the
-lens's own state.
+lens's own state. Two people can derive the same nick; if credentials for
+one agent nick were issued to more than one person, a flag raised against
+that nick is not mapped to anyone (it is logged, without an address), so it
+is never attributed to the wrong human. Ban by address instead.
 
 ## MCP endpoint
 
 There is one remote MCP endpoint for all tiers. It is mounted at
 `web.mcp_path` (default `/mcp`; `src/irc_lens/web/mcp_http.py`) on the lens's
-own public host. The host is never written in code: you reach it at your
-deployment's public base URL plus that path, for example
+own public host. The path must be static: one with spaces or braces (`{`,
+`}`, which aiohttp would read as a dynamic segment) is refused at start.
+The host is never written in code: you reach it at your deployment's public
+base URL plus that path, for example
 `https://lens.example.com/mcp`. The credential page shows the endpoint built
 from `auth.app_signin.base_url` and `web.mcp_path`.
 
@@ -157,7 +186,8 @@ token is answered 401 before any tool runs.
 
 On every request, not just the first, the lens re-checks the credential's
 human: a member must still be approved in the store; a guest must still exist
-and not be banned (by email or IP). Nothing is cached, so removing a member or
+and not be banned (by email or IP). Every change to the store is seen on the
+next call (see the cache rule under Roles and levels), so removing a member or
 banning a guest cuts off their agent on its next call. A background sweep also
 closes live agent connections whose credential lapsed or whose human no longer
 passes.
@@ -184,12 +214,27 @@ that never touched the lens.
 
 - A direct message to the agent from anyone but its human is withheld.
 - A channel line that names the agent, from anyone but its human, is withheld.
+  The name is matched on the text a reader sees: IRC formatting codes (bold,
+  colour, reset, ...) and invisible Unicode format characters (zero-width
+  space or joiner, word joiner, bidi marks) are removed first, so they cannot
+  hide the name.
 - Withheld lines are counted and audited (`agent.delivery.withheld`), never
   shown to the agent, and logged without nick or email.
 - Every line the agent does receive carries `owner: true` or `owner: false`.
   "Owner" means the human's own live lens session holds the sending nick; a
   namesake or a raw client that grabbed the nick is not the owner.
 - An agent may send direct messages only to its own human.
+
+One gap is known and not closed: when the human's IRC connection dies on
+the server side, the lens notices only when its own connection reports it.
+In that short window a raw IRC client could take the human's nick. Lines it
+sends then are not marked `owner: true` once the lens has seen the human's
+session drop (the owner check needs the human's own healthy, connected lens
+session holding the nick), but until then the lens still believes the human
+holds it, so such lines could be delivered as `owner: true`. Restricting
+the mesh IRCd to the lens, as in
+[deployment-permissions.md](deployment-permissions.md), keeps raw clients
+off the mesh and closes this in practice.
 
 Resident mesh agents are not personal agents: this rule applies to agents that
 connect through the MCP endpoint, and residents answer any person holding
@@ -221,6 +266,14 @@ How the extension changes when a guest's agent disconnects
 - When the guest's own sandbox session is gone (signed off for idleness, or
   never opened) and no extension is live, the agent is disconnected on the
   next reap.
+- Every agent request checks the same rule before anything connects
+  (`_guest_agent_gate` in `src/irc_lens/web/agent_sessions.py`): while the
+  human is signed off and no extension is live, the call is refused and an
+  open agent connection is closed, so a tool call never reopens an agent
+  the reaper closed. The agent works again once its human signs back in.
+- The same check re-reads the guest's consent: after a Terms or Privacy
+  version bump, the agent is refused and disconnected until the guest
+  accepts the new version.
 - While an extension is live, the agent stays connected. Once the extension
   ends or is cleared, the next reap applies the normal rule.
 - For a guest, the extension is looked up under the bare email (what the
@@ -273,9 +326,17 @@ refused accesses and refused agent calls are rows in the store's append-only
 `audit` table. Rows are keyed by the SHA-256 of the actor's address, never the
 address, and service logs carry no email address or token.
 
+Refused agent calls need no credential, so their audit rows are throttled:
+at most one `agent.refuse` row per reason per client address per minute, and
+at most 30 per reason per minute across all clients
+(`RefusalThrottle` in `src/irc_lens/web/agent_auth.py`). Throttled refusals
+are still counted.
+
 `GET /owner/metrics` (admin-only) adds an `access` object of counts only:
 `grant_changes`, `credential_events`, `access_denials` and `agent_refusals`.
-The counts are derived from the audit table, so they survive restarts.
+The counts are derived from the audit table, so they survive restarts;
+`agent_refusals` also adds the refusals the throttle kept out of the audit
+since the lens started.
 
 ## For admins
 

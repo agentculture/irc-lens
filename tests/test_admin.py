@@ -295,6 +295,43 @@ async def test_grant_visible_on_next_action_without_restart(env: Env) -> None:
     assert not access.can_read(MEMBER, "#lab", store=env.access)
 
 
+async def test_revoke_of_a_missing_grant_says_so(env: Env) -> None:
+    """Finding 2: revoking a channel the user was never granted (a case
+    variant here) is refused, not reported as 'Grant revoked.'."""
+    env.access.set_grant(MEMBER, "channel", "#Ops", "write", actor=None)
+    r = await env.post(
+        "/admin/grants", env.jwt(ADMIN), email=MEMBER, channel="#ops", level="revoke"
+    )
+    assert r.status == 400
+    assert "No such grant" in await r.text()
+    assert env.access.grants_for(MEMBER) == [("channel", "#Ops", "write")]
+
+
+async def test_reload_never_renders_a_revoked_channel(env: Env) -> None:
+    """Finding 3: after a grant is revoked, a page reload must not show the
+    channel's buffered lines or its sidebar entry. (The HISTORY query is
+    refused; the page used to fall back to the unfiltered buffer.)"""
+    from irc_lens.web.sessions import BACKEND_MESH
+
+    env.access.set_grant(MEMBER, "channel", "#lab", "write", actor=None)
+    h = env.jwt(MEMBER)
+    assert (await env.client.get("/", headers=h)).status == 200
+    session = dict(zip(env.app["registry"].keys(), env.app["registry"].values()))[
+        (MEMBER, BACKEND_MESH)
+    ]
+    session.joined_channels.add("#lab")
+    session.current_channel = "#lab"
+    session.buffer.add("#lab", "someone", "buffered-secret-line")
+    env.access.remove_grant(MEMBER, "channel", "#lab", actor=None)
+    r = await env.client.get("/", headers=h)
+    assert r.status == 200
+    body = await r.text()
+    assert "buffered-secret-line" not in body
+    assert "#lab" not in body
+    assert "#lab" not in session.joined_channels
+    assert session.current_channel == ""
+
+
 async def test_bad_grant_rejected(env: Env) -> None:
     for data in (
         {"email": MEMBER, "channel": "lab", "level": "read"},
@@ -310,13 +347,43 @@ async def test_role_change_applies_to_open_session(env: Env) -> None:
     h = env.jwt(MEMBER)
     assert (await env.client.get("/admin", headers=h)).status == 403
     await env.post(
-        "/admin/users", env.jwt(ADMIN), email=MEMBER, role="admin", mode="add"
+        "/admin/users", env.jwt(ADMIN), email=MEMBER, role="admin", mode="role"
     )
     assert (await env.client.get("/admin", headers=h)).status == 200
     await env.post(
-        "/admin/users", env.jwt(ADMIN), email=MEMBER, role="member", mode="add"
+        "/admin/users", env.jwt(ADMIN), email=MEMBER, role="member", mode="role"
     )
     assert (await env.client.get("/admin", headers=h)).status == 403
+
+
+@pytest.mark.parametrize("state", ["removed", "invited"])
+async def test_role_change_keeps_the_users_state(env: Env, state: str) -> None:
+    """Finding 7: changing a removed or invited user's role from the users
+    table must not approve them; only 'Add now' approves."""
+    env.access.set_user(NEWBIE, role="member", state=state, actor=None)
+    r = await env.post(
+        "/admin/users", env.jwt(ADMIN), email=NEWBIE, role="admin", mode="role"
+    )
+    assert r.status == 303
+    user = env.access.get_user(NEWBIE)
+    assert (user["role"], user["state"]) == ("admin", state)
+    assert app_session.approved_user(env.app, NEWBIE) is None
+
+
+async def test_role_forms_on_the_page_do_not_post_add(env: Env) -> None:
+    """Finding 7: the per-user role form posts mode=role, never mode=add."""
+    env.access.set_user(NEWBIE, role="member", state="removed", actor=None)
+    html = await (await env.client.get("/admin", headers=env.jwt(ADMIN))).text()
+    assert '<input type="hidden" name="mode" value="add">' not in html
+    assert '<input type="hidden" name="mode" value="role">' in html
+
+
+async def test_role_change_of_an_unknown_user_is_refused(env: Env) -> None:
+    r = await env.post(
+        "/admin/users", env.jwt(ADMIN), email=NEWBIE, role="admin", mode="role"
+    )
+    assert r.status == 400
+    assert env.access.get_user(NEWBIE) is None
 
 
 async def test_remove_user_and_last_admin_guard(env: Env) -> None:
@@ -326,10 +393,11 @@ async def test_remove_user_and_last_admin_guard(env: Env) -> None:
     # The only admin cannot be removed or demoted.
     r = await env.post("/admin/users/remove", env.jwt(ADMIN), email=ADMIN)
     assert r.status == 400
-    r = await env.post(
-        "/admin/users", env.jwt(ADMIN), email=ADMIN, role="member", mode="add"
-    )
-    assert r.status == 400
+    for mode in ("add", "role"):
+        r = await env.post(
+            "/admin/users", env.jwt(ADMIN), email=ADMIN, role="member", mode=mode
+        )
+        assert r.status == 400, mode
     assert env.access.admin_count() == 1
 
 

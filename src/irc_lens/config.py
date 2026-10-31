@@ -311,16 +311,23 @@ def _validate_web_section(raw: dict) -> tuple[str, int]:
 
 
 def _validate_mcp_path(raw: dict) -> str:
-    """Return ``web.mcp_path`` (default ``/mcp``): an absolute URL path."""
+    """Return ``web.mcp_path`` (default ``/mcp``): an absolute URL path.
+
+    Braces are refused: aiohttp reads ``{...}`` in a route as a dynamic
+    segment, which would mount the endpoint on more paths than configured.
+    """
     web = raw.get("web")
     value = web.get("mcp_path", "/mcp") if isinstance(web, dict) else "/mcp"
     if (
         not isinstance(value, str)
         or not value.startswith("/")
         or any(ch.isspace() for ch in value)
+        or "{" in value
+        or "}" in value
     ):
         raise _err(
-            f"web.mcp_path must be a URL path starting with '/', got {value!r}",
+            f"web.mcp_path must be a static URL path starting with '/' "
+            f"(no spaces or braces), got {value!r}",
             "set `web.mcp_path:` to a path like /mcp",
         )
     return value

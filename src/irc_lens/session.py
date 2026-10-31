@@ -590,6 +590,11 @@ class Session:
         # Deliberately generic: never confirm whether the channel exists.
         self._publish_error(f"not permitted: {channel}")
 
+    def enforce_revocations(self) -> None:
+        """Public entry for page renders (``GET /``): see
+        :meth:`_enforce_revocations`."""
+        self._enforce_revocations()
+
     def _enforce_revocations(self) -> None:
         """Drop local state for channels the viewer may no longer see (a
         grant revoked mid-session), so no view or sidebar names them."""

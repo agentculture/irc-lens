@@ -26,7 +26,9 @@ Authenticating (every MCP request)
     re-checked against its human on *every* request (o16): an approved
     user must still be approved in the access store; a guest must still
     exist in the guest store and not be banned (by email, by the caller's
-    IP, or by the IP recorded at entry). Nothing is cached. A failing
+    IP, or by the IP recorded at entry). Any store change is seen on the
+    next request (``AccessStore`` caches reads only while the database is
+    unchanged). A failing
     re-check also closes the agent's live connection.
 
     The principal handed to tools (:class:`AgentPrincipal`) is built only
@@ -50,8 +52,10 @@ Switches (``auth.email_permissions``)
     closes every live agent connection. Permissions switched off after the
     access store was initialised resolve to the same (see
     :func:`irc_lens.config.resolve_access`). Every refusal -- bad or missing
-    bearer, lapsed human, kill switch -- appends an ``agent.refuse`` audit row
-    (reason only, actor hashed) and is counted in ``/owner/metrics``.
+    bearer, lapsed human, kill switch -- is counted in ``/owner/metrics``;
+    an ``agent.refuse`` audit row (reason only, actor hashed) is written at
+    most once per reason per client per minute (:class:`RefusalThrottle`),
+    so unauthenticated requests cannot flood the shared sqlite file.
 
 Plain emails and tokens are never logged.
 """
@@ -62,8 +66,9 @@ import asyncio
 import contextlib
 import logging
 import re
+import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from aiohttp import web
 
@@ -104,7 +109,9 @@ __all__ = [
     "MCP_ROUTES",
     "PAGE_PATH",
     "REFUSE_ACTION",
+    "REFUSAL_THROTTLE",
     "AgentPrincipal",
+    "RefusalThrottle",
     "agent_nick_for",
     "agents_off",
     "audit_refusal",
@@ -195,9 +202,16 @@ def build_agent_front(app: web.Application | None = None):
     async def whoami() -> dict:
         """Report this agent's nick, its human's tier and its joined channels."""
         principal, agent = await _agent()
+        session = agent.session
         return {
             **describe_principal(principal),
-            "joined": sorted(agent.session.joined_channels),
+            # Only channels the human may still list: a revoked grant
+            # must not keep naming its channel here.
+            "joined": sorted(
+                c
+                for c in session.joined_channels
+                if session.may("list", c, audit=False)
+            ),
         }
 
     @front.tool
@@ -263,6 +277,76 @@ def agents_off(app: web.Application) -> bool:
     return config is None or not getattr(config, "agents_enabled", True)
 
 
+class RefusalThrottle:
+    """Caps ``agent.refuse`` audit rows; every refusal is still counted.
+
+    Refused MCP requests need no credential, so without a cap anyone could
+    flood the shared sqlite file with audit rows (each a ``BEGIN IMMEDIATE``
+    + ``INSERT``). A row is written for at most one refusal per (reason,
+    client address) per :attr:`WINDOW_S`, and for at most
+    :attr:`PER_REASON_PER_WINDOW` per reason per window across all clients
+    (the client address can be a forwarded header, so rotating it must not
+    bypass the cap). The key table is bounded by *max_keys*. Refusals not
+    written are counted in :attr:`suppressed`, which ``/owner/metrics``
+    adds to the audit-derived ``agent_refusals``. In memory only, like the
+    withheld-line throttle in ``agent_sessions``.
+    """
+
+    WINDOW_S = 60.0
+    PER_REASON_PER_WINDOW = 30
+
+    def __init__(
+        self,
+        *,
+        clock: Callable[[], float] = time.monotonic,
+        max_keys: int = 4096,
+    ) -> None:
+        self._clock = clock
+        self._max_keys = max_keys
+        self._last: dict[tuple[str, str], float] = {}
+        self._per_reason: dict[str, tuple[float, int]] = {}
+        self.suppressed = 0
+
+    def __len__(self) -> int:
+        return len(self._last)
+
+    def _prune(self, now: float) -> None:
+        self._last = {k: ts for k, ts in self._last.items() if now - ts < self.WINDOW_S}
+
+    def should_audit(self, reason: str, client: str) -> bool:
+        """True if this refusal gets an audit row; False counts it suppressed."""
+        now = self._clock()
+        key = (reason, client or "unknown")
+        last = self._last.get(key)
+        if last is not None and now - last < self.WINDOW_S:
+            self.suppressed += 1
+            return False
+        start, used = self._per_reason.get(reason, (now, 0))
+        if now - start >= self.WINDOW_S:
+            start, used = now, 0
+        if used >= self.PER_REASON_PER_WINDOW:
+            self.suppressed += 1
+            return False
+        if key not in self._last and len(self._last) >= self._max_keys:
+            self._prune(now)
+            if len(self._last) >= self._max_keys:
+                self.suppressed += 1
+                return False
+        self._last[key] = now
+        self._per_reason[reason] = (start, used + 1)
+        return True
+
+
+#: The app's :class:`RefusalThrottle` (installed with the MCP endpoint).
+REFUSAL_THROTTLE = web.AppKey("agent_refusal_throttle", RefusalThrottle)
+
+
+def suppressed_refusals(app: web.Application) -> int:
+    """Refusals counted but not written to the audit (see RefusalThrottle)."""
+    throttle = app.get(REFUSAL_THROTTLE)
+    return throttle.suppressed if throttle is not None else 0
+
+
 def _write_refusal(app: web.Application, reason: str, actor: str | None) -> None:
     store = app.get(app_session.ACCESS_STORE)
     if store is None:
@@ -274,13 +358,17 @@ def _write_refusal(app: web.Application, reason: str, actor: str | None) -> None
 
 
 async def audit_refusal(
-    app: web.Application, reason: str, actor: str | None = None
+    app: web.Application, reason: str, actor: str | None = None, *, ip: str = ""
 ) -> None:
     """Best-effort ``agent.refuse`` audit row; the refusal stands regardless.
 
     *actor* is an email (hashed by the store) or None; *reason* is a fixed
-    word, never request data.
+    word, never request data. *ip* is the caller's address, used only as
+    the throttle key (never stored): see :class:`RefusalThrottle`.
     """
+    throttle = app.get(REFUSAL_THROTTLE)
+    if throttle is not None and not throttle.should_audit(reason, ip):
+        return
     try:
         await asyncio.to_thread(_write_refusal, app, reason, actor)
     except Exception:  # noqa: BLE001 - audit must never turn a refusal into a pass
@@ -350,10 +438,10 @@ async def authenticate_token(
     """
     if agents_off(app):
         logger.info("agent_auth=refused reason=agents-off")
-        await audit_refusal(app, "agents-off")
+        await audit_refusal(app, "agents-off", ip=ip)
         return None
     if not _TOKEN_RE.fullmatch(token or ""):
-        await audit_refusal(app, "malformed")
+        await audit_refusal(app, "malformed", ip=ip)
         return None
     try:
         outcome, value = await asyncio.to_thread(_resolve, app, token, ip)
@@ -364,7 +452,7 @@ async def authenticate_token(
         return value
     logger.info("agent_auth=refused reason=%s", outcome)
     await audit_refusal(
-        app, outcome, _split_key(value)[0] if outcome == "human" else None
+        app, outcome, _split_key(value)[0] if outcome == "human" else None, ip=ip
     )
     if outcome == "human":
         await close_agent_connections(app, value)
@@ -388,16 +476,16 @@ def make_authenticator(app: web.Application):
     """
 
     async def authenticate(req) -> AgentPrincipal | None:
-        if agents_off(app):  # kill switch: refuse before reading anything
-            return await authenticate_token(app, "", ip="")
-        token = _bearer(req.headers.get("authorization"))
-        if token is None:
-            logger.info("agent_auth=refused reason=no-bearer")
-            await audit_refusal(app, "no-bearer")
-            return None
         ip = (req.headers.get("cf-connecting-ip") or "").strip()
         if not ip and req.client:
             ip = str(req.client[0])
+        if agents_off(app):  # kill switch: refuse before reading any credential
+            return await authenticate_token(app, "", ip=ip)
+        token = _bearer(req.headers.get("authorization"))
+        if token is None:
+            logger.info("agent_auth=refused reason=no-bearer")
+            await audit_refusal(app, "no-bearer", ip=ip)
+            return None
         return await authenticate_token(app, token, ip=ip)
 
     return authenticate
@@ -598,6 +686,7 @@ def install(app: web.Application, *, sweep_interval_s: float) -> None:
     """
     if app.get(app_session.ACCESS_STORE) is None:
         return
+    app[REFUSAL_THROTTLE] = RefusalThrottle()
     app.router.add_get(PAGE_PATH, get_page)
     app.router.add_post(PAGE_PATH, post_issue)
     mount_mcp(

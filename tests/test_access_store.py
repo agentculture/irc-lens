@@ -112,6 +112,65 @@ def test_grants_generic_kind(store: AccessStore) -> None:
     assert store.grants_for(ALICE, resource_kind="channel") == []
 
 
+def test_remove_grant_reports_whether_a_row_went(store: AccessStore) -> None:
+    """Finding 2: revoking a grant that does not exist (for example a case
+    variant of the stored channel) removes nothing and says so; one row per
+    (email, kind, resource) however often it is set."""
+    store.set_grant(ALICE, "channel", "#Ops", "write", actor=BOB)
+    store.set_grant(ALICE.upper(), "channel", "#Ops", "read", actor=BOB)
+    assert store.grants_for(ALICE) == [("channel", "#Ops", "read")]
+    before = len(store.audit_rows())
+    assert store.remove_grant(ALICE, "channel", "#ops", actor=BOB) == 0
+    assert store.grants_for(ALICE) == [("channel", "#Ops", "read")]
+    assert len(store.audit_rows()) == before  # nothing changed, nothing audited
+    assert store.remove_grant(ALICE, "channel", "#Ops", actor=BOB) == 1
+    assert store.grants_for(ALICE) == []
+
+
+def test_hot_path_reads_are_cached_until_the_store_changes(db: Path) -> None:
+    """Finding 6: the per-message grant check must not open sqlite on every
+    line. Reads are cached and invalidated by any committed change -- from
+    this instance, another instance, or another process -- so it stays
+    fail-closed and a revocation still bites on the next check."""
+    import sqlite3
+    from contextlib import closing
+
+    from irc_lens import access
+
+    store = AccessStore(db)
+    store.set_user(ALICE, role="member", state="approved", actor=None)
+    store.set_grant(ALICE, "channel", "#room", "write", actor=None)
+    opened = []
+    real = store._connect
+
+    def counting():
+        opened.append(1)
+        return real()
+
+    store._connect = counting  # type: ignore[method-assign]
+    for _ in range(200):
+        assert access.can_read(ALICE, "#room", store=store, audit=False)
+    assert len(opened) <= 2
+    # Another instance (the CLI) revokes: the next check sees it.
+    AccessStore(db).remove_grant(ALICE, "channel", "#room", actor=None)
+    assert not access.can_read(ALICE, "#room", store=store, audit=False)
+    # A raw writer that never touched AccessStore (another process).
+    store.set_grant(ALICE, "channel", "#room", "write", actor=None)
+    assert access.can_read(ALICE, "#room", store=store, audit=False)
+    with closing(sqlite3.connect(db)) as con, con:
+        con.execute("DELETE FROM grants")
+    assert not access.can_read(ALICE, "#room", store=store, audit=False)
+    with closing(sqlite3.connect(db)) as con, con:
+        con.execute("UPDATE users SET state='removed'")
+    assert store.get_user(ALICE)["state"] == "removed"
+
+
+def test_cached_user_is_a_copy(store: AccessStore) -> None:
+    store.set_user(ALICE, role="member", state="approved", actor=None)
+    store.get_user(ALICE)["role"] = "admin"
+    assert store.get_user(ALICE)["role"] == "member"
+
+
 # -- agent credentials (o1) -------------------------------------------------
 def test_issue_credential_revokes_prior(store: AccessStore, db: Path) -> None:
     t1 = store.issue_agent_credential(ALICE, "alice-agent", ttl=3600, actor=BOB)

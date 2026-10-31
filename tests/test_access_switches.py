@@ -126,6 +126,48 @@ def test_state_admins_only_after_migration(tmp_path: Path) -> None:
     assert cfg.agents_enabled is False  # and no agent runs
 
 
+def _install(cfg: cfgmod.LensConfig) -> AccessStore:
+    from aiohttp import web
+
+    app = web.Application()
+    app["config"] = cfg
+    store = app_session.install_access(app)
+    assert store is not None
+    return store
+
+
+def test_first_enforced_start_with_no_imports_still_initialises(
+    tmp_path: Path,
+) -> None:
+    """Finding 9: the admin was created by the CLI and allowed_emails was
+    empty on the first enforced start. The store must still count as
+    initialised: a later start never imports allowed_emails as admins, and
+    switching the feature off is admins-only, not the legacy allowlist."""
+    db = tmp_path / "guests.db"
+    AccessStore(db).set_user(ADMIN, role="admin", state="approved", actor=None)
+    _install(_base(tmp_path, access_enabled=True, allowed_emails=()))
+    # Restart with an address in the (retired) list: it is not imported.
+    store = _install(_base(tmp_path, access_enabled=True, allowed_emails=(MEMBER,)))
+    assert store.get_user(MEMBER) is None
+    assert store.admin_count() == 1
+    # Feature off afterwards: fail closed to admins-only.
+    cfg = cfgmod.resolve_access(
+        _base(tmp_path, access_enabled=False, allowed_emails=(MEMBER,))
+    )
+    assert cfg.access_mode == cfgmod.ACCESS_ADMINS_ONLY
+
+
+def test_a_refused_first_start_does_not_initialise(tmp_path: Path) -> None:
+    """With no admin at all the first start is refused and the store stays
+    uninitialised, so fixing allowed_emails and restarting still imports."""
+    from irc_lens._errors import AfiError
+
+    with pytest.raises(AfiError):
+        _install(_base(tmp_path, access_enabled=True, allowed_emails=()))
+    store = _install(_base(tmp_path, access_enabled=True, allowed_emails=(ADMIN,)))
+    assert store.get_user(ADMIN)["role"] == "admin"
+
+
 def test_state_admins_only_when_the_store_is_unreadable(tmp_path: Path) -> None:
     (tmp_path / "guests.db").write_bytes(b"this is not a sqlite database" * 20)
     cfg = cfgmod.resolve_access(_base(tmp_path, access_enabled=False))
@@ -361,8 +403,45 @@ async def test_refused_agent_calls_are_audited_without_the_email(killed: Env) ->
     await killed.rpc({"Authorization": f"Bearer {token}"})
     await killed.rpc({})
     rows = [r for r in killed.access.audit_rows() if r[2] == "agent.refuse"]
-    assert len(rows) == 2
+    # Both are "agents-off" from one client within a minute: one audit row
+    # (finding 6 throttle), both still counted in the metrics.
+    assert len(rows) == 1
     assert all(MEMBER not in "".join(map(str, r)) for r in rows)
+    r = await killed.client.get("/owner/metrics", headers=killed.jwt(ADMIN))
+    assert (await r.json())["access"]["agent_refusals"] == 2
+
+
+async def test_unauthenticated_refusals_cannot_flood_the_audit(live: Env) -> None:
+    """Finding 6: every refused MCP request used to write an audit row
+    (BEGIN IMMEDIATE + INSERT on the shared sqlite file). Rows are now
+    throttled to one per reason per client per minute; the metric still
+    counts every refusal."""
+    for _ in range(25):
+        await live.rpc({})  # no bearer
+        await live.rpc({"Authorization": "Bearer " + "x" * 40})  # unknown
+    rows = [r for r in live.access.audit_rows() if r[2] == "agent.refuse"]
+    assert sorted(r[3] for r in rows) == ["no-bearer", "unknown"]
+    r = await live.client.get("/owner/metrics", headers=live.jwt(ADMIN))
+    assert (await r.json())["access"]["agent_refusals"] == 50
+
+
+def test_refusal_throttle_is_per_reason_per_client_and_bounded() -> None:
+    from irc_lens.web import agent_auth
+
+    t = [1000.0]
+    gate = agent_auth.RefusalThrottle(clock=lambda: t[0], max_keys=4)
+    assert gate.should_audit("no-bearer", "203.0.113.1") is True
+    assert gate.should_audit("no-bearer", "203.0.113.1") is False
+    assert gate.should_audit("unknown", "203.0.113.1") is True
+    assert gate.should_audit("no-bearer", "203.0.113.2") is True
+    t[0] += 61
+    assert gate.should_audit("no-bearer", "203.0.113.1") is True
+    # Many distinct clients: the table never grows past its bound, and a
+    # spoofed-address flood falls back to the per-reason ceiling.
+    audited = sum(gate.should_audit("malformed", f"198.51.100.{i}") for i in range(200))
+    assert audited <= agent_auth.RefusalThrottle.PER_REASON_PER_WINDOW
+    assert len(gate) <= 4
+    assert gate.suppressed > 0
 
 
 async def test_agent_refusals_by_reason_are_audited(live: Env) -> None:

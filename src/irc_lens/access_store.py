@@ -18,12 +18,15 @@ Tables:
 * ``audit(ts, actor_hash, action, target)`` -- append-only mutation log,
   keyed by :func:`irc_lens.guest_store.email_hash`, never a plain email.
 * ``admin_imports(email_hash)`` -- ledger making the one-time admin import
-  idempotent (a later demotion is not undone by re-running it).
+  idempotent (a later demotion is not undone by re-running it). It also
+  holds the :data:`INITIALISED_MARK` sentinel row once the first enforced
+  start succeeded, however many addresses that start imported.
 """
 
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 import sqlite3
 import time
@@ -33,7 +36,13 @@ from typing import Callable, Iterable, Iterator
 
 from irc_lens.guest_store import email_hash
 
+logger = logging.getLogger(__name__)
+
 SYSTEM_ACTOR = "system"
+
+#: Sentinel ``admin_imports`` row: "the first enforced start completed".
+#: Not a hex digest, so it can never equal an imported address's hash.
+INITIALISED_MARK = "store-initialised"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -56,6 +65,11 @@ CREATE TABLE IF NOT EXISTS admin_imports (email_hash TEXT PRIMARY KEY);
 """
 
 
+#: Backstop lifetime of a cached read, in seconds. The cache is normally
+#: invalidated sooner, by the database's change counter (see _stamp).
+READ_CACHE_TTL_S = 5.0
+
+
 def _norm(email: str) -> str:
     return email.strip().lower()
 
@@ -75,6 +89,41 @@ class AccessStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as con:
             con.executescript(_SCHEMA)
+        # Hot-path read cache (finding 6): the grant check runs on every
+        # received channel line, so get_user/grants_for answer from memory
+        # while the database is unchanged. Keyed by query; each entry keeps
+        # the change stamp it was read under and expires after
+        # READ_CACHE_TTL_S at the latest.
+        self._read_cache: dict[tuple, tuple[bytes, float, object]] = {}
+
+    def _stamp(self) -> bytes | None:
+        """The database file's change counter (header bytes 24-27).
+
+        SQLite bumps it on every committed write in rollback-journal mode
+        (this store's mode), from any connection or process, so a changed
+        stamp means "something was written". None (no cache) on any error.
+        """
+        try:
+            with open(self.path, "rb") as fh:
+                header = fh.read(28)
+        except OSError:
+            return None
+        return header[24:28] if len(header) == 28 else None
+
+    def _cached(self, key: tuple, load: Callable[[], object]) -> object:
+        stamp = self._stamp()
+        now = time.monotonic()
+        hit = self._read_cache.get(key)
+        if stamp is not None and hit is not None:
+            hit_stamp, expires, value = hit
+            if hit_stamp == stamp and now < expires:
+                return value
+        value = load()  # errors propagate: callers fail closed, nothing cached
+        if stamp is not None:
+            if len(self._read_cache) > 4096:
+                self._read_cache.clear()
+            self._read_cache[key] = (stamp, now + READ_CACHE_TTL_S, value)
+        return value
 
     def _now(self) -> int:
         return int(self._clock())
@@ -88,6 +137,7 @@ class AccessStore:
     @contextmanager
     def _tx(self) -> Iterator[sqlite3.Connection]:
         """One write transaction; BEGIN IMMEDIATE serialises concurrent writers."""
+        self._read_cache.clear()
         with closing(self._connect()) as con:
             con.execute("BEGIN IMMEDIATE")
             try:
@@ -122,8 +172,12 @@ class AccessStore:
             self._audit(con, actor, "user.set", f"{email_hash(email)}:{role}:{state}")
 
     def get_user(self, email: str) -> dict[str, str] | None:
-        rows = self._all(
-            "SELECT email, role, state FROM users WHERE email=?", (_norm(email),)
+        email = _norm(email)
+        rows = self._cached(
+            ("user", email),
+            lambda: self._all(
+                "SELECT email, role, state FROM users WHERE email=?", (email,)
+            ),
         )
         if not rows:
             return None
@@ -167,19 +221,28 @@ class AccessStore:
 
     def remove_grant(
         self, email: str, resource_kind: str, resource: str, *, actor: str | None
-    ) -> None:
+    ) -> int:
+        """Delete the grant on exactly *resource*; return the rows removed.
+
+        0 means there was no such grant (the resource is matched exactly, so
+        ``#ops`` never removes ``#Ops``); nothing changed and nothing is
+        audited, so callers can say "no such grant" instead of claiming a
+        revocation.
+        """
         email = _norm(email)
         with self._tx() as con:
-            con.execute(
+            n = con.execute(
                 "DELETE FROM grants WHERE email=? AND resource_kind=? AND resource=?",
                 (email, resource_kind, resource),
-            )
-            self._audit(
-                con,
-                actor,
-                "grant.remove",
-                f"{email_hash(email)}:{resource_kind}:{resource}",
-            )
+            ).rowcount
+            if n:
+                self._audit(
+                    con,
+                    actor,
+                    "grant.remove",
+                    f"{email_hash(email)}:{resource_kind}:{resource}",
+                )
+        return n
 
     def grants_for(
         self, email: str, resource_kind: str | None = None
@@ -189,7 +252,11 @@ class AccessStore:
         if resource_kind is not None:
             sql += " AND resource_kind=?"
             args += (resource_kind,)
-        return self._all(sql + " ORDER BY resource_kind, resource", args)
+        rows = self._cached(
+            ("grants",) + args,
+            lambda: self._all(sql + " ORDER BY resource_kind, resource", args),
+        )
+        return list(rows)
 
     # -- agent credentials -------------------------------------------------
     def issue_agent_credential(
@@ -236,17 +303,27 @@ class AccessStore:
         return rows[0] if rows else None
 
     def agent_key_for_nick(self, nick: str) -> str | None:
-        """The credential key whose agent was issued *nick* (newest row).
+        """The credential key whose agent was issued *nick*.
 
         Lens state, not nick text: revoked and expired rows still answer,
         so a flag raised against an agent after its credential lapsed still
-        reaches its human.
+        reaches its human. Two humans can derive the same agent nick (a
+        ``derive_nick`` collision); when rows for *nick* belong to more than
+        one key the answer is None, so a flag is never attributed to the
+        wrong human. That case is logged without any address.
         """
         rows = self._all(
-            "SELECT email FROM agent_credentials WHERE nick = ? COLLATE NOCASE "
-            "ORDER BY created DESC, rowid DESC LIMIT 1",
+            "SELECT DISTINCT email FROM agent_credentials "
+            "WHERE nick = ? COLLATE NOCASE",
             ((nick or "").strip(),),
         )
+        if len(rows) > 1:
+            logger.warning(
+                "agent nick is ambiguous: issued to %d credential keys; "
+                "not mapping it to a human",
+                len(rows),
+            )
+            return None
         return rows[0][0] if rows else None
 
     def guest_credential_emails(self) -> list[str]:
@@ -345,6 +422,20 @@ class AccessStore:
                 self._audit(con, None, "admin.import", h)
                 count += 1
         return count
+
+    def mark_initialised(self) -> None:
+        """Record that the first enforced start completed (idempotent).
+
+        Without it, a first start that imported no address (an empty
+        ``auth.allowed_emails``, the admin created by the CLI) left the
+        ledger empty: every restart re-imported the list as admins, and
+        switching the feature off fell back to the legacy allowlist.
+        """
+        with self._tx() as con:
+            con.execute(
+                "INSERT OR IGNORE INTO admin_imports (email_hash) VALUES (?)",
+                (INITIALISED_MARK,),
+            )
 
     # -- audit ---------------------------------------------------------------
     def audit_rows(self) -> list[tuple[int, str, str, str]]:

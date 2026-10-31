@@ -112,10 +112,17 @@ def test_join_granted_allowed(store):
     assert "#x" in session.joined_channels
 
 
-def test_join_is_case_insensitive_on_grant(store):
+def test_join_is_case_sensitive_on_grant(store):
+    """A grant on ``#x`` must not open ``#X``: AgentIRC treats them as two
+    different channels, so a case variant is an ungranted room."""
     session, srv = _make(store, USER)
-    _run(session, CommandType.JOIN, "#X")
-    assert "JOIN #X" in srv.lines
+    events = _run(session, CommandType.JOIN, "#X")
+    assert srv.lines == []
+    assert "#X" not in session.joined_channels
+    assert [e.name for e in events] == ["error"]
+    _run(session, CommandType.READ, "#X")
+    _run(session, CommandType.SEND, "#X", text="hi")
+    assert srv.lines == []
 
 
 def test_send_and_chat_and_me_ungranted_emit_nothing(store):

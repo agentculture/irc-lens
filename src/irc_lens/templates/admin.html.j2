@@ -45,7 +45,7 @@
               <td>
                 <form method="post" action="/admin/users" class="admin-inline">
                   <input type="hidden" name="email" value="{{ u.email }}">
-                  <input type="hidden" name="mode" value="add">
+                  <input type="hidden" name="mode" value="role">
                   <select name="role" aria-label="Role for {{ u.email }}">
                     {% for r in roles %}<option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ r }}</option>{% endfor %}
                   </select>

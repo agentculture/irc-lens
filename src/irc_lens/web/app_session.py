@@ -208,7 +208,8 @@ def install_access(app: web.Application) -> AccessStore | None:
     if not getattr(config, "access_enabled", False):
         return None
     store = AccessStore(_store_path(config))
-    if _sql_count(store, "SELECT COUNT(*) FROM admin_imports") == 0:
+    first_start = _sql_count(store, "SELECT COUNT(*) FROM admin_imports") == 0
+    if first_start:
         store.import_admins(config.allowed_emails)
     if store.admin_count() == 0:
         raise AfiError(
@@ -223,6 +224,12 @@ def install_access(app: web.Application) -> AccessStore | None:
                 "admin), or restore an admin in the access store"
             ),
         )
+    if first_start:
+        # Initialised from now on, even if the import added nobody (the
+        # admin came from the CLI): no later start re-imports the list, and
+        # switching the feature off is admins-only, never legacy. A refused
+        # start (no admin) above leaves it uninitialised so it can be fixed.
+        store.mark_initialised()
     app[ACCESS_STORE] = store
     return store
 
