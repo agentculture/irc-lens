@@ -73,6 +73,10 @@ class LensConfig:
     # auth.app_signin.base_url: public base of set-password links (https;
     # http only for loopback). None falls back to media_public_base_url.
     app_signin_base_url: str | None = None
+    # auth.email_permissions.enabled: approval + roles live in the access
+    # store (irc_lens.access_store); auth.allowed_emails is then only the
+    # one-time admin import. Off: allowed_emails stays the allowlist.
+    access_enabled: bool = False
     guest_rate_entry_per_min: int = 10
     guest_rate_messages_per_min: int = 20
     guest_rate_password_attempts_per_15min: int = 5
@@ -469,6 +473,19 @@ def _validate_app_signin(auth: dict) -> bool:
     return _coerce_bool(sect.get("enabled", True), "auth.app_signin.enabled")
 
 
+_EMAIL_PERMISSIONS_KEYS = frozenset({"enabled"})
+
+
+def _validate_email_permissions(auth: dict) -> bool:
+    """auth.email_permissions.enabled (default False)."""
+    sect = _optional_mapping(
+        auth.get("email_permissions"),
+        "auth.email_permissions",
+        _EMAIL_PERMISSIONS_KEYS,
+    )
+    return _coerce_bool(sect.get("enabled", False), "auth.email_permissions.enabled")
+
+
 def _app_signin_base_url(auth: dict) -> str | None:
     """auth.app_signin.base_url: https URL (http only for loopback), or None.
 
@@ -718,6 +735,7 @@ def load_config(path: Path) -> LensConfig:
         # a code screen whose code never arrives. make_app logs why.
         app_signin_enabled = False
     app_signin_base_url = _app_signin_base_url(auth)
+    access_enabled = _validate_email_permissions(auth)
 
     return LensConfig(
         auth_mode=mode,
@@ -743,6 +761,7 @@ def load_config(path: Path) -> LensConfig:
         culture_overview_name=culture_overview_name,
         app_signin_enabled=app_signin_enabled,
         app_signin_base_url=app_signin_base_url,
+        access_enabled=access_enabled,
         **guest_fields,
     )
 
