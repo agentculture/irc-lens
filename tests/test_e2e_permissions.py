@@ -408,6 +408,68 @@ async def test_owner_lines_arrive_marked_owner_symmetrically(env: Env) -> None:
         assert all(isinstance(ln["owner"], bool) for ln in lines)
 
 
+# -- q14: chosen nicknames, never the email -----------------------------------------
+
+#: What either member's address could leak as: the addresses, their domain,
+#: the old derived nicks and the bare local parts (as whole words, so
+#: "channel" does not count as "ann").
+_EMAIL_TRACES = re.compile(
+    r"ann@|ben@|example\.org|testsrv-ann|testsrv-ben|(?<![a-z])(?:ann|ben)(?![a-z])",
+    re.I,
+)
+
+
+def _record_inbound(session) -> list[str]:
+    """Every IRC line *session*'s connection receives from now on."""
+    seen: list[str] = []
+    transport = session._transport  # noqa: SLF001
+    handle = transport._handle  # noqa: SLF001
+
+    async def recording(msg):
+        seen.append(msg.format())
+        await handle(msg)
+
+    transport._handle = recording  # noqa: SLF001
+    return seen
+
+
+async def test_members_see_chosen_nicknames_and_no_email(env: Env) -> None:
+    """Two approved members in a shared channel see each other's chosen
+    nicknames; nothing derived from either address reaches the other: not
+    in the roster, a /who, the channel lines, nor the agent's MCP reads."""
+    ta, tb = await env.member_with_agent(A), await env.member_with_agent(B)
+    inbound = {e: _record_inbound(env.human_session(e)) for e in (A, B)}
+    await settle()
+    for t in (ta, tb):
+        await env.ok(t, "read")  # drain the joins
+    for me in (A, B):
+        assert (await env.say(env.jwt(me), f"hello from {NICK[me]}")).status == 204
+    await settle()
+    for me, other, token in ((A, B, ta), (B, A, tb)):
+        session = env.human_session(me)
+        assert session.nick == NICK[me]
+        await session.refresh_roster()
+        roster = {entry.nick for entry in session.roster}
+        assert NICK[other] in roster
+        who = await session.who(SHARED)
+        assert NICK[other] in json.dumps(who)
+        read = await env.ok(token, "read")
+        assert any(ln["nick"] == NICK[other] for ln in read["lines"])
+        whoami = await env.ok(token, "whoami")
+        received = json.dumps(
+            {
+                "roster": sorted(roster),
+                "who": who,
+                "irc": inbound[me],
+                "read": read,
+                "whoami": whoami,
+            }
+        )
+        assert NICK[other] in received
+        assert any(NICK[other] in line for line in inbound[me])
+        assert not _EMAIL_TRACES.search(received), _EMAIL_TRACES.search(received)
+
+
 # -- three credentials, one endpoint, three scopes -------------------------------------
 
 
