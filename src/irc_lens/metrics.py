@@ -164,12 +164,14 @@ _ACCESS_COUNTERS = {
 }
 
 
-def access_counts(store: Any) -> dict[str, int]:
+def access_counts(store: Any, *, suppressed_refusals: int = 0) -> dict[str, int]:
     """Counts of grant changes, credential events and refusals in the audit.
 
     Derived from the access store's append-only audit table, so they survive
     restarts and agree with it. Integers only; an unreadable store reads as
-    zero rather than failing the metrics route.
+    zero rather than failing the metrics route. *suppressed_refusals* adds
+    the agent refusals the in-memory throttle kept out of the audit
+    (``agent_auth.RefusalThrottle``), so every refusal is counted once.
     """
     counts = dict.fromkeys(dict.fromkeys(_ACCESS_COUNTERS.values()), 0)
     try:
@@ -180,6 +182,7 @@ def access_counts(store: Any) -> dict[str, int]:
         name = _ACCESS_COUNTERS.get(action)
         if name:
             counts[name] += 1
+    counts["agent_refusals"] += int(suppressed_refusals)
     return counts
 
 

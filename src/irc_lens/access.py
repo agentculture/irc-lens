@@ -2,8 +2,11 @@
 
 Pure functions: no IRC, no aiohttp. Every caller asks the same three
 questions -- :func:`can_list`, :func:`can_read`, :func:`can_write` -- and
-every answer is derived from the store's *current* rows, on every call
-(nothing is cached), so revoking a grant takes effect on the next check.
+every answer is derived from the store's *current* rows, so revoking a
+grant takes effect on the next check. The store answers repeated reads
+from memory only while the database file is unchanged (its change counter,
+bumped by every committed write from any process), with a short TTL as a
+backstop; a read error is never cached and answers ``False``.
 
 Rules:
 

@@ -56,6 +56,11 @@ CREATE TABLE IF NOT EXISTS admin_imports (email_hash TEXT PRIMARY KEY);
 """
 
 
+#: Backstop lifetime of a cached read, in seconds. The cache is normally
+#: invalidated sooner, by the database's change counter (see _stamp).
+READ_CACHE_TTL_S = 5.0
+
+
 def _norm(email: str) -> str:
     return email.strip().lower()
 
@@ -75,6 +80,41 @@ class AccessStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with closing(self._connect()) as con:
             con.executescript(_SCHEMA)
+        # Hot-path read cache (finding 6): the grant check runs on every
+        # received channel line, so get_user/grants_for answer from memory
+        # while the database is unchanged. Keyed by query; each entry keeps
+        # the change stamp it was read under and expires after
+        # READ_CACHE_TTL_S at the latest.
+        self._read_cache: dict[tuple, tuple[bytes, float, object]] = {}
+
+    def _stamp(self) -> bytes | None:
+        """The database file's change counter (header bytes 24-27).
+
+        SQLite bumps it on every committed write in rollback-journal mode
+        (this store's mode), from any connection or process, so a changed
+        stamp means "something was written". None (no cache) on any error.
+        """
+        try:
+            with open(self.path, "rb") as fh:
+                header = fh.read(28)
+        except OSError:
+            return None
+        return header[24:28] if len(header) == 28 else None
+
+    def _cached(self, key: tuple, load: Callable[[], object]) -> object:
+        stamp = self._stamp()
+        now = time.monotonic()
+        hit = self._read_cache.get(key)
+        if stamp is not None and hit is not None:
+            hit_stamp, expires, value = hit
+            if hit_stamp == stamp and now < expires:
+                return value
+        value = load()  # errors propagate: callers fail closed, nothing cached
+        if stamp is not None:
+            if len(self._read_cache) > 4096:
+                self._read_cache.clear()
+            self._read_cache[key] = (stamp, now + READ_CACHE_TTL_S, value)
+        return value
 
     def _now(self) -> int:
         return int(self._clock())
@@ -88,6 +128,7 @@ class AccessStore:
     @contextmanager
     def _tx(self) -> Iterator[sqlite3.Connection]:
         """One write transaction; BEGIN IMMEDIATE serialises concurrent writers."""
+        self._read_cache.clear()
         with closing(self._connect()) as con:
             con.execute("BEGIN IMMEDIATE")
             try:
@@ -122,8 +163,12 @@ class AccessStore:
             self._audit(con, actor, "user.set", f"{email_hash(email)}:{role}:{state}")
 
     def get_user(self, email: str) -> dict[str, str] | None:
-        rows = self._all(
-            "SELECT email, role, state FROM users WHERE email=?", (_norm(email),)
+        email = _norm(email)
+        rows = self._cached(
+            ("user", email),
+            lambda: self._all(
+                "SELECT email, role, state FROM users WHERE email=?", (email,)
+            ),
         )
         if not rows:
             return None
@@ -198,7 +243,11 @@ class AccessStore:
         if resource_kind is not None:
             sql += " AND resource_kind=?"
             args += (resource_kind,)
-        return self._all(sql + " ORDER BY resource_kind, resource", args)
+        rows = self._cached(
+            ("grants",) + args,
+            lambda: self._all(sql + " ORDER BY resource_kind, resource", args),
+        )
+        return list(rows)
 
     # -- agent credentials -------------------------------------------------
     def issue_agent_credential(

@@ -361,8 +361,47 @@ async def test_refused_agent_calls_are_audited_without_the_email(killed: Env) ->
     await killed.rpc({"Authorization": f"Bearer {token}"})
     await killed.rpc({})
     rows = [r for r in killed.access.audit_rows() if r[2] == "agent.refuse"]
-    assert len(rows) == 2
+    # Both are "agents-off" from one client within a minute: one audit row
+    # (finding 6 throttle), both still counted in the metrics.
+    assert len(rows) == 1
     assert all(MEMBER not in "".join(map(str, r)) for r in rows)
+    r = await killed.client.get("/owner/metrics", headers=killed.jwt(ADMIN))
+    assert (await r.json())["access"]["agent_refusals"] == 2
+
+
+async def test_unauthenticated_refusals_cannot_flood_the_audit(live: Env) -> None:
+    """Finding 6: every refused MCP request used to write an audit row
+    (BEGIN IMMEDIATE + INSERT on the shared sqlite file). Rows are now
+    throttled to one per reason per client per minute; the metric still
+    counts every refusal."""
+    for _ in range(25):
+        await live.rpc({})  # no bearer
+        await live.rpc({"Authorization": "Bearer " + "x" * 40})  # unknown
+    rows = [r for r in live.access.audit_rows() if r[2] == "agent.refuse"]
+    assert sorted(r[3] for r in rows) == ["no-bearer", "unknown"]
+    r = await live.client.get("/owner/metrics", headers=live.jwt(ADMIN))
+    assert (await r.json())["access"]["agent_refusals"] == 50
+
+
+def test_refusal_throttle_is_per_reason_per_client_and_bounded() -> None:
+    from irc_lens.web import agent_auth
+
+    t = [1000.0]
+    gate = agent_auth.RefusalThrottle(clock=lambda: t[0], max_keys=4)
+    assert gate.should_audit("no-bearer", "203.0.113.1") is True
+    assert gate.should_audit("no-bearer", "203.0.113.1") is False
+    assert gate.should_audit("unknown", "203.0.113.1") is True
+    assert gate.should_audit("no-bearer", "203.0.113.2") is True
+    t[0] += 61
+    assert gate.should_audit("no-bearer", "203.0.113.1") is True
+    # Many distinct clients: the table never grows past its bound, and a
+    # spoofed-address flood falls back to the per-reason ceiling.
+    audited = sum(
+        gate.should_audit("malformed", f"198.51.100.{i}") for i in range(200)
+    )
+    assert audited <= agent_auth.RefusalThrottle.PER_REASON_PER_WINDOW
+    assert len(gate) <= 4
+    assert gate.suppressed > 0
 
 
 async def test_agent_refusals_by_reason_are_audited(live: Env) -> None:

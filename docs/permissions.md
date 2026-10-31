@@ -47,9 +47,13 @@ The policy is default-deny and pure (`src/irc_lens/access.py`):
 
 - A member with no grants has no channels: nothing is listed, joined, read or
   sent.
-- Every answer is derived from the store's current rows on every call and is
-  never cached, so revoking a grant takes effect on the next action, with no
-  restart.
+- Every answer is derived from the store's current rows, so revoking a
+  grant takes effect on the next action, with no restart. Because the check
+  runs on every received channel line, the store keeps repeated reads in
+  memory only while the database file is unchanged: SQLite's change
+  counter, bumped by any committed write from the lens or the CLI,
+  invalidates them, and a 5-second lifetime is the backstop. A read error is
+  never cached and answers "no".
 - Anything unexpected (unknown or unapproved person, missing store, read error)
   answers "no". An audit failure never turns a refusal into an approval.
 - Guests receive no grants. They live on the sandbox, separate from the mesh.
@@ -167,7 +171,8 @@ token is answered 401 before any tool runs.
 
 On every request, not just the first, the lens re-checks the credential's
 human: a member must still be approved in the store; a guest must still exist
-and not be banned (by email or IP). Nothing is cached, so removing a member or
+and not be banned (by email or IP). Every change to the store is seen on the
+next call (see the cache rule under Roles and levels), so removing a member or
 banning a guest cuts off their agent on its next call. A background sweep also
 closes live agent connections whose credential lapsed or whose human no longer
 passes.
@@ -291,9 +296,17 @@ refused accesses and refused agent calls are rows in the store's append-only
 `audit` table. Rows are keyed by the SHA-256 of the actor's address, never the
 address, and service logs carry no email address or token.
 
+Refused agent calls need no credential, so their audit rows are throttled:
+at most one `agent.refuse` row per reason per client address per minute, and
+at most 30 per reason per minute across all clients
+(`RefusalThrottle` in `src/irc_lens/web/agent_auth.py`). Throttled refusals
+are still counted.
+
 `GET /owner/metrics` (admin-only) adds an `access` object of counts only:
 `grant_changes`, `credential_events`, `access_denials` and `agent_refusals`.
-The counts are derived from the audit table, so they survive restarts.
+The counts are derived from the audit table, so they survive restarts;
+`agent_refusals` also adds the refusals the throttle kept out of the audit
+since the lens started.
 
 ## For admins
 

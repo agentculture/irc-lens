@@ -1068,10 +1068,15 @@ async def get_owner_metrics(request: web.Request) -> web.Response:  # NOSONAR S7
     denied = _admin_only(request)
     if denied is not None:
         return denied
+    from irc_lens.web.agent_auth import suppressed_refusals
+
     return web.json_response(
         {
             "counters": metrics.get_metrics().snapshot(),
-            "access": metrics.access_counts(request.app.get(app_session.ACCESS_STORE)),
+            "access": metrics.access_counts(
+                request.app.get(app_session.ACCESS_STORE),
+                suppressed_refusals=suppressed_refusals(request.app),
+            ),
             "agent": _owner_agent_state(request.app["registry"]),
         }
     )
