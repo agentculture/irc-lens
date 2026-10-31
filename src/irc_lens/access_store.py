@@ -18,7 +18,9 @@ Tables:
 * ``audit(ts, actor_hash, action, target)`` -- append-only mutation log,
   keyed by :func:`irc_lens.guest_store.email_hash`, never a plain email.
 * ``admin_imports(email_hash)`` -- ledger making the one-time admin import
-  idempotent (a later demotion is not undone by re-running it).
+  idempotent (a later demotion is not undone by re-running it). It also
+  holds the :data:`INITIALISED_MARK` sentinel row once the first enforced
+  start succeeded, however many addresses that start imported.
 """
 
 from __future__ import annotations
@@ -34,6 +36,10 @@ from typing import Callable, Iterable, Iterator
 from irc_lens.guest_store import email_hash
 
 SYSTEM_ACTOR = "system"
+
+#: Sentinel ``admin_imports`` row: "the first enforced start completed".
+#: Not a hex digest, so it can never equal an imported address's hash.
+INITIALISED_MARK = "store-initialised"
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -403,6 +409,20 @@ class AccessStore:
                 self._audit(con, None, "admin.import", h)
                 count += 1
         return count
+
+    def mark_initialised(self) -> None:
+        """Record that the first enforced start completed (idempotent).
+
+        Without it, a first start that imported no address (an empty
+        ``auth.allowed_emails``, the admin created by the CLI) left the
+        ledger empty: every restart re-imported the list as admins, and
+        switching the feature off fell back to the legacy allowlist.
+        """
+        with self._tx() as con:
+            con.execute(
+                "INSERT OR IGNORE INTO admin_imports (email_hash) VALUES (?)",
+                (INITIALISED_MARK,),
+            )
 
     # -- audit ---------------------------------------------------------------
     def audit_rows(self) -> list[tuple[int, str, str, str]]:

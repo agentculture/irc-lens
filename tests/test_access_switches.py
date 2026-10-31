@@ -126,6 +126,48 @@ def test_state_admins_only_after_migration(tmp_path: Path) -> None:
     assert cfg.agents_enabled is False  # and no agent runs
 
 
+def _install(cfg: cfgmod.LensConfig) -> AccessStore:
+    from aiohttp import web
+
+    app = web.Application()
+    app["config"] = cfg
+    store = app_session.install_access(app)
+    assert store is not None
+    return store
+
+
+def test_first_enforced_start_with_no_imports_still_initialises(
+    tmp_path: Path,
+) -> None:
+    """Finding 9: the admin was created by the CLI and allowed_emails was
+    empty on the first enforced start. The store must still count as
+    initialised: a later start never imports allowed_emails as admins, and
+    switching the feature off is admins-only, not the legacy allowlist."""
+    db = tmp_path / "guests.db"
+    AccessStore(db).set_user(ADMIN, role="admin", state="approved", actor=None)
+    _install(_base(tmp_path, access_enabled=True, allowed_emails=()))
+    # Restart with an address in the (retired) list: it is not imported.
+    store = _install(_base(tmp_path, access_enabled=True, allowed_emails=(MEMBER,)))
+    assert store.get_user(MEMBER) is None
+    assert store.admin_count() == 1
+    # Feature off afterwards: fail closed to admins-only.
+    cfg = cfgmod.resolve_access(
+        _base(tmp_path, access_enabled=False, allowed_emails=(MEMBER,))
+    )
+    assert cfg.access_mode == cfgmod.ACCESS_ADMINS_ONLY
+
+
+def test_a_refused_first_start_does_not_initialise(tmp_path: Path) -> None:
+    """With no admin at all the first start is refused and the store stays
+    uninitialised, so fixing allowed_emails and restarting still imports."""
+    from irc_lens._errors import AfiError
+
+    with pytest.raises(AfiError):
+        _install(_base(tmp_path, access_enabled=True, allowed_emails=()))
+    store = _install(_base(tmp_path, access_enabled=True, allowed_emails=(ADMIN,)))
+    assert store.get_user(ADMIN)["role"] == "admin"
+
+
 def test_state_admins_only_when_the_store_is_unreadable(tmp_path: Path) -> None:
     (tmp_path / "guests.db").write_bytes(b"this is not a sqlite database" * 20)
     cfg = cfgmod.resolve_access(_base(tmp_path, access_enabled=False))

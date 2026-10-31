@@ -113,7 +113,12 @@ address you typed, plus counts, channels and levels.
 `config.yaml` no longer holds the approved list. With
 `auth.email_permissions.enabled: true`, `auth.allowed_emails` is read once to
 import its entries as admins (an import ledger makes that idempotent, so a
-later demotion is never undone by a restart) and is then ignored.
+later demotion is never undone by a restart) and is then ignored. The first
+start that succeeds marks the store initialised even when it imported
+nobody (for example an empty list and an admin added with
+`irc-lens users add --role admin`), so later starts never import the list
+and switching the feature off is admins-only, never legacy. A first start
+refused for having no admin does not mark it.
 
 ## Invites
 
