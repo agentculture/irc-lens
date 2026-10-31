@@ -437,6 +437,50 @@ async def test_extension_clear(env: Env) -> None:
     assert env.access.extension_until(MEMBER) is None
 
 
+# -- a guest's agent extension from the admin page (review 2, finding 6) ------------
+
+
+async def test_extension_can_be_set_for_a_guest(env: Env) -> None:
+    env.guests.record_guest(GUEST, "sbx-gus", "127.0.0.1")
+    r = await env.post("/admin/extension", env.jwt(ADMIN), email=GUEST, hours="2")
+    assert r.status == 303
+
+
+async def test_guest_extension_is_keyed_where_the_reaper_reads_it(env: Env) -> None:
+    env.guests.record_guest(GUEST, "sbx-gus", "127.0.0.1")
+    await env.post("/admin/extension", env.jwt(ADMIN), email=GUEST, hours="2")
+    # sessions._agent_extended: the bare address (or guest:<email>).
+    assert env.app["registry"].guest_agent_may_run(GUEST)
+
+
+async def test_guest_extension_is_audited_with_the_admin(env: Env) -> None:
+    from irc_lens.guest_store import email_hash
+
+    env.guests.record_guest(GUEST, "sbx-gus", "127.0.0.1")
+    await env.post("/admin/extension", env.jwt(ADMIN), email=GUEST, hours="2")
+    rows = [r for r in env.access.audit_rows() if r[2] == "extension.set"]
+    assert [r[1] for r in rows] == [email_hash(ADMIN)]
+
+
+async def test_guest_extension_can_be_cleared(env: Env) -> None:
+    env.guests.record_guest(GUEST, "sbx-gus", "127.0.0.1")
+    await env.post("/admin/extension", env.jwt(ADMIN), email=GUEST, hours="2")
+    r = await env.post("/admin/extension", env.jwt(ADMIN), email=GUEST, hours="clear")
+    assert (r.status, env.access.extension_until(GUEST)) == (303, None)
+
+
+async def test_guest_extension_stays_admin_only(env: Env) -> None:
+    env.guests.record_guest(GUEST, "sbx-gus", "127.0.0.1")
+    r = await env.post("/admin/extension", env.jwt(MEMBER), email=GUEST, hours="2")
+    assert r.status == 403
+
+
+async def test_guest_extension_by_member_sets_nothing(env: Env) -> None:
+    env.guests.record_guest(GUEST, "sbx-gus", "127.0.0.1")
+    await env.post("/admin/extension", env.jwt(MEMBER), email=GUEST, hours="2")
+    assert env.access.extension_until(GUEST) is None
+
+
 # -- d1: sign-in / set-password decide from the store ------------------------------
 
 

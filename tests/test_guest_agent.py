@@ -90,9 +90,7 @@ async def test_agent_never_adds_to_active_guests(env: Env) -> None:
         OTHER_GUEST, "127.0.0.2", tos_version="v1", privacy_version="v1"
     )
     # Its human is signed off, so only a live extension lets it run.
-    env.access.set_extension(
-        OTHER_GUEST, until=int(time.time()) + 3600, set_by="system"
-    )
+    env.access.set_extension(OTHER_GUEST, until=int(time.time()) + 3600, actor=None)
     other = await env.issue(env.guest(OTHER_GUEST))
     await env.ok(other, "whoami")
     assert env.registry.active_guests() == {GUEST_PRINCIPAL}
@@ -106,7 +104,7 @@ async def test_agent_alone_holds_no_seat(env: Env) -> None:
     assert "signed in" in await env.refused(token, "whoami")
     assert not _agent_open(env)
     assert env.registry.active_guests() == set()
-    env.access.set_extension(GUEST, until=int(time.time()) + 3600, set_by="system")
+    env.access.set_extension(GUEST, until=int(time.time()) + 3600, actor=None)
     await env.ok(token, "whoami")
     assert _agent_open(env)
     assert env.registry.active_guests() == set()
@@ -180,9 +178,7 @@ async def test_ban_leaves_other_guests_agents_alone(env: Env) -> None:
     env.guests.record_consent(
         OTHER_GUEST, "127.0.0.2", tos_version="v1", privacy_version="v1"
     )
-    env.access.set_extension(
-        OTHER_GUEST, until=int(time.time()) + 3600, set_by="system"
-    )
+    env.access.set_extension(OTHER_GUEST, until=int(time.time()) + 3600, actor=None)
     other = await env.issue(env.guest(OTHER_GUEST))
     await env.ok(other, "whoami")
     env.guests.ban(email=GUEST, reason="test")
@@ -225,7 +221,7 @@ def test_retention_sweep_clears_agent_rows(tmp_path) -> None:
     guests.record_guest(GUEST, "sbx-gus", "203.0.113.9")
     guests.record_consent(GUEST, "203.0.113.9", tos_version="v1", privacy_version="v1")
     access.issue_agent_credential(GUEST_KEY, GUEST_AGENT, ttl=3600, actor=None)
-    access.set_extension(GUEST, until=int(now[0]) + 10, set_by="system")
+    access.set_extension(GUEST, until=int(now[0]) + 10, actor=None)
     guests.set_consent_agent(GUEST, GUEST_AGENT)
     now[0] += 200 * 86400
     counts = guests.sweep(inactive_days=90)
@@ -289,7 +285,7 @@ async def test_live_extension_keeps_the_agent_after_its_human_signs_off(
     env: Env,
 ) -> None:
     await _guest_with_agent(env)
-    env.access.set_extension(GUEST, until=int(time.time()) + 3600, set_by="system")
+    env.access.set_extension(GUEST, until=int(time.time()) + 3600, actor=None)
     await _reap(env)
     assert not _human_open(env)
     assert _agent_open(env)
@@ -299,17 +295,17 @@ async def test_live_extension_keeps_the_agent_after_its_human_signs_off(
 
 async def test_agent_closes_once_the_extension_ends(env: Env) -> None:
     await _guest_with_agent(env)
-    env.access.set_extension(GUEST, until=int(time.time()) + 3600, set_by="system")
+    env.access.set_extension(GUEST, until=int(time.time()) + 3600, actor=None)
     await _reap(env)
     assert _agent_open(env)
-    env.access.set_extension(GUEST, until=int(time.time()) - 1, set_by="system")
+    env.access.set_extension(GUEST, until=int(time.time()) - 1, actor=None)
     await _reap(env)
     assert not _agent_open(env)
 
 
 async def test_cleared_extension_ends_the_exemption(env: Env) -> None:
     await _guest_with_agent(env)
-    env.access.set_extension(GUEST, until=int(time.time()) + 3600, set_by="system")
+    env.access.set_extension(GUEST, until=int(time.time()) + 3600, actor=None)
     await _reap(env)
     env.access.clear_extension(GUEST, actor=None)
     await _reap(env)
@@ -318,9 +314,7 @@ async def test_cleared_extension_ends_the_exemption(env: Env) -> None:
 
 async def test_extension_of_another_email_does_not_keep_the_agent(env: Env) -> None:
     await _guest_with_agent(env)
-    env.access.set_extension(
-        OTHER_GUEST, until=int(time.time()) + 3600, set_by="system"
-    )
+    env.access.set_extension(OTHER_GUEST, until=int(time.time()) + 3600, actor=None)
     await _reap(env)
     assert not _agent_open(env)
 

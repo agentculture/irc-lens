@@ -152,6 +152,14 @@ def test_extend_sets_until(db):
     assert before + 3 * 86400 <= until <= int(time.time()) + 3 * 86400
 
 
+def test_extend_audits_the_plain_system_marker(db):
+    from irc_lens.access_store import SYSTEM_ACTOR
+
+    assert run(db, "extend", EMAIL, "--days", "1") == 0
+    rows = [r for r in AccessStore(db).audit_rows() if r[2] == "extension.set"]
+    assert [r[1] for r in rows] == [SYSTEM_ACTOR]
+
+
 def test_extend_clear(db):
     run(db, "extend", EMAIL, "--days", "1")
     assert run(db, "extend", EMAIL, "--clear") == 0

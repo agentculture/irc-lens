@@ -229,9 +229,9 @@ def test_extension(db: Path) -> None:
     clock = Clock()
     s = AccessStore(db, clock=clock)
     assert s.extension_until(ALICE) is None
-    s.set_extension(ALICE, until=5000, set_by=BOB)
+    s.set_extension(ALICE, until=5000, actor=BOB)
     assert s.extension_until(ALICE) == 5000
-    s.set_extension(ALICE, until=6000, set_by=BOB)
+    s.set_extension(ALICE, until=6000, actor=BOB)
     assert s.extension_until(ALICE) == 6000
     s.clear_extension(ALICE, actor=BOB)
     assert s.extension_until(ALICE) is None
@@ -263,7 +263,7 @@ def test_mutations_audited_by_hash_only(store: AccessStore, db: Path) -> None:
     store.remove_grant(ALICE, "channel", "#room", actor=BOB)
     store.issue_agent_credential(ALICE, "n", ttl=60, actor=BOB)
     store.revoke_agent_credential(ALICE, actor=BOB)
-    store.set_extension(ALICE, until=9, set_by=BOB)
+    store.set_extension(ALICE, until=9, actor=BOB)
     store.import_admins(["carol@example.com"])
     rows = store.audit_rows()
     actions = [r[2] for r in rows]

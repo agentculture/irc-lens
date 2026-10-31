@@ -377,16 +377,23 @@ class AccessStore:
         )[0][0]
 
     # -- extensions ----------------------------------------------------------
-    def set_extension(self, email: str, *, until: int, set_by: str) -> None:
+    def set_extension(self, email: str, *, until: int, actor: str | None) -> None:
+        """Set *email*'s agent extension to end at *until* (unix seconds).
+
+        *actor* is the admin who set it (hashed in the audit row, stored as
+        ``set_by``); None means the operator CLI, recorded as the plain
+        :data:`SYSTEM_ACTOR` marker in both places.
+        """
         email = _norm(email)
+        set_by = _norm(actor) if actor else SYSTEM_ACTOR
         with self._tx() as con:
             con.execute(
                 "INSERT INTO agent_extensions (email, until, set_by) VALUES (?,?,?) "
                 "ON CONFLICT(email) DO UPDATE SET until=excluded.until, "
                 "set_by=excluded.set_by",
-                (email, until, _norm(set_by)),
+                (email, until, set_by),
             )
-            self._audit(con, set_by, "extension.set", f"{email_hash(email)}:{until}")
+            self._audit(con, actor, "extension.set", f"{email_hash(email)}:{until}")
 
     def clear_extension(self, email: str, *, actor: str | None) -> None:
         email = _norm(email)

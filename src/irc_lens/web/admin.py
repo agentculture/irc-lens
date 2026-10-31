@@ -18,7 +18,8 @@ agents all get 403.
 * ``POST /admin/grants`` -- set a channel grant (``read``/``write``/``ask``)
   or ``revoke`` it.
 * ``POST /admin/extension`` -- approve an *n*-hour agent extension; *n* is
-  typed per approval and has no fixed maximum (``clear`` removes it).
+  typed per approval and has no fixed maximum (``clear`` removes it). The
+  address may be a known user or a guest in the guest store.
 
 The last approved admin can be neither demoted nor removed. Pages are
 server-rendered and CSP-clean: no inline script or style.
@@ -247,6 +248,21 @@ async def post_grant(request: web.Request) -> web.Response:
     return _see_other("grant")
 
 
+def _is_guest(request: web.Request, email: str) -> bool:
+    """Is *email* a guest the guest store knows? Fails closed (False).
+
+    A guest has no users row; their agent extension is keyed by the bare
+    address, which is what ``sessions._agent_extended`` reads.
+    """
+    guests = request.app.get("guest_store")
+    if guests is None or not email:
+        return False
+    try:
+        return bool(guests.get_guest(email))
+    except Exception:  # noqa: BLE001 - an unreadable store knows nobody
+        return False
+
+
 @allows_anonymous
 async def post_extension(request: web.Request) -> web.Response:
     admin = _admin(request)
@@ -254,7 +270,7 @@ async def post_extension(request: web.Request) -> web.Response:
     form = await request.post()
     email = _norm_email(form.get("email"))
     raw = str(form.get("hours") or "").strip().lower()
-    if store.get_user(email) is None:
+    if store.get_user(email) is None and not _is_guest(request, email):
         return _refuse(request, _NO_SUCH_USER)
     if raw == "clear":
         store.clear_extension(email, actor=admin.principal)
@@ -270,7 +286,7 @@ async def post_extension(request: web.Request) -> web.Response:
     )  # pylint: disable=protected-access
     if until >= _MAX_UNTIL:
         return _refuse(request, "That many hours is too large to store.")
-    store.set_extension(email, until=until, set_by=admin.principal)
+    store.set_extension(email, until=until, actor=admin.principal)
     return _see_other("extension")
 
 

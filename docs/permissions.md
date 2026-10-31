@@ -285,8 +285,11 @@ How the extension changes when a guest's agent disconnects
   ends or is cleared, the next reap applies the normal rule.
 - For a guest, the extension is looked up under the bare email (what the
   admin page and `irc-lens extend` set) and under `guest:<email>`. The admin
-  page accepts only known users, so a pure guest's extension is set with the
-  CLI.
+  page's extension form accepts a known user or an address the guest store
+  knows, so a guest's extension can be set (and cleared) there or with the
+  CLI. Guests are not listed in the admin page's users table.
+- An extension set from the CLI is recorded with the plain `system` marker
+  (no admin address); one set from the admin page records the admin.
 
 Approved users' agents are not reaped this way. Their lifetime follows their
 credential and their human's standing (`sweep_once` in

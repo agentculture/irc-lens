@@ -194,7 +194,7 @@ def cmd_extend(args: argparse.Namespace) -> int:
         )
     store = _open_store(args)
     until = int(time.time()) + args.days * SECONDS_PER_DAY
-    store.set_extension(email, until=until, set_by="system")
+    store.set_extension(email, until=until, actor=None)
     print(f"extended {email} until {until}")
     return 0
 
