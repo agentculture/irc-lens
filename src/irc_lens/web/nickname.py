@@ -187,7 +187,12 @@ def _roster_nicks(session: Any) -> set[str]:
     return {n.casefold() for n in nicks if n}
 
 
-async def _resident_nicks(config: Any) -> set[str]:
+async def resident_nicks(config: Any) -> set[str]:
+    """Casefolded nicks the culture residents list names (empty if unset).
+
+    Best effort: an unconfigured or unreachable list holds nobody. Shared
+    by the web forms and the ``irc-lens users`` verbs.
+    """
     url = await asyncio.to_thread(
         resolve_residents_url,
         getattr(config, "culture_residents_url", None),
@@ -212,7 +217,7 @@ async def nick_in_use(app: web.Application, nick: str) -> bool:
     for (_principal, backend), session in zip(registry.keys(), registry.values()):
         if backend == BACKEND_MESH and wanted in _roster_nicks(session):
             return True
-    return wanted in await _resident_nicks(app["config"])
+    return wanted in await resident_nicks(app["config"])
 
 
 def _store(request: web.Request) -> AccessStore:
@@ -392,5 +397,6 @@ __all__ = [
     "needs_nickname",
     "nick_in_use",
     "nickname_gate",
+    "resident_nicks",
     "sweep_once",
 ]
