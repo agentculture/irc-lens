@@ -54,6 +54,12 @@ The policy is default-deny and pure (`src/irc_lens/access.py`):
   counter, bumped by any committed write from the lens or the CLI,
   invalidates them, and a 5-second lifetime is the backstop. A read error is
   never cached and answers "no".
+- Per received line the counter is read once and shared by every check
+  that line needs; the sweep that drops channels whose grant was revoked
+  runs only when the counter changed since the last sweep. The checks'
+  database reads wait at most 0.25 seconds for a writer holding the store
+  locked; past that they answer "no" and log a warning, so a blocked writer
+  never stalls the console.
 - Anything unexpected (unknown or unapproved person, missing store, read error)
   answers "no". An audit failure never turns a refusal into an approval.
 - Guests receive no grants. They live on the sandbox, separate from the mesh.

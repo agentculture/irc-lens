@@ -369,6 +369,71 @@ def test_dispatch_drop_does_not_audit_each_line(store):
     assert _denials(store) == before
 
 
+# --- the hot path: one change-counter read per line (review 2, finding 7) ----
+
+
+def _count_sweeps(session: Session) -> list[int]:
+    runs: list[int] = []
+    real = session._enforce_revocations
+
+    def counting() -> None:
+        runs.append(1)
+        real()
+
+    session._enforce_revocations = counting  # type: ignore[method-assign]
+    return runs
+
+
+def _granted_session(store: AccessStore) -> Session:
+    session, _srv = _make(store, ADMIN)
+    session.joined_channels.update({"#x", "#y", "#z"})
+    session.current_channel = "#x"
+    return session
+
+
+def test_dispatch_skips_the_revocation_sweep_while_the_store_is_unchanged(store):
+    session = _granted_session(store)
+    runs = _count_sweeps(session)
+    for _ in range(5):
+        asyncio.run(session.dispatch(_privmsg("#x")))
+    assert len(runs) == 1
+
+
+def test_dispatch_sweeps_again_once_the_store_changed(store):
+    session = _granted_session(store)
+    runs = _count_sweeps(session)
+    asyncio.run(session.dispatch(_privmsg("#x")))
+    store.set_grant(USER, "channel", "#z", "read", actor=None)
+    asyncio.run(session.dispatch(_privmsg("#x")))
+    assert len(runs) == 2
+
+
+def test_dispatch_still_drops_a_line_revoked_between_lines(store):
+    session, _srv = _make(store, USER)
+    session.joined_channels.add("#x")
+    session.current_channel = "#x"
+    asyncio.run(session.dispatch(_privmsg("#x")))
+    store.remove_grant(USER, "channel", "#x", actor=None)
+    sub = session.event_bus.subscribe()
+    asyncio.run(session.dispatch(_privmsg("#x")))
+    assert not any(e.name == "chat" for e in sub.drain_nowait())
+
+
+def test_dispatch_reads_the_change_counter_once_per_line(store):
+    session = _granted_session(store)
+    asyncio.run(session.dispatch(_privmsg("#x")))  # warm the read cache
+    reads: list[int] = []
+    real = store._stamp
+
+    def counting():
+        reads.append(1)
+        return real()
+
+    store._stamp = counting  # type: ignore[method-assign]
+    asyncio.run(session.dispatch(_privmsg("#x")))
+    assert len(reads) == 1
+
+
 # --- admin-only commands ---------------------------------------------------
 
 

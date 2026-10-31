@@ -143,9 +143,9 @@ def test_hot_path_reads_are_cached_until_the_store_changes(db: Path) -> None:
     opened = []
     real = store._connect
 
-    def counting():
+    def counting(*args, **kwargs):
         opened.append(1)
-        return real()
+        return real(*args, **kwargs)
 
     store._connect = counting  # type: ignore[method-assign]
     for _ in range(200):
@@ -366,3 +366,43 @@ def test_concurrent_demotions_never_leave_zero_admins(db: Path) -> None:
     for t in threads:
         t.join()
     assert (AccessStore(db).admin_count(), len(refused)) == (1, 1)
+
+
+# -- a blocked writer cannot stall the hot path (review 2, finding 7) -------------
+
+
+def _lock_exclusively(db: Path):
+    from contextlib import closing
+
+    con = sqlite3.connect(db, isolation_level=None)
+    con.execute("BEGIN EXCLUSIVE")
+    return closing(con)
+
+
+def test_hot_path_read_under_a_held_write_lock_fails_closed_fast(db: Path) -> None:
+    import time
+
+    from irc_lens import access
+
+    AccessStore(db).set_user(ALICE, role="admin", state="approved", actor=None)
+    store = AccessStore(db)  # cold cache: the check must read sqlite
+    with _lock_exclusively(db) as con:
+        started = time.monotonic()
+        allowed = access.can_read(ALICE, "#room", store=store, audit=False)
+        elapsed = time.monotonic() - started
+        con.execute("ROLLBACK")
+    assert (allowed, elapsed < 5) == (False, True)
+
+
+def test_hot_path_read_timeout_is_logged(db: Path, caplog) -> None:
+    import logging
+
+    from irc_lens import access
+
+    AccessStore(db).set_user(ALICE, role="admin", state="approved", actor=None)
+    store = AccessStore(db)
+    caplog.set_level(logging.WARNING, logger="irc_lens.access_store")
+    with _lock_exclusively(db) as con:
+        access.can_read(ALICE, "#room", store=store, audit=False)
+        con.execute("ROLLBACK")
+    assert any("denying" in r.getMessage() for r in caplog.records)

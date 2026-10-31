@@ -29,6 +29,7 @@ import hashlib
 import logging
 import secrets
 import sqlite3
+import threading
 import time
 from contextlib import closing, contextmanager
 from pathlib import Path
@@ -70,6 +71,14 @@ CREATE TABLE IF NOT EXISTS admin_imports (email_hash TEXT PRIMARY KEY);
 #: Backstop lifetime of a cached read, in seconds. The cache is normally
 #: invalidated sooner, by the database's change counter (see _stamp).
 READ_CACHE_TTL_S = 5.0
+
+#: Busy timeout of the hot-path reads (the grant check on every received
+#: line), in seconds. A writer holding the database locked longer than this
+#: makes the check fail closed (deny, logged) instead of stalling the event
+#: loop for the 30 s write timeout.
+READ_BUSY_TIMEOUT_S = 0.25
+#: Busy timeout of writes and of the reads off the hot path.
+WRITE_BUSY_TIMEOUT_S = 30.0
 
 
 ROLE_ADMIN = "admin"
@@ -114,6 +123,29 @@ class AccessStore:
         # the change stamp it was read under and expires after
         # READ_CACHE_TTL_S at the latest.
         self._read_cache: dict[tuple, tuple[bytes, float, object]] = {}
+        # Per-thread pinned change stamp (see pinned_stamp).
+        self._pin = threading.local()
+
+    def change_stamp(self) -> bytes | None:
+        """The database's change counter now: equal stamps mean nothing was
+        committed in between. None when it cannot be read (assume changed)."""
+        pinned = getattr(self._pin, "stamp", None)
+        return pinned if pinned is not None else self._stamp()
+
+    @contextmanager
+    def pinned_stamp(self) -> Iterator[bytes | None]:
+        """Read the change counter once and reuse it for every cached read
+        made by this thread inside the block (one file read per received
+        line, however many checks the line needs). Nested blocks keep the
+        outer stamp. Other threads are unaffected."""
+        if getattr(self._pin, "stamp", None) is not None:
+            yield self._pin.stamp
+            return
+        self._pin.stamp = self._stamp()
+        try:
+            yield self._pin.stamp
+        finally:
+            self._pin.stamp = None
 
     def _stamp(self) -> bytes | None:
         """The database file's change counter (header bytes 24-27).
@@ -130,7 +162,7 @@ class AccessStore:
         return header[24:28] if len(header) == 28 else None
 
     def _cached(self, key: tuple, load: Callable[[], _T]) -> _T:
-        stamp = self._stamp()
+        stamp = self.change_stamp()
         now = time.monotonic()
         hit = self._read_cache.get(key)
         if stamp is not None and hit is not None:
@@ -147,9 +179,9 @@ class AccessStore:
     def _now(self) -> int:
         return int(self._clock())
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self, timeout: float = WRITE_BUSY_TIMEOUT_S) -> sqlite3.Connection:
         # isolation_level=None: transactions are explicit (see _tx).
-        con = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        con = sqlite3.connect(self.path, timeout=timeout, isolation_level=None)
         con.execute("PRAGMA secure_delete = ON")
         return con
 
@@ -169,6 +201,19 @@ class AccessStore:
     def _all(self, sql: str, args: tuple = ()) -> list[tuple]:
         with closing(self._connect()) as con:
             return [tuple(r) for r in con.execute(sql, args)]
+
+    def _hot_all(self, sql: str, args: tuple = ()) -> list[tuple]:
+        """A hot-path read with a short busy timeout; a locked database
+        raises (callers fail closed) and is logged, never waited out."""
+        try:
+            with closing(self._connect(timeout=READ_BUSY_TIMEOUT_S)) as con:
+                return [tuple(r) for r in con.execute(sql, args)]
+        except sqlite3.OperationalError:
+            logger.warning(
+                "access store read timed out after %.2fs (locked); denying",
+                READ_BUSY_TIMEOUT_S,
+            )
+            raise
 
     def _audit(
         self, con: sqlite3.Connection, actor: str | None, action: str, target: str
@@ -245,7 +290,7 @@ class AccessStore:
         email = _norm(email)
         rows = self._cached(
             ("user", email),
-            lambda: self._all(
+            lambda: self._hot_all(
                 "SELECT email, role, state FROM users WHERE email=?", (email,)
             ),
         )
@@ -322,7 +367,7 @@ class AccessStore:
             args += (resource_kind,)
         rows = self._cached(
             ("grants",) + args,
-            lambda: self._all(sql + " ORDER BY resource_kind, resource", args),
+            lambda: self._hot_all(sql + " ORDER BY resource_kind, resource", args),
         )
         return list(rows)
 

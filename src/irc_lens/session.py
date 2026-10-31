@@ -24,7 +24,8 @@ import json
 import logging
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
@@ -323,6 +324,9 @@ class Session:
         # registry from the verified identity and the configured server
         # name (never from typed text). The one nick a non-admin may DM.
         self.own_agent_nick: str | None = None
+        # The store's change stamp at the last revocation sweep run for a
+        # received line (dispatch skips the sweep while it is unchanged).
+        self._swept_stamp: bytes | None = None
         self._bg_tasks: set[asyncio.Task[None]] = set()
 
         # Guest-mode UI context, set by the session registry / routes from
@@ -1208,7 +1212,41 @@ class Session:
         the user-visible reactive update. Per-command branches live in
         helpers so this stays under sonarcloud's S3776 complexity cap.
         """
-        self._enforce_revocations()
+        with self._access_snapshot() as stamp:
+            if self._store_changed(stamp):
+                self._enforce_revocations()
+            self._dispatch_line(msg)
+
+    @contextmanager
+    def _access_snapshot(self) -> Iterator[bytes | None]:
+        """One change-counter read for everything one received line checks.
+
+        Yields the store's change stamp (None with enforcement off or an
+        unreadable counter) and pins it for the store's cached reads made
+        inside the block, so a busy room costs one file read per line.
+        """
+        pin = getattr(self.access_store, "pinned_stamp", None)
+        if not self.access_enforced or pin is None:
+            yield None
+            return
+        with pin() as stamp:
+            yield stamp
+
+    def _store_changed(self, stamp: bytes | None) -> bool:
+        """Has the access store changed since the last revocation sweep?
+
+        True (sweep) when the stamp is unknown; the sweep then runs on
+        every line, as before, so an unreadable counter never hides a
+        revocation.
+        """
+        if not self.access_enforced:
+            return False
+        if stamp is not None and stamp == self._swept_stamp:
+            return False
+        self._swept_stamp = stamp
+        return True
+
+    def _dispatch_line(self, msg: Message) -> None:
         if msg.command == "PRIVMSG":
             self._dispatch_privmsg(msg)
             return
