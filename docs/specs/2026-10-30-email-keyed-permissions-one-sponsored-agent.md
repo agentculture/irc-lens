@@ -28,9 +28,10 @@
 - Permissions keyed by email place an approved (signed) user on specific mesh channels, where they can read the content and ask agents about it; their agent inherits the same channels. Guests get no grants (q7)
   - instruction: test: user with grant on #x only -> /channels shows #x only; /join #y and HISTORY #y refused
   - honesty: A user granted #x can see #x, read its history and live lines, and (at write/ask) ask the agents there; channels they hold no grant for are neither listed nor joinable nor readable
-- Per-email grants (channel + access mode) live in a new table in the lens sqlite store and are managed by an irc-lens CLI subcommand, taking effect without a restart — not in config.yaml, which is a frozen dataclass loaded once
+- Per-email approval, admin flags and grants (resource + access level) live in the lens sqlite store and take effect without a restart — managed by admins from within the app and by an irc-lens CLI subcommand; config.yaml no longer holds the approved list
   - instruction: test: CLI grant add/list/revoke round-trip on a temp store; config.yaml unchanged
   - honesty: Grants are rows in the lens store (email-keyed, never committed), editable through an irc-lens CLI verb, read on each check so changes need no restart
+  - honesty: Approval, admin flags and grants are rows in the lens store (email-keyed, never committed); after the one-time import, editing config.yaml changes nobody's access
 - Channel permissions are enforced server-side in the lens Session for every path — join, send, read/history, channels listing, roster/who, raw /input — not only by hiding channels in the UI
   - instruction: test matrix: each path x (granted, ungranted) for a non-admin approved user
   - honesty: Every session path that can reveal or emit channel content (join, send, read/history, channels, who/roster, raw /input, live PRIVMSG dispatch) consults the grant check
@@ -64,23 +65,48 @@
 - The mesh IRCd accepts connections only from the lens, the mesh's own agents and its federation links — restricting it is part of this feature, because the IRCd has no access control and lens-side grants are otherwise bypassable
   - instruction: verify from a non-allowed host: a direct IRC connect to the mesh port fails; lens, mesh agents and links still connect
   - honesty: A direct IRC connection to the mesh from anything other than the lens, the mesh's own agents or its federation links is refused, so no channel grant can be bypassed by skipping the lens
+- Admin-only surfaces: the sandbox 'guest view' toggle (which joins every guest's private room), the owner metrics page and the residents page are available to admins only — never to non-admin approved users or any agent
+  - honesty: A non-admin approved user calling the sandbox enter route, the owner metrics route or the residents route gets 403; an admin still gets today's behaviour
+- Every view that enumerates channels or nicks — /channels, /who, /agents, /overview, /status, the mesh graph, presence — is filtered to the viewer's grants; commands that change channel state (/topic, /kick, /invite, /icon) are admin-only
+  - honesty: For a non-admin with one granted channel, no listing or graph view names any other channel or any nick seen only in ungranted channels
+- Personal-agent nicks live in a reserved namespace that cannot collide with resident agents or human nicks, and the owner / not-owner marking comes from the lens's credential-to-human map, never from nick text
+  - honesty: A human whose derived nick equals a resident's or another agent's nick cannot claim it; a guest who picks a nickname resembling another human's agent nick is never marked as that agent's owner
+- Owner-only filtering runs on the receive side of the agent's lens-held IRC connection, so it covers every sender — other lens users, federated peers, and any client that reached the IRCd directly
+  - honesty: A DM to a personal agent sent from a raw IRC client (not through the lens) never appears in that agent's MCP reads
+- The MCP endpoint does not reuse the identity-less tools.py path (fixed dev nick, dev-mode only); every MCP tool call carries its credential's human and passes the same grant check as the web Session
+  - honesty: No MCP tool call reaches IRC without a resolved human identity; a call for an ungranted channel is refused before any IRC line is sent
+- An agent's sends pass the same gates as its human's: the guest command allowlist, the per-human rate limit, the input log and the flag path; one agent cannot exhaust a shared resident's answer capacity
+  - honesty: A guest's agent sending faster than the guest rate limit is throttled exactly like the guest; a disallowed command from an agent is refused like the guest's
+- Every agent request re-checks its human's current status (still approved, not banned, not deleted), so removing an approved user or banning a guest cuts off their agent on its next request
+  - honesty: Removing a human from the approved list while their agent is connected makes the agent's next call fail and closes its IRC connection
+- Rollback fails closed: a single switch disables the MCP endpoint and blocks all agent credentials, and turning the permissions feature off never restores full mesh access to non-admin approved users
+  - honesty: With the kill switch on, every agent call is refused; with permissions disabled, a non-admin approved user is refused the mesh rather than given all of it
+- Grant changes, credential issue/replace/revoke, and refused accesses (ungranted channel, cross-human agent delivery) are recorded in the lens store keyed like other guest records (no email in log lines), and metrics expose only counts
+  - honesty: After a refused cross-human delivery and a grant change, the audit records exist and the service log lines carry no email address
+- Admins add and invite non-admin approved users, and manage their grants, from within the app
+  - honesty: Only an admin can add or invite a user or change grants in the app; an invited user becomes approved only after completing the existing app sign-in (set password, emailed code), and the change takes effect without a restart
+- A guest's agent is disconnected when its human is signed off for idleness, unless an admin has approved that agent to stay for a set period of n hours (chosen by the admin), after which the normal rule applies again
+  - honesty: Without an admin extension a guest's agent closes at its human's idle sign-off; an extension is set only by an admin, names the agent and an end time n hours ahead, and expires on its own — after which the agent closes at the next idle sign-off
 
 ## Honesty conditions
 
 - Every behaviour in the announcement is backed by a confirmed requirement below (roles c18, levels c19, separation c20, agent scope c21, single endpoint c22, owner-only reach c3)
 - A guest and their agent can run the same human-to-own-agent loop a signed user runs, through the same endpoint, inside the guest's sandbox
 - Adding an approved user and their grants needs only CLI commands against the running lens (no config edit, no restart) and is effective on their next action
+- Adding an approved user and their grants needs only the app or CLI against the running lens (no config edit, no restart) and is effective on their next action
 - No host name or address for the public endpoint appears as a literal in src/ or the exported spec; it is read from configuration
 - Each named audience has a path in the spec: the admin manages grants via CLI, approved users and guests sign in as today, and agents connect through the one MCP endpoint
 - The before-state matches the surveyed code: binary approval (web/identity.py tier), one guest room (web/sessions.py `_rooms_for`), stdio-only MCP (tools.py auth.mode dev), no IRCd ACLs (agentirc client.py modes o/v/S)
 - After delivery, a non-admin approved user's channel list equals their grant rows, and their agent's reachable channels equal the user's
 - Both numbers are checked: the onboarding run uses only CLI commands with the lens running throughout, and the e2e cross-human agent test asserts zero deliveries
+- Both numbers are checked: the onboarding run uses only the app or CLI with the lens running throughout, and the e2e cross-human agent test asserts zero deliveries
+- The spec distinguishes personal (MCP, human-bound) agents from resident agents, and the grant check on asking a resident is the channel's write/ask level
 
 ## Success signals
 
 - After delivery, the owner adds a few approved users, each with limited (channel-scoped) permissions
   - instruction: test: grant added via CLI while the user's session is open -> next /channels includes it
-- The operator onboards at least 3 approved users with channel-scoped grants through the CLI alone — 0 config edits and 0 lens restarts — and the e2e suite records 0 cross-human deliveries to a personal agent
+- The operator onboards at least 3 approved users with channel-scoped grants from within the app (or CLI) — 0 config edits and 0 lens restarts — and the e2e suite records 0 cross-human deliveries to a personal agent
 
 ## Scope / boundaries
 
@@ -92,6 +118,10 @@
 - Emails and any PII are out of the spec, plan and repo: approved emails and their grants exist only in runtime config/store, never in committed artifacts
 - Library-tagged content permissions are a later follow-up ('soon'), not part of this first cut
 - No library-tag schema or library access integration in this cut; the grant model should still be shaped so a later resource kind (library tag) fits beside channels
+
+## Assumptions
+
+- Resident mesh agents (the agents the mesh runs in a channel) are not personal agents: the owner-only rule (c3) applies only to agents connected through the MCP endpoint, and residents answer any human who holds write/ask on that channel
 
 ## Scope exploration
 
@@ -115,13 +145,39 @@
   - seeds: `c17`
 - `s10` — `spark listening sockets (ss -ltn)`: The mesh IRCd listens on all interfaces while the guest sandbox IRCd listens on loopback only, so gateway-only enforcement holds for the sandbox but not for the mesh unless the mesh port is closed to everything except the lens, the mesh's own agents and its links (now requirement c31).
   - seeds: `c16` (rejected), `q1` (question)
+- `s11` — `challenge pass / security lens: web/routes.py:315-330 + web/sessions.py:276-279 + routes.py:1036-1050 + routes.py:980`: `_set_sandbox_toggle` gates only on identity.`is_approved`, and the toggled sandbox session joins every guest room via store.`list_rooms`(); `get_owner_metrics` is 'Approved tier only'; `get_residents` renders culture's overview of all residents. With default-deny approved users, each of these would hand a new non-admin every guest's private chat or the whole mesh roster.
+  - seeds: `c32`
+- `s12` — `challenge pass / data-flow lens: session.py dispatch table :690-712 + _exec_mesh :1017 + _exec_agents :944`: Approved sessions dispatch TOPIC/ICON/MESH/AGENTS/OVERVIEW/STATUS with no tier check; `_exec_mesh` recomputes the mesh graph with WHO round-trips across joined channels; `_exec_agents` walks every joined channel. START/STOP/RESTART/KICK/INVITE/SERVER parse (commands.py:70-77) but have no session handler (fall to UNKNOWN) — no lifecycle exposure found.
+  - seeds: `c33`
+- `s13` — `challenge pass / security lens: resident agent backends (culture_core clients + spark-ask design note)`: c4 promises users can 'ask agents' in granted channels, but residents on the claude backend run with `permission_mode`='bypassPermissions' (cultureagent/clients/claude/`agent_runner.py`:148, verified) and full tools; spark-ask was built tool-less because no backend can disable tools. Inviting outside users to a channel with a tool-using resident turns a channel grant into prompt-driven tool use on the host. Routed to user decision q8.
+  - seeds: `c34`
+- `s14` — `challenge pass / security lens: web/identity.py:52-70 derive_nick + agentirc client.py:453-490 nick prefix`: Approved nicks are <server>-<email local part> and AgentIRC forces the <server>- prefix and only enforces uniqueness — an approved human whose local part equals a resident's suffix would collide with it, and a nick says nothing trustworthy about ownership. Ownership must come from lens state.
+  - seeds: `c35`
+- `s15` — `challenge pass / adjacent-systems lens: tools.py:160-215 + agentirc _relay_direct_privmsg`: tools.py opens a throwaway Session with cfg.`dev_nick` and refuses outside auth.mode dev, taking no caller identity — reusing it would drop both identity and grants. AgentIRC relays a DM from any client to any nick, so a send-side check in the lens alone misses senders that never pass through the lens.
+  - seeds: `c36`, `c37`
+- `s16` — `challenge pass / failure-mode lens: web/routes.py:~765-800 /input gate + sbx-ask capacity probe (eidetic cortex-spark2-serializes-2026-10-09)`: The guest allowlist, /delete redirect and per-guest per-IP rate limit live in the web /input handler; an MCP path bypasses /input unless it re-enters the same gate. sbx-ask's model serializes (~7 s/answer, ~8 answers/min), so one unthrottled agent can starve both guest seats.
+  - seeds: `c38`
+- `s17` — `challenge pass / lifecycle lens: web/app_session.py:174-212 identity_for`: `identity_for` re-checks `allowed_emails` on every request for browser sessions; a bearer credential has no such path today, so an agent credential could outlive its human's approval unless the same re-check is built in.
+  - seeds: `c39`
+- `s18` — `challenge pass / observability + reversibility lens: config.py auth flags + web/metrics + guest_store deletion log (email_hash)`: Today's rollback for app sign-in is a config flag + restart (auth.`app_signin`.enabled: false). For this feature a naive 'off' would revert to today's full mesh access for every approved user — fail-open. No audit trail exists for access decisions; the store already logs deletions by sha256(email), a usable pattern.
+  - seeds: `c40`, `c41`
+- `s19` — `challenge pass / counter-evidence lens: c27 vs config.py:189-219,661`: c27's '0 config edits, 0 restarts' contradicts the approval allowlist living in frozen config — onboarding a new approved user today needs a config edit and a restart. Routed to a user decision (q9).
+- `s20` — `challenge pass / migration lens: guest_store.py _migrate :125 + live store`: New tables (grants, agent credentials, audit) fit the additive `_migrate` pattern on the existing live store. The hazard is the default-deny cutover, not the schema: no admin role exists yet, so enabling the feature before an admin is marked locks the owner out. Routed to q10.
+- `s21` — `challenge pass / concurrency lens: credential replace (c29) + grant revoke mid-session`: Two concurrent credential issues for one human must leave exactly one active (single store transaction, as `consume_token` already does); a grant revoked while a session is joined must also stop live line dispatch, which h14's 'live PRIVMSG dispatch' covers. No further concurrency hazard found; the replace race is carried as an obligation on c2.
+- `s22` — `challenge pass / operations lens: ss -tn established :6667 (probe 2026-10-31)`: At probe time all 5 established mesh connections came from loopback and server.yaml showed no link block, so restricting the mesh port to loopback would cut nothing observed today. This is a point-in-time observation; federation peers or remote agents that connect occasionally were not ruled out.
 
 ## Decisions
 
 - Guests get no channel grants in this version; the grant store is generic (email, resource kind, level) so guest or library-tag grants can be added later without a schema change
 - A second agent credential request from the same human replaces the first: the new credential is issued, the old one revoked, and the old agent's connection closed
 - In a shared channel the agent may see what its human may see; other humans' DMs to it are refused and their lines that @-address it are withheld; every line delivered to the agent is marked with whether it came from its owner
+- Granted channels host only tool-less question-answering agents; tool-using residents stay out of granted channels (a per-channel trusted flag may come later)
+- Approved users and admin flags live in the lens store; the migration imports the existing config allowlist once and the config list is then retired
+- The migration marks currently approved users as admins (today only the operator); the feature refuses to enable while zero admins exist
 
 ## Open parks
 
 - [unknown_nonblocking] Logout of one browser closes the shared per-(principal, backend) IRC session for all browsers (irc-lens#70, `app_session.py`:217-232); an agent session tied to the same human must not be torn down by — or tear down — the human's browser session
+- [unknown_nonblocking] Long-lived MCP streaming (streamable HTTP/SSE) through the public edge and tunnel is untested: idle timeouts and response buffering could drop agent connections
+- [unknown_nonblocking] Unexamined in this pass: whether agentfront >=0.20 ships an HTTP MCP transport (the surveyed checkout was 0.14.0); the /upload route's tier gating; the full katvan legal text beyond the clauses cited in s6
+- [follow_up] Approved users' and their agents' lines persist in mesh history with no deletion path (guest deletion covers only the sandbox, which runs memory-only)
