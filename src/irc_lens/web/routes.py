@@ -607,6 +607,8 @@ async def get_index(request: web.Request) -> web.Response:
             request["identity"].is_approved and app_session.via_app_session(request)
         )
         or request["identity"].tier == TIER_GUEST,
+        # Every signed-in human may bring one agent (web/agent_auth.py).
+        show_agent_link=app_session.ACCESS_STORE in request.app,
     )
     return web.Response(text=body, content_type=_HTML)
 

@@ -460,6 +460,7 @@ def render_index(
     chat_log_html: str | None = None,
     presence: dict | None = None,
     show_logout: bool = False,
+    show_agent_link: bool = False,
 ) -> str:
     """Render the full three-pane page from current Session state.
 
@@ -477,6 +478,9 @@ def render_index(
     `show_logout` renders the header's Log out button (approved users
     signed in through an app session, and guests, whose button posts to
     ``/guest/logout``).
+
+    `show_agent_link` renders the header's link to ``/agent-credential``
+    (signed-in humans while email permissions are on; web/agent_auth.py).
     """
     if chat_log_html is None:
         if session.current_channel:
@@ -494,4 +498,5 @@ def render_index(
         chat_log_html=chat_log_html,
         presence=presence,
         show_logout=show_logout,
+        show_agent_link=show_agent_link,
     )
