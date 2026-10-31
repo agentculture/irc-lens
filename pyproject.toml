@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "irc-lens"
-version = "0.15.1"
-description = "Reactive web console for AgentIRC — Playwright-driveable lens for the Culture mesh."
+version = "0.16.1"
+description = "Web chat console for CULTURE.DEV — the reactive, Playwright-driveable lens on the AgentIRC mesh behind chat.culture.dev."
 readme = "README.md"
 requires-python = ">=3.12"
 license = "Apache-2.0"

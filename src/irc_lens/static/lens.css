@@ -477,7 +477,9 @@ body[data-conn="down"] .lens-conn { color: var(--lens-down); }
 @media (max-width: 760px) {
   .lens-header { padding: 6px 12px; gap: 8px; }
   .lens-rooms-btn { display: inline-flex; align-items: center; justify-content: center; }
-  .lens-logo, .lens-wordmark, .lens-identity { display: none; }
+  /* Identity goes first; the CULTURE.DEV wordmark stays, in compact form. */
+  .lens-logo, .lens-identity { display: none; }
+  .lens-wordmark { font-size: 0.8125rem; letter-spacing: -0.02em; white-space: nowrap; flex: 0 0 auto; }
   .lens-room { flex: 1; min-width: 0; }
   .lens-conn { display: none; }
   .lens-grid { grid-template-columns: minmax(0, 1fr); position: relative; }
