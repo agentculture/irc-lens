@@ -122,9 +122,21 @@ def email_hash(email: str) -> str:
     return hashlib.sha256(email.strip().lower().encode()).hexdigest()
 
 
+def _has_table(con: sqlite3.Connection, name: str) -> bool:
+    return (
+        con.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+        is not None
+    )
+
+
 def _migrate(con: sqlite3.Connection) -> None:
     """Bring an existing store up to the current schema (idempotent)."""
     cols = {row[1] for row in con.execute("PRAGMA table_info(consents)")}
+    if "agent_nick" not in cols:
+        # The guest's sponsored agent, named once its credential is issued.
+        con.execute("ALTER TABLE consents ADD COLUMN agent_nick TEXT")
     if "train" not in cols:
         con.execute(
             "ALTER TABLE consents ADD COLUMN train INTEGER NOT NULL DEFAULT 0"
@@ -230,11 +242,47 @@ class GuestStore:
     ) -> None:
         """Record Terms/Privacy consent; *train* is the separate, optional
         opt-in to training use of the guest's conversations (d9)."""
-        self._run(
-            "INSERT INTO consents (email, ip, tos_version, privacy_version, ts, train) "
-            "VALUES (?,?,?,?,?,?)",
-            (email, ip, tos_version, privacy_version, self._now(), int(bool(train))),
+        with closing(self._connect()) as con, con:
+            # A re-consent (new legal version) keeps naming the guest's agent.
+            prior = con.execute(
+                "SELECT agent_nick FROM consents WHERE email=? "
+                "ORDER BY ts DESC, rowid DESC LIMIT 1",
+                (email,),
+            ).fetchone()
+            con.execute(
+                "INSERT INTO consents "
+                "(email, ip, tos_version, privacy_version, ts, train, agent_nick) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (
+                    email,
+                    ip,
+                    tos_version,
+                    privacy_version,
+                    self._now(),
+                    int(bool(train)),
+                    prior[0] if prior else None,
+                ),
+            )
+
+    def set_consent_agent(self, email: str, agent_nick: str) -> int:
+        """Name the guest's agent on their latest consent record.
+
+        Returns rows updated (0 when the guest has no consent on record).
+        """
+        return self._run(
+            "UPDATE consents SET agent_nick=? WHERE rowid = ("
+            "SELECT rowid FROM consents WHERE email=? ORDER BY ts DESC, rowid DESC LIMIT 1)",
+            (agent_nick, email),
         )
+
+    def consent_agent(self, email: str) -> str | None:
+        """The agent named on the guest's latest consent record, if any."""
+        rows = self._all(
+            "SELECT agent_nick FROM consents WHERE email=? "
+            "ORDER BY ts DESC, rowid DESC LIMIT 1",
+            (email,),
+        )
+        return rows[0][0] if rows else None
 
     def get_consents(self, email: str) -> list[tuple[str, str, str, str, int]]:
         return self._all(
@@ -636,24 +684,54 @@ class GuestStore:
             con.execute("DELETE FROM flags WHERE email=?", (email,))
             con.execute("DELETE FROM rooms WHERE email=?", (email,))
             con.execute("DELETE FROM attempts WHERE key = ?", (f"e:{email}",))
+            self._delete_agent_rows(con, email)
             con.execute(
                 "INSERT INTO deletions (email, ts, removed) VALUES (?,?,?)",
                 (email_hash(email), self._now(), removed),
             )
         return removed
 
+    @staticmethod
+    def _delete_agent_rows(con: sqlite3.Connection, email: str) -> None:
+        """Drop the guest's sponsored-agent rows (o9) from the shared file.
+
+        The access tables live in the same sqlite file but are created by
+        :class:`irc_lens.access_store.AccessStore`; a guest-only store has
+        none. Only the ``guest:<email>`` key goes -- an approved user who
+        shares the address keeps theirs. The guest's bare-email extension
+        goes too unless that address is an approved user's.
+        """
+        key = f"guest:{email}"
+        if _has_table(con, "agent_credentials"):
+            con.execute("DELETE FROM agent_credentials WHERE email=?", (key,))
+        if _has_table(con, "agent_extensions"):
+            con.execute("DELETE FROM agent_extensions WHERE email=?", (key,))
+            shared = _has_table(con, "users") and con.execute(
+                "SELECT 1 FROM users WHERE email=?", (email,)
+            ).fetchone()
+            if not shared:
+                con.execute("DELETE FROM agent_extensions WHERE email=?", (email,))
+
     # -- retention (d9) ----------------------------------------------------
     def inactive_guests(self, cutoff: int) -> list[str]:
         """Emails whose last activity (max of guests.created, inputs.ts and
         consents.ts) is older than *cutoff*. A guest-linked row with no
         activity at all (e.g. an orphaned room) counts as inactive."""
+        with closing(self._connect()) as con:
+            agents = (
+                " UNION ALL SELECT substr(email, 7), created FROM agent_credentials"
+                " WHERE email LIKE 'guest:%'"
+                if _has_table(con, "agent_credentials")
+                else ""
+            )
         rows = self._all(
             "SELECT email, MAX(ts) FROM ("
             " SELECT email, created AS ts FROM guests"
             " UNION ALL SELECT email, ts FROM inputs"
             " UNION ALL SELECT email, ts FROM consents"
             " UNION ALL SELECT email, NULL FROM rooms"
-            ") GROUP BY email HAVING MAX(ts) IS NULL OR MAX(ts) < ? ORDER BY email",
+            + agents
+            + ") GROUP BY email HAVING MAX(ts) IS NULL OR MAX(ts) < ? ORDER BY email",
             (int(cutoff),),
         )
         return [r[0] for r in rows]

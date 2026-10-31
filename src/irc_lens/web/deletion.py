@@ -185,6 +185,13 @@ async def post_confirm(request: web.Request) -> web.Response:
     await request.app["registry"].close(
         f"{GUEST_PRINCIPAL_PREFIX}{email}", BACKEND_SANDBOX
     )
+    # o9: the guest's agent is disconnected too; erase_guest_data below
+    # removes its credential rows with the rest of the guest's data.
+    from irc_lens.web import agent_auth
+
+    await agent_auth.close_agent_connections(
+        request.app, f"{GUEST_PRINCIPAL_PREFIX}{email}"
+    )
     # d9: nothing of the guest's conversation is kept.
     await asyncio.to_thread(
         erase_guest_data, store, cfg, email, request.app.get("media_store")
