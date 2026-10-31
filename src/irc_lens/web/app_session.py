@@ -74,6 +74,8 @@ REQUEST_SESSION_HASH = "app_session_hash"
 #: ``{(principal, backend): id_hash}`` for registry sessions opened via an
 #: app session.
 LINKS = web.AppKey("app_session_links", dict)
+#: The app key of the session registry (``web.app`` stores it).
+REGISTRY_KEY = "registry"
 
 #: The :class:`~irc_lens.access_store.AccessStore` when
 #: ``auth.email_permissions.enabled``; absent otherwise.
@@ -381,7 +383,7 @@ def note_registry_open(
 
 async def _close_links(app: web.Application, keys: list[tuple[str, str]]) -> None:
     links = app.get(LINKS)
-    registry = app["registry"]
+    registry = app[REGISTRY_KEY]
     for key in keys:
         if links is not None:
             links.pop(key, None)
@@ -398,7 +400,7 @@ async def sweep_once(app: web.Application) -> list[tuple[str, str]]:
     store = _store(app)
     if not links or store is None:
         return []
-    registry = app["registry"]
+    registry = app[REGISTRY_KEY]
     ended: list[tuple[str, str]] = []
     for key, id_hash in tuple(links.items()):  # snapshot: links.pop below
         if not registry.has(*key):
@@ -470,5 +472,10 @@ async def post_logout(request: web.Request) -> web.Response:
 
 def install(app: web.Application) -> None:
     """Enable app sessions on *app*: the link table and ``POST /logout``."""
-    app[LINKS] = {}
+    links: dict[tuple[str, str], str] = {}
+    app[LINKS] = links
+    registry = app.get(REGISTRY_KEY)
+    if registry is not None:
+        # A nick change retires the entry: forget who opened the old one.
+        registry.on_retire(lambda key: links.pop(key, None))
     app.router.add_post("/logout", post_logout)

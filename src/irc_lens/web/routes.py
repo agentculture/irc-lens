@@ -262,7 +262,7 @@ async def _resolve_session(request: web.Request, *, may_open_guest: bool = True)
     """
     identity, backend = _backend_for(request)
     registry = request.app["registry"]
-    existed = registry.has(identity.principal, backend)
+    prior = registry.peek(identity.principal, backend)
     if backend == BACKEND_SANDBOX and identity.principal.startswith(
         GUEST_PRINCIPAL_PREFIX
     ):
@@ -271,7 +271,10 @@ async def _resolve_session(request: web.Request, *, may_open_guest: bool = True)
     else:
         session = await registry.get_or_open(identity, backend)
     # Remember which app session (if any) opened it, so ending that app
-    # session closes this IRC session too (app_session.sweep_once).
+    # session closes this IRC session too (app_session.sweep_once). A
+    # session reopened under a renamed nick is a fresh open, so it is
+    # attributed to this request's app session, not the old opener's.
+    existed = prior is not None and session is prior
     app_session.note_registry_open(request, identity.principal, backend, existed)
     # UI context for the header / palette, from the verified tier only.
     session.sandbox_available = (

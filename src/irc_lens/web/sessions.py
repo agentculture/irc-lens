@@ -174,6 +174,9 @@ class SessionRegistry:
         # as a Phase 3 cleanup item; not flagged inline because Sonar
         # S1135 treats every TODO comment as an unresolved task.
         self._locks: dict[tuple[str, str], asyncio.Lock] = defaultdict(asyncio.Lock)
+        # Called with the key of every entry retired by a nick change
+        # (retire): app_session drops its opener link there.
+        self._retire_hooks: list[Callable[[tuple[str, str]], None]] = []
 
     def __contains__(self, principal: str) -> bool:
         """Membership for the real-mesh backend (the pre-guest-mode meaning)."""
@@ -215,6 +218,24 @@ class SessionRegistry:
         for principal, backend in self._sessions:
             if self._counts_as_guest(principal, backend):
                 metrics.get_metrics().session_closed()
+
+    def on_retire(self, hook: Callable[[tuple[str, str]], None]) -> None:
+        """Call *hook(key)* for every entry :meth:`retire` closes."""
+        self._retire_hooks.append(hook)
+
+    async def retire(self, principal: str, backend: str) -> None:
+        """Nick changed: close (*principal*, *backend*) and unlink it.
+
+        The one path for every rename reconnect (``get_or_open`` finding a
+        renamed connection, an admin rename, the nickname sweep). Besides
+        closing, the hooks drop whatever pointed at the old connection --
+        app_session's record of which app session opened it -- so a stale
+        opener (another device signing out) can never close the session
+        that replaces it.
+        """
+        for hook in self._retire_hooks:
+            hook((principal, backend))
+        await self.close(principal, backend)
 
     async def close(self, principal: str, backend: str) -> None:
         """Disconnect and forget one (principal, backend) Session."""
@@ -538,7 +559,7 @@ class SessionRegistry:
         if existing is not None and _renamed(existing, identity.nick):
             # Renamed (an admin or the CLI changed the nickname): reconnect
             # under the new nick instead of reusing the old connection.
-            await self.close(*key)
+            await self.retire(*key)
             existing = None
         if existing is not None:
             if backend == BACKEND_MESH or getattr(existing, "healthy", True):

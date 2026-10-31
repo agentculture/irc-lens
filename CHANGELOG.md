@@ -23,8 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Admins rename users from a nickname field on `/admin` or with `irc-lens users
   nick <email> <nickname>`; `irc-lens users add` takes `--nick`. A rename closes
   the user's IRC sessions and agent connection so they reconnect under the new
-  nick; the agent credential must be re-issued. Setting and renaming are audited
-  with the nickname as target, never the email.
+  nick; the agent credential is revoked and must be re-issued. Setting and
+  renaming are audited with the nickname as target, never the email.
 - The own-agent DM rule (0.17.1) follows the chosen nickname: a member reaches
   `<server>-pa_-<nickname>` on the configured server name, and after a rename
   only the new agent nick. The nickname sweep reads the store under one pinned
@@ -35,10 +35,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The access store's `users` table gains a `nickname` column (additive
-  migration, unique index).
+  migration, unique index) and a `nickname_holders` table: every nickname a
+  user has held stays reserved for them after a rename or a removal (another
+  user is refused "taken", the same user may take it back). The migration runs
+  in one `BEGIN IMMEDIATE` transaction, so two processes opening an old store
+  at once no longer race on the `ALTER`.
+- A rename revokes the user's agent credential in the same transaction, so the
+  old token stops verifying at once and an agent nick never maps to two
+  humans.
 - docs/permissions.md: who sees whom (guests invisible to everyone; approved
   users and admins see each other in granted channels, by nickname).
   docs/cli.md: `users nick` and `users add --nick`.
+
+### Fixed
+
+Review of PR #86, before release:
+
+- A person's own choice (`POST /nickname`) only ever sets a first nickname
+  (`AccessStore.claim_nickname`, one conditional update): a second in-flight
+  POST from another tab gets the console and changes nothing, instead of
+  renaming.
+- `irc-lens users nick` and `users add --nick` refuse a nick a resident agent
+  holds (the configured culture residents list, as `/admin` checks it); the
+  CLI cannot see live rosters, so the IRCd keeps the final say.
+- `users add --nick` approves the user and sets the nickname in one
+  transaction: a refused nickname adds nobody.
+- The nickname gate no longer blocks deleting one's data or consenting:
+  `/delete`, `/delete/request`, `/delete/confirm` and `/consent` are exempt.
+- An agent whose human was removed or is not approved (including an
+  admins-only switch) is told its access ended (logged
+  `reason=human-not-approved`); only a real nick mismatch gets the "re-issue
+  the agent credential" advice.
+- `/nickname` and `/admin/users/nickname` show a form error on a store error,
+  never a 500, and the admin rename reads and writes the store off the event
+  loop.
+- Every rename reconnect (the console's own reopen, an admin rename, the
+  nickname sweep) goes through one registry helper that also forgets which app
+  session opened the old connection, so signing out on the old device no
+  longer closes the session another device reopened under the new nick.
+- Every nickname check uses `normalize_approved`.
 
 ## [0.17.1] - 2026-10-31
 

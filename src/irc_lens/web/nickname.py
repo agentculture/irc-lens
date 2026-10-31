@@ -273,14 +273,11 @@ async def close_user_connections(app: web.Application, email: str) -> int:
     from irc_lens.web.agent_auth import close_agent_connections
 
     registry = app["registry"]
-    links = app.get(app_session.LINKS)
     closed = 0
     for backend in sorted(BACKENDS):
         if registry.has(email, backend):
-            await registry.close(email, backend)
             closed += 1
-        if links is not None:
-            links.pop((email, backend), None)
+        await registry.retire(email, backend)
     return closed + await close_agent_connections(app, email)
 
 
@@ -368,11 +365,8 @@ async def sweep_once(app: web.Application) -> list[tuple[str, str]]:
     registry = app["registry"]
     entries = list(zip(registry.keys(), registry.values()))
     stale = await asyncio.to_thread(_stale_keys, app, entries)
-    links = app.get(app_session.LINKS)
     for key in stale:
-        await registry.close(*key)
-        if links is not None:
-            links.pop(key, None)
+        await registry.retire(*key)
     if stale:
         logger.info("nickname_sweep closed=%d", len(stale))
     return stale

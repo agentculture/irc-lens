@@ -81,6 +81,21 @@ _USER_FIELDS = ("email", "role", "state", "nickname")
 _USER_SELECT = "SELECT email, role, state, nickname FROM users"
 
 
+_REVOKE_LIVE_SQL = "UPDATE agent_credentials SET revoked=1 WHERE email=? AND revoked=0"
+
+
+@contextmanager
+def _immediate(con: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """One ``BEGIN IMMEDIATE`` transaction on *con*: commit, or roll back."""
+    con.execute("BEGIN IMMEDIATE")
+    try:
+        yield con
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
+    con.execute("COMMIT")
+
+
 def _migrate(con: sqlite3.Connection) -> None:
     """Additive, idempotent upgrades of an existing store.
 
@@ -88,8 +103,7 @@ def _migrate(con: sqlite3.Connection) -> None:
     file serialise here, and the second re-reads the columns after the
     first committed, so it never repeats the ``ALTER``.
     """
-    con.execute("BEGIN IMMEDIATE")
-    try:
+    with _immediate(con):
         cols = {row[1] for row in con.execute("PRAGMA table_info(users)")}
         if "nickname" not in cols:
             con.execute("ALTER TABLE users ADD COLUMN nickname TEXT")
@@ -101,10 +115,6 @@ def _migrate(con: sqlite3.Connection) -> None:
             "INSERT OR IGNORE INTO nickname_holders (nickname, email) "
             "SELECT nickname, email FROM users WHERE nickname IS NOT NULL"
         )
-    except BaseException:
-        con.execute("ROLLBACK")
-        raise
-    con.execute("COMMIT")
 
 
 #: :meth:`AccessStore.claim_nickname` found a nickname already chosen.
@@ -258,14 +268,8 @@ class AccessStore:
     def _tx(self) -> Iterator[sqlite3.Connection]:
         """One write transaction; BEGIN IMMEDIATE serialises concurrent writers."""
         self._read_cache.clear()
-        with closing(self._connect()) as con:
-            con.execute("BEGIN IMMEDIATE")
-            try:
-                yield con
-            except BaseException:
-                con.execute("ROLLBACK")
-                raise
-            con.execute("COMMIT")
+        with closing(self._connect()) as con, _immediate(con):
+            yield con
 
     def _all(self, sql: str, args: tuple = ()) -> list[tuple]:
         with closing(self._connect()) as con:
@@ -299,14 +303,8 @@ class AccessStore:
         Its own write transaction: an audit row never changes access, so unlike
         the mutating methods it leaves the hot-path read cache intact.
         """
-        with closing(self._connect()) as con:
-            con.execute("BEGIN IMMEDIATE")
-            try:
-                self._audit(con, actor, action, target)
-            except BaseException:
-                con.execute("ROLLBACK")
-                raise
-            con.execute("COMMIT")
+        with closing(self._connect()) as con, _immediate(con):
+            self._audit(con, actor, action, target)
 
     # -- users & roles ---------------------------------------------------
     def set_user(self, email: str, *, role: str, state: str, actor: str | None) -> None:
@@ -487,7 +485,7 @@ class AccessStore:
             return
         self._audit(con, actor, "nickname.rename", nick)
         revoked = con.execute(
-            "UPDATE agent_credentials SET revoked=1 WHERE email=? AND revoked=0",
+            _REVOKE_LIVE_SQL,
             (email,),
         ).rowcount
         if revoked:
@@ -574,7 +572,7 @@ class AccessStore:
         now = self._now()
         with self._tx() as con:
             con.execute(
-                "UPDATE agent_credentials SET revoked=1 WHERE email=? AND revoked=0",
+                _REVOKE_LIVE_SQL,
                 (email,),
             )
             con.execute(
@@ -590,7 +588,7 @@ class AccessStore:
         email = _norm(email)
         with self._tx() as con:
             n = con.execute(
-                "UPDATE agent_credentials SET revoked=1 WHERE email=? AND revoked=0",
+                _REVOKE_LIVE_SQL,
                 (email,),
             ).rowcount
             self._audit(con, actor, "credential.revoke", email_hash(email))

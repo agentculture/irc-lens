@@ -363,3 +363,41 @@ async def test_finding8_admin_rename_runs_off_the_event_loop(
     assert env.access.get_user(MEMBER)["nickname"] == "comet"
     assert seen
     assert loop_thread not in seen
+
+
+async def test_finding9_stale_opener_cannot_close_the_renamed_session(
+    env: Env,
+) -> None:
+    """Laptop opens the console, the CLI renames, the phone reconnects under
+    the new nick; the laptop's sign-out must not close the phone's session,
+    and the phone's own sign-out must."""
+    env.access.set_nickname(MEMBER, "comet", actor=None)
+    laptop = env.guests.create_session(MEMBER)
+    assert (await env.client.get("/", headers=_cookie(laptop))).status == 200
+    env.access.set_nickname(MEMBER, "nova", actor=None)  # another process
+    phone = env.guests.create_session(MEMBER)
+    assert (await env.client.get("/", headers=_cookie(phone))).status == 200
+    assert _mesh_nicks(env) == {MEMBER: "testsrv-nova"}
+
+    await app_session.end_session(env.app, laptop)
+    assert _mesh_nicks(env) == {MEMBER: "testsrv-nova"}
+    await app_session.end_session(env.app, phone)
+    assert _mesh_nicks(env) == {}
+
+
+async def test_finding9_every_rename_path_unlinks_through_one_helper(
+    env: Env,
+) -> None:
+    env.access.set_nickname(MEMBER, "comet", actor=None)
+    laptop = env.guests.create_session(MEMBER)
+    await env.client.get("/", headers=_cookie(laptop))
+    links = env.app[app_session.LINKS]
+    assert (MEMBER, BACKEND_MESH) in links
+    await nickname_web.close_user_connections(env.app, MEMBER)
+    assert (MEMBER, BACKEND_MESH) not in links
+
+    await env.client.get("/", headers=_cookie(laptop))
+    assert (MEMBER, BACKEND_MESH) in links
+    env.access.set_nickname(MEMBER, "nova", actor=None)
+    assert await nickname_web.sweep_once(env.app) == [(MEMBER, BACKEND_MESH)]
+    assert (MEMBER, BACKEND_MESH) not in links

@@ -411,11 +411,14 @@ Full reference: [permissions.md](permissions.md).
 - `users nick <email> <nickname>` sets or renames the nickname others see:
   the user's IRC nick becomes `<server>-<nickname>`. Nicknames are 2 to 16
   letters, digits or `_` (case is dropped), unique across users, never an
-  address, a reserved name or anything starting with `pa_`; a refused one
-  exits 1 and says why (`invalid`, `reserved`, `taken`). The running lens
-  closes the user's IRC sessions and their agent's connection on its next
-  sweep, so they come back under the new nick; their agent credential must
-  be re-issued.
+  address, a reserved name, anything starting with `pa_`, a nickname
+  another user holds or once held, or a nick a resident agent holds (the
+  culture residents list in the config; live rosters are not visible to the
+  CLI, so the IRCd keeps the final say). A refused one exits 1 and says why
+  (`invalid`, `reserved`, `taken`). The rename revokes the user's agent
+  credential at once; the running lens closes the user's IRC sessions and
+  their agent's connection on its next sweep, so they come back under the
+  new nick, and the credential must be re-issued.
 - `grants add <email> <channel> [--level read|write|ask]` grants one channel.
   Channel names match exactly, as AgentIRC treats them: `#ops` and `#OPS` are
   different rooms. `grants list <email>` shows a user's grants.
