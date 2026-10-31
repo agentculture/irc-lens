@@ -1,0 +1,209 @@
+# Build Plan — Email-keyed permissions + one sponsored agent
+
+slug: `email-keyed-permissions-one-sponsored-agent` · status: `exported` · from frame: `email-keyed-permissions-one-sponsored-agent`
+
+> The lens console grants each user permissions by email: admins have full access, other approved humans reach only their granted mesh channels, guests stay in their separate sandbox, and each human may bring one personal agent over the lens's single MCP endpoint — authenticated through the human's email, present wherever its human is with the same permissions, and reachable only by its own human
+
+## Tasks
+
+### t1 — Access store: users, roles, grants, agent credentials, extensions and audit tables
+
+- instruction: Mirror `guest_store.py`'s connection/`_migrate` pattern (`guest_store.py`:60-131) but keep everything in the new module so `guest_store.py` stays untouched this wave. Tokens: reuse the sha256 `_hash_token` approach (`guest_store.py`:107). Tests in tests/`test_access_store.py` on a temp db.
+- covers: c9, h38
+- acceptance:
+  - new module src/`irc_lens`/`access_store.py` adds tables users(email, role, state), grants(email, `resource_kind`, resource, level), `agent_credentials`(`token_hash`, email, nick, created, expires, revoked), `agent_extensions`(email, until, `set_by`) and audit(ts, `actor_hash`, action, target) to the existing lens sqlite file via an additive migration; a pre-existing guests.db opens with no error and no data change
+  - grant rows are generic (`resource_kind` 'channel' today) so a later '`library_tag`' kind needs no schema change
+  - issuing an agent credential for a human revokes any prior one in the same transaction; two concurrent issues leave exactly one active row (o1)
+  - one-time import of a given email list marks those users approved+admin; re-running imports nothing new (o21)
+  - grant/role/credential mutations append an audit row keyed by sha256(email), never the plain email
+
+### t3 — Mesh IRCd reachable only by the lens, mesh agents and links (operational)
+
+- instruction: Read `culture_core` config for the actual link/peer key names before asserting none exist. The production change itself (unit/bind or firewall) is applied by the owner during cutover (t18); this task produces the doc + verification script only.
+- covers: c31, h21
+- acceptance:
+  - docs/deployment-permissions.md documents how the mesh IRCd is restricted (bind address or firewall) without naming a specific host, and lists who must still connect (lens, mesh agents, federation links)
+  - a verification script under scripts/ attempts a direct IRC connect from a non-allowed source and exits non-zero if it succeeds (o10)
+  - before applying, the real federation/link configuration is read from the culture server config schema (closes lapse l1) and any remote peer is listed in the doc
+
+### t4 — culture: sandbox agents treat visiting personal agents as agents (hand-off)
+
+- instruction: Separate PR in the culture repo (version bump required there). Current behaviour: `_should_answer` (agent.py:686-712) treats any nick not in the static `peer_agents` dict as human. Brief the culture side via the communicate skill if run by another agent.
+- covers: c15, h18
+- acceptance:
+  - in agentculture/culture, `culture_core`/sandbox/agent.py recognises nicks in the personal-agent namespace (configurable prefix) as peers for the hop-limit guard, not as humans
+  - culture test: a room with sbx-ask, sbx-bolt and a visiting personal agent produces at most `max_agent_hops` agent replies to any agent line
+  - docs/sandbox-agent.md and docs/guest-sandbox.md describe the rule
+
+### t5 — katvan: Terms/Privacy clauses for personal agents and approved users with channel access (hand-off)
+
+- instruction: Material change -> version bump -> guests re-consent. Owner reviews wording before merge (draft PR), as with katvan #67.
+- covers: c14
+- acceptance:
+  - in katvan, site-astro/src/legal/terms.md and privacy.md gain clauses for a user's own agent acting in their name and for approved users with channel access; legal.ts bumps terms/privacy to 1.3
+  - the built legal/version.json reports the new version (the stale 1.1 build is fixed)
+
+### t6 — Policy module: role and grant resolution, default-deny
+
+- instruction: Pure functions over `access_store`; no IRC, no aiohttp. Tests in tests/`test_access_policy.py` as a role x level x granted/ungranted matrix.
+- depends on: t1
+- covers: c18, h7, c19, h8, c21, h10
+- acceptance:
+  - src/`irc_lens`/access.py exposes `can_list` / `can_read` / `can_write`(human, channel) used by every caller; an admin passes all; a non-admin with no grant row fails all (o4)
+  - a missing or unreadable store or grant fails closed (deny), never allow
+  - read level allows list/read, refuses write; write/ask allows both (o5)
+  - an agent's checks resolve through its human's current rows on every call; revoking the human's grant refuses the agent's next check (o7)
+  - every refusal appends an audit row (no plain email)
+
+### t7 — Approval moves to the store: identity, roles, one-time import, enable gate
+
+- instruction: Touch web/`app_session.py`, web/auth.py, web/identity.py and config.py only. Current checks: `app_session.py`:166-212 and auth.py:296-318.
+- depends on: t1
+- covers: c9, h38
+- acceptance:
+  - `identity_for` / Cloudflare-JWT paths decide 'approved' and the admin role from `access_store`, re-checked on every request; Identity carries the role
+  - on first start with the feature enabled, auth.`allowed_emails` is imported once (all become admin) and is never read for access afterwards (o21)
+  - enabling the feature with zero admins in the store refuses with a hint (o20)
+  - pre-existing approved sessions keep working through the migration
+
+### t8 — CLI: irc-lens access verbs for users, grants, agents and extensions
+
+- instruction: Follow cli/`_commands`/guests.py for structure and registration. Tests in tests/`test_access_cli.py` on a temp store.
+- depends on: t1
+- covers: h13
+- acceptance:
+  - src/`irc_lens`/cli/`_commands`/access.py adds users add/remove/role, grants add/list/revoke, agents list/revoke, extend, against the running store; changes apply without a restart
+  - no command prints an email it was not given on the command line
+
+### t9 — Session enforcement: every channel path checks grants; listing views filtered; channel-changing commands admin-only
+
+- instruction: Touch session.py and commands.py only. Entry points: dispatch table session.py:690-712, `_exec_join` :738, `_exec_channels` :912, `_exec_agents` :944, `_exec_mesh` :1017, `_dispatch_privmsg` :1090.
+- depends on: t6
+- covers: c10, h14, c33, h27, c4, h4, c26, h24
+- acceptance:
+  - for a non-admin, join/send/read/HISTORY/channels/who/mesh/agents/overview/status are refused or filtered for ungranted channels, and the refused request emits no IRC line (o3)
+  - live PRIVMSG dispatch drops lines from channels the viewer may no longer read (revoked mid-session)
+  - /topic, /kick, /invite and /icon are admin-only
+  - for a user granted #x only, /channels lists #x only and no graph or listing names another channel or a nick seen only there
+
+### t10 — Admin-only routes and backend selection
+
+- instruction: Touch web/routes.py only. Gates today: `_set_sandbox_toggle` routes.py:315-330 (`is_approved` only), `get_owner_metrics` :1036, `get_residents` :980, `_backend_for` :134-166.
+- depends on: t7
+- covers: c32, h26, c20, h9
+- acceptance:
+  - sandbox enter/leave, owner metrics and the residents page return 403 for non-admin approved users and for any agent (o12)
+  - `_backend_for` maps guests to the sandbox always and approved non-admins to the mesh, with no route to the all-rooms guest view (o6)
+
+### t11 — In-app admin: add/invite users, edit grants, approve agent extensions
+
+- instruction: Wire routes in web/app.py in this task (t12 depends on it to avoid an app.py collision). Reuse mail.py and the /password set-password flow. n hours is entered by the admin per approval; no fixed maximum.
+- depends on: t7
+- covers: c45, h36, c7, h6, h40
+- acceptance:
+  - new web/admin.py routes + templates/admin.html.j2 let an admin add or invite a user, set role and grants, and approve an n-hour agent extension; non-admins, guests and agents get 403 (o18)
+  - an invite mails the existing set-password link; the user is approved only after completing app sign-in
+  - a grant added while the user's session is open is visible on their next action, with no restart
+  - the admin page is CSP-clean (no inline script), matching existing templates
+
+### t19 — agentfront: remote streamable-HTTP MCP transport with a caller-context hook (agentfront#52, hand-off)
+
+- instruction: Separate PR in agentculture/agentfront, closing #52; comment on #52 that the caller-context hook is added for irc-lens (auth policy still consumer-side, matching the issue). mcp>=1.28 already provides mcp.server.`streamable_http` (ASGI/starlette). Version bump + changelog per agentfront's own CLAUDE.md. learn-cli is the other consumer waiting on it.
+- acceptance:
+  - agentfront ships a remote MCP transport (streamable HTTP per the MCP spec) for any App, keeping the single 'run' tool dispatch and the {code, message, remediation} error payloads; `surfaces_agree` covers it
+  - the transport is embeddable in an existing host: an ASGI app plus an adapter (or framework-neutral handler) an aiohttp application can mount under a configurable path, with no host or port hardcoded
+  - a consumer-supplied authenticator runs before any command and returns a caller principal (or refuses with 401); the principal reaches command handlers as call context, so a consumer can scope commands per caller — auth policy itself stays in the consumer
+  - a stock MCP client completes initialize, tools/list and tools/call against it in agentfront's own tests; stdio behaviour is unchanged
+  - released as a new agentfront minor version on PyPI; irc-lens's agentfront\[mcp\] pin is raised to it
+
+### t2 — irc-lens mounts agentfront's remote MCP transport with the lens authenticator
+
+- instruction: Depends on the agentfront transport task. Use agentfront's aiohttp adapter/handler rather than hand-rolled MCP protocol code. Tests in tests/`test_mcp_http.py` with the mcp SDK client. Do not wire it into web/app.py in this task (t12 does).
+- depends on: t19
+- acceptance:
+  - web/`mcp_http.py` mounts agentfront's remote MCP transport (from the new agentfront release) under a path read from config; a stock MCP client can initialize, list tools and call one through the lens test app
+  - the lens authenticator callback runs before any tool; with a rejecting authenticator the response is 401 and no tool executes; the caller principal it returns reaches the tool handlers
+  - no host name or address literal in the module; mount path comes from config
+
+### t12 — Agent credentials and endpoint authentication
+
+- instruction: New web/`agent_auth.py` implements the t2 authenticator; wire the endpoint into web/app.py. Credential issue UI as a small template partial.
+- depends on: t7, t2, t11
+- covers: c2, h19, c12, h15, c39, h33, c22, h11
+- acceptance:
+  - a signed-in human (any tier) can issue their agent credential from the app; it is shown once and stored only as a hash; issuing again replaces the old one and closes the old agent's connection (o1)
+  - the MCP endpoint rejects missing, expired or revoked credentials before any tool runs (o8)
+  - each request re-checks the human is still approved, not banned and not deleted (o16)
+  - the credential's bound human alone decides tier and grants; request parameters cannot change scope (o11)
+
+### t13 — Agent session: lens-held IRC connection, reserved nicks, owner filtering, shared input gate
+
+- instruction: New web/`agent_sessions.py`. Extract the /input gate (allowlist + rate limit, routes.py ~765-800 — re-read it, lapse l2) into a shared function the agent path also calls. Keep agent sessions under their own registry key so logout of a browser (irc-lens#70) cannot tear them down.
+- depends on: t9, t12, t10
+- covers: c3, h20, c35, h29, c36, h30, c37, h31, c38, h32
+- acceptance:
+  - each agent gets its own lens-held IRC connection in a reserved nick namespace that cannot collide with resident or human nicks; ownership comes from lens state, never nick text
+  - on the receive side, DMs and @-addressed lines from anyone other than the agent's human are withheld from MCP reads, including from raw IRC clients that bypass the lens (o2, o13)
+  - every delivered line carries owner / not-owner
+  - MCP tools run through the identity + access checks; the dev-only identity-less tools.py path is unreachable from the endpoint (o14)
+  - agent sends go through the same allowlist, rate limit, input log and flag path as the human's web input (o15)
+
+### t14 — Guest integration: seat, bans, deletion, retention, idle + extension, consent names the agent
+
+- instruction: Touch `guest_store.py`, web/sessions.py, web/deletion.py, web/bans.py, web/entry.py. Retention sweep (`guest_store.py`:646-659) must also clear agent rows.
+- depends on: t13, t5, t4
+- covers: c13, h16, c46, h37, c14, h17, c5, h5
+- acceptance:
+  - a guest's agent never adds to `active_guests`; banning or deleting the guest refuses and disconnects the agent and removes its credential rows (o9)
+  - the idle reaper closes the agent with its human unless a live admin extension exists; it then stays until the extension's end time (o19)
+  - the consent record names the guest's agent; a guest whose consent predates the new legal version is re-prompted before connecting one
+  - a guest and their agent can exchange lines in the guest's own sandbox room through the MCP endpoint
+
+### t15 — Fail-closed switches, refusal audit wiring and metrics
+
+- instruction: Touch config.py, web/`agent_auth.py` and web/metrics.py. Switch names live in config; no host literals.
+- depends on: t12
+- covers: c40, h34, c41, h35
+- acceptance:
+  - a kill switch refuses every agent call and blocks all credentials (o17)
+  - with permissions disabled, non-admin approved users are refused the mesh rather than given all of it (o17)
+  - grant changes, credential events and refusals are in the audit table; service log lines contain no email address; metrics expose counts only
+
+### t16 — Docs: permissions, agents over MCP, and before/after for operators
+
+- instruction: Docs only plus tests/`test_no_host_literals.py`. Do not name the production host.
+- depends on: t13
+- covers: c23, h12, c24, h22, c25, h23
+- acceptance:
+  - docs/permissions.md covers roles, levels, grants, invites, the agent credential, the MCP endpoint and extensions, for admins, approved users, guests and agent authors
+  - a test asserts no public host name or address literal appears in src/ or docs/specs
+  - a before/after section matches the surveyed code references in the spec (binary approval, one guest room, stdio MCP, no IRCd ACLs)
+
+### t17 — End-to-end suite: humans, agents and the 0-cross-delivery check
+
+- instruction: Use tests/`_agentirc_server.py` for the live IRCd. Map each announcement clause to at least one assertion.
+- depends on: t14, t15, t16
+- covers: c1, h1, c27, h25, h39
+- acceptance:
+  - tests/`test_e2e_permissions.py` runs a real IRCd fixture with admin, approved and guest humans each with one agent; asserts 0 cross-human deliveries to any personal agent
+  - three credentials on the one endpoint get three different scopes
+  - a scripted onboarding of 3 approved users via the app routes completes with the lens running and no config change
+
+### t18 — Staging browser pass and production cutover
+
+- instruction: Owner-run steps for systemd/firewall changes (auto mode can't make them). Back up config and store before each step, as in past cutovers.
+- depends on: t17, t3
+- covers: c27, c31
+- acceptance:
+  - a real-browser click-through on staging covers admin invite, grant, user sign-in, agent credential, agent chat, revoke and a cross-user attempt
+  - production: store migrated, operator is admin, mesh IRCd restricted and the t4 script passes, feature enabled; rollback switch tested
+  - the first approved user is onboarded via the app with 0 config edits and 0 restarts
+
+## Risks
+
+- [unknown_nonblocking] agentfront's new transport must embed in the lens's aiohttp app (the MCP SDK server is ASGI/starlette); if agentfront can only ship ASGI, the lens needs an adapter or a separate loopback listener behind the same public path (decided in t19) (task t2)
+- [unknown_nonblocking] Long-lived MCP streams through the public edge/tunnel may hit idle timeouts or buffering (frame park v2) — verify on staging before go-live (task t18)
+- [unknown_nonblocking] Restricting the mesh IRCd could cut off a remote agent or federation link that connects only occasionally (lapse l1: link config not yet read) (task t3)
+- [unknown_nonblocking] Agent IRC sessions must not share the browser session registry key, or logout in one browser (irc-lens#70) tears down the agent (task t13)
+- [follow_up] t14 waits on two cross-repo PRs (culture t4, katvan t5) merging and deploying; guests' agents stay disabled until both land (task t14)
+- [unknown_nonblocking] Default-deny is a breaking change for approved users without grants; today only the operator is approved, so the cutover must run the import before enabling (task t18)
