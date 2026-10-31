@@ -229,6 +229,8 @@ async def test_store_missing_while_enabled_fails_closed(
     jwks, tmp_path, monkeypatch
 ) -> None:
     e = await _build(jwks, tmp_path, monkeypatch, install=False)
+    # make_app installs the store itself (t11); drop it to simulate it missing.
+    e.app._state.pop(app_session.ACCESS_STORE, None)
     try:
         assert not await e.approved(e.jwt(ALICE))
     finally:

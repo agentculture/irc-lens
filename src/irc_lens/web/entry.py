@@ -527,8 +527,7 @@ async def _post_signin_access(request: web.Request) -> web.Response:
         await asyncio.to_thread(_dummy_verify, password)
     else:
         human = await state.verifier.verify(str(form.get(TURNSTILE_FIELD) or ""), ip)
-        allowed = {e.lower() for e in cfg.allowed_emails}
-        if email in allowed:
+        if app_session.can_sign_in(request.app, email):
             pw_ok = await asyncio.to_thread(store.check_password, email, password)
         else:
             await asyncio.to_thread(_dummy_verify, password)
@@ -627,8 +626,7 @@ async def _post_signin_app(request: web.Request) -> web.Response:
     password = str(form.get("password") or "")
     ip = client_ip(request)
     store = state.get_store()
-    allowed = {e.lower() for e in cfg.allowed_emails}
-    approved = email in allowed
+    approved = app_session.can_sign_in(request.app, email)
     # Two independent limits, so no inbox can learn anything about the
     # other one (an attacker owns guest inboxes, never an approved one):
     # - password attempts (r6) are counted for approved emails only -- a
@@ -712,21 +710,22 @@ async def post_code(request: web.Request) -> web.Response:
     code = str(form.get("code") or "").strip()
     pending = app_session.read_signin_cookie(request)
     store = state.get_store()
-    allowed = {e.lower() for e in cfg.allowed_emails}
-    if email not in allowed:
+    allowed = app_session.can_sign_in(request.app, email)
+    if not allowed:
         return await _post_code_guest(
             request, state, form, email, code, pending, started
         )
     ok = (
         bool(code)
         and bool(pending)
-        and email in allowed
+        and allowed
         and store.verify_signin_token(email, code, pending)
     )
     if not ok:
         metrics.get_metrics().failed_sign_in()
         await _pad(started, state.signin_floor_s)
         return _page(state, "signin_code", status=401, email=email, error=ERR_CODE)
+    app_session.promote_on_signin(request.app, email)
     raw = store.create_session(email)
     device = app_session.read_device_cookie(request)
     was_trusted = store.is_trusted_device(device, email)

@@ -1,7 +1,8 @@
 """Set or reset an approved user's password by emailed link (task t6).
 
 ``GET /password`` -> email form. ``POST /password`` always answers with the
-same "check your email" page; only an address in ``auth.allowed_emails``
+same "check your email" page; only an address that may sign in (``auth.allowed_emails``, or an
+approved/invited user in the access store when email permissions are on)
 gets a single-use link (token purpose ``setpw``, 30 minutes) to
 ``/password/<token>``. The token is issued and the mail sent in a background
 task, so the response time does not reveal whether the address is approved.
@@ -34,7 +35,7 @@ from aiohttp import web
 from irc_lens import metrics
 from irc_lens.guest_store import TOKEN_TTLS
 from irc_lens.mail import is_allowed_base_url, render_link_email, send_with_alert
-from irc_lens.web.app_session import allowed_lower, end_sessions_for_email
+from irc_lens.web.app_session import can_sign_in, end_sessions_for_email
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import (
     ENTRY_PAGE_MARKER,
@@ -192,7 +193,7 @@ async def post_password(request: web.Request) -> web.Response:
     )
     if limited:
         metrics.get_metrics().rate_limited()
-    elif _plausible_email(email) and email in allowed_lower(request.app["config"]):
+    elif _plausible_email(email) and can_sign_in(request.app, email):
         tasks = request.app[MAIL_TASKS]
         task = asyncio.create_task(_send_link(state, email))
         tasks.add(task)
@@ -205,7 +206,7 @@ def _live_email(request: web.Request, store, token: str) -> str | None:
     if not _TOKEN_RE.fullmatch(token):
         return None
     email = store.peek_token(token, purpose=TOKEN_PURPOSE)
-    if email is None or email not in allowed_lower(request.app["config"]):
+    if email is None or not can_sign_in(request.app, email):
         return None
     return email
 

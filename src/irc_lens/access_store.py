@@ -129,6 +129,17 @@ class AccessStore:
             return None
         return dict(zip(("email", "role", "state"), rows[0]))
 
+    def list_users(self) -> list[dict[str, str]]:
+        """Every known user, ordered by email."""
+        rows = self._all("SELECT email, role, state FROM users ORDER BY email")
+        return [dict(zip(("email", "role", "state"), r)) for r in rows]
+
+    def admin_count(self) -> int:
+        """How many users are approved admins right now."""
+        return self._all(
+            "SELECT COUNT(*) FROM users WHERE role='admin' AND state='approved'"
+        )[0][0]
+
     # -- grants ------------------------------------------------------------
     def set_grant(
         self,
