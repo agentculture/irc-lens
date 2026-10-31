@@ -608,9 +608,13 @@ async def agent_session_for(app: web.Application, principal: Any) -> AgentSessio
     human = await asyncio.to_thread(human_state, app, principal)
     if human is None or not _nick_matches(app, principal.nick, human):
         logger.info("agent_session=refused reason=nick-mismatch")
+        # Issued under an old nick (a rename) or for a human with no
+        # nickname now: drop any connection still held under it.
+        await _close_agent(app, principal.credential_key)
         raise _refused(
-            "this credential's agent nick no longer matches its human",
-            "re-issue the agent credential from the app",
+            "this credential was issued under an old nick and no longer "
+            "matches its human's nickname",
+            "re-issue the agent credential from the app (/agent-credential)",
         )
     if human.backend == BACKEND_SANDBOX:
         await _guest_agent_gate(app, principal)

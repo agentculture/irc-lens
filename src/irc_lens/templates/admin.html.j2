@@ -36,12 +36,20 @@
         <h2>Users</h2>
         <table class="admin-table">
           <thead>
-            <tr><th>Email</th><th>Role</th><th>State</th><th>Channel grants</th><th>Agent</th><th></th></tr>
+            <tr><th>Email</th><th>Nickname</th><th>Role</th><th>State</th><th>Channel grants</th><th>Agent</th><th></th></tr>
           </thead>
           <tbody>
             {% for u in users %}
             <tr>
               <td>{{ u.email }}</td>
+              <td>
+                <form method="post" action="/admin/users/nickname" class="admin-inline">
+                  <input type="hidden" name="email" value="{{ u.email }}">
+                  <input name="nickname" type="text" value="{{ u.nickname or '' }}" required minlength="2" maxlength="{{ nick_max }}"
+                         autocapitalize="none" spellcheck="false" placeholder="not chosen" aria-label="Nickname for {{ u.email }}">
+                  <button type="submit" class="btn btn-outline">Rename</button>
+                </form>
+              </td>
               <td>
                 <form method="post" action="/admin/users" class="admin-inline">
                   <input type="hidden" name="email" value="{{ u.email }}">

@@ -34,11 +34,17 @@ from aiohttp import web
 
 from irc_lens import nickname as rules
 from irc_lens.access_store import AccessStore, NicknameError
+from irc_lens.agent_nick import agent_nick_for
 from irc_lens.web import app_session
-from irc_lens.web.identity import Identity
+from irc_lens.web.identity import TIER_APPROVED, Identity, nick_for_user
 from irc_lens.web.render import render_fragment, static_url
 from irc_lens.web.residents import fetch_residents, resolve_residents_url
-from irc_lens.web.sessions import BACKEND_MESH
+from irc_lens.web.sessions import (
+    AGENT_PRINCIPAL_PREFIX,
+    BACKEND_MESH,
+    BACKENDS,
+    GUEST_PRINCIPAL_PREFIX,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -220,6 +226,101 @@ async def post_nickname(request: web.Request) -> web.Response:
     return _done()
 
 
+# -- renames: reconnect under the new nick -----------------------------------------
+
+
+async def close_user_connections(app: web.Application, email: str) -> int:
+    """Close *email*'s own IRC sessions and their agent's connection.
+
+    Called after an admin renames them: the next request reopens the
+    browser's session under the new nick, and the agent's credential (issued
+    under the old nick) is refused until it is re-issued. The app session
+    (the sign-in) is kept. Returns how many connections were closed.
+    """
+    from irc_lens.web.agent_auth import close_agent_connections
+
+    registry = app["registry"]
+    links = app.get(app_session.LINKS)
+    closed = 0
+    for backend in sorted(BACKENDS):
+        if registry.has(email, backend):
+            await registry.close(email, backend)
+            closed += 1
+        if links is not None:
+            links.pop((email, backend), None)
+    return closed + await close_agent_connections(app, email)
+
+
+def _human_nick(app: web.Application, email: str) -> str:
+    """*email*'s current mesh nick from the store; ``""`` if none or unknown."""
+    user = app_session.approved_user(app, email)
+    if user is None:
+        return ""
+    try:
+        return nick_for_user(app["config"].server_name, email, user)
+    except ValueError:
+        return ""
+
+
+def _expected_nick(app: web.Application, principal: str, backend: str) -> str | None:
+    """The nick the registry entry (*principal*, *backend*) should hold now.
+
+    None for entries this check does not govern (guests and their agents,
+    whose nicknames never change, and people no longer approved, whom the
+    other sweeps close); ``""`` when the person has no nickname any more.
+    """
+    from irc_lens.web.routes import sandbox_nick_for
+
+    agent = principal.startswith(AGENT_PRINCIPAL_PREFIX)
+    email = principal[len(AGENT_PRINCIPAL_PREFIX) :] if agent else principal
+    if email.startswith(GUEST_PRINCIPAL_PREFIX):
+        return None
+    if app_session.approved_user(app, email) is None:
+        return None
+    nick = _human_nick(app, email)
+    if not nick:
+        return ""
+    if agent:
+        return agent_nick_for(nick)
+    if backend == BACKEND_MESH:
+        return nick
+    human = Identity(email, nick, "", tier=TIER_APPROVED)
+    return sandbox_nick_for(app["config"], human)
+
+
+def _stale(app: web.Application, principal: str, backend: str, session: Any) -> bool:
+    expected = _expected_nick(app, principal, backend)
+    if expected is None:
+        return False
+    return str(getattr(session, "nick", "")).casefold() != expected.casefold()
+
+
+async def sweep_once(app: web.Application) -> list[tuple[str, str]]:
+    """Close connections held under a nick the store no longer gives.
+
+    Catches a rename made in another process (``irc-lens users nick``) for
+    people with no request in flight: their browser reconnects under the new
+    nick on its next request, and their agent must re-issue its credential.
+    Runs on the agent sweep's interval; read-only on the store.
+    """
+    if app.get(app_session.ACCESS_STORE) is None:
+        return []
+    registry = app["registry"]
+    stale = [
+        key
+        for key, session in zip(registry.keys(), registry.values())
+        if await asyncio.to_thread(_stale, app, *key, session)
+    ]
+    links = app.get(app_session.LINKS)
+    for key in stale:
+        await registry.close(*key)
+        if links is not None:
+            links.pop(key, None)
+    if stale:
+        logger.info("nickname_sweep closed=%d", len(stale))
+    return stale
+
+
 def install(app: web.Application) -> None:
     """Add ``GET``/``POST /nickname`` (the gate is in ``make_app``'s chain)."""
     app.router.add_get(PATH, get_nickname)
@@ -232,9 +333,11 @@ __all__ = [
     "ERR_RESERVED",
     "ERR_TAKEN",
     "PATH",
+    "close_user_connections",
     "error_text",
     "install",
     "needs_nickname",
     "nick_in_use",
     "nickname_gate",
+    "sweep_once",
 ]

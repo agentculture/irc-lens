@@ -4,7 +4,7 @@ Every verb opens the sqlite file, makes one store call and exits, so a
 running console (which reads the store on every request) sees the change
 without a restart. No verb prints an email address it was not given on the
 command line: output names only the address the operator typed, counts,
-nicks, channels and levels.
+nicks, nicknames, channels and levels.
 """
 
 from __future__ import annotations
@@ -85,12 +85,72 @@ def _set_user(store, email: str, role: str, state: str) -> None:
         ) from exc
 
 
+def _check_nickname(raw: str) -> str:
+    """The stored form of *raw*, or exit 1 saying why it is refused."""
+    from irc_lens import nickname
+
+    refusal = nickname.approved_refusal(raw)
+    if refusal is not None:
+        raise _nickname_error(refusal)
+    return nickname.sanitize_nickname(raw) or ""
+
+
+def _nickname_error(reason: str) -> AfiError:
+    return AfiError(
+        code=EXIT_USER_ERROR,
+        message=f"nickname refused: {reason}",
+        remediation=(
+            "2-16 letters, digits or _, not an address, not a reserved name, "
+            "not starting with pa_, and not another user's nickname"
+        ),
+    )
+
+
+def _set_nickname(store, email: str, nick: str) -> str:
+    from irc_lens.access_store import NicknameError
+
+    try:
+        return store.set_nickname(email, nick, actor=None)
+    except NicknameError as exc:
+        raise _nickname_error(exc.reason) from exc
+
+
 def cmd_users_add(args: argparse.Namespace) -> int:
     _check_role(args.role)
     email = _email(args)
+    nick = _check_nickname(args.nick) if args.nick is not None else None
     store = _open_store(args)
+    if nick is not None and _nickname_owner(store, nick) not in (None, email):
+        raise _nickname_error("taken")
     _set_user(store, email, args.role, STATE_APPROVED)
+    if nick is not None:
+        nick = _set_nickname(store, email, nick)
+        print(f"added {email} as {args.role}, nickname {nick}")
+        return 0
     print(f"added {email} as {args.role}")
+    return 0
+
+
+def _nickname_owner(store, nick: str) -> str | None:
+    """The address already holding *nick* (any case), else None."""
+    for user in store.list_users():
+        if (user["nickname"] or "").casefold() == nick.casefold():
+            return user["email"]
+    return None
+
+
+def cmd_users_nick(args: argparse.Namespace) -> int:
+    """Set or rename a user's nickname (their IRC nick is <server>-<nickname>).
+
+    A running lens closes the user's sessions and agent connection on its
+    next sweep or request; their agent credential must be re-issued.
+    """
+    email = _email(args)
+    nick = _check_nickname(args.nickname)
+    store = _open_store(args)
+    _need_user(store, email)
+    nick = _set_nickname(store, email, nick)
+    print(f"{email} is now known as {nick}")
     return 0
 
 
@@ -228,8 +288,21 @@ def _verb(sub, name: str, help_text: str, func, *positionals: str):
 def _build_users(sub) -> None:
     add = _verb(sub, "add", "Approve a user.", cmd_users_add, "email")
     add.add_argument("--role", default="member", help="member (default) or admin.")
+    add.add_argument(
+        "--nick",
+        default=None,
+        help="The nickname others see (else the user picks one on first sign-in).",
+    )
     _verb(sub, "remove", "Remove a user.", cmd_users_remove, "email")
     _verb(sub, "role", "Set a user's role.", cmd_users_role, "email", "role")
+    _verb(
+        sub,
+        "nick",
+        "Set or rename a user's nickname.",
+        cmd_users_nick,
+        "email",
+        "nickname",
+    )
 
 
 def _build_grants(sub) -> None:
@@ -257,7 +330,7 @@ def register_into(app) -> None:
     _noun(
         app,
         "users",
-        "Manage approved users and roles (add, remove, role).",
+        "Manage approved users, roles and nicknames (add, remove, role, nick).",
         _build_users,
     )
     _noun(app, "grants", "Manage channel grants (add, list, revoke).", _build_grants)
