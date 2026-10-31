@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-31
+
+### Fixed
+
+- A non-admin may DM, /who and /read their own personal agent (and no other nick); DMs to other humans and to mesh agents stay refused.
+- An agent's MCP read past its limit leaves the rest unread (returned oldest first next time); concurrent agent tool calls no longer see each other's errors.
+- An invited user is promoted to approved on any verified sign-in, including the Cloudflare Access /login path.
+- Agent nicks use the configured server name, so server names containing a dash work.
+- The admin page can set and clear a guest's agent extension; irc-lens extend audits as system.
+- The per-line grant check reads the store's change counter once per line, sweeps revocations only after a change, and fails closed after a 0.25 s busy wait instead of blocking the event loop.
+- Owner metrics count the audit table with one GROUP BY off the event loop.
+- The last-admin guard is one atomic store operation shared by /admin and the CLI.
+- The admin-only command set moved out of the cited commands.py, which is byte-faithful again.
+
 ## [0.17.0] - 2026-10-31
 
 ### Added
@@ -23,10 +37,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Sign-in, set-password and the guests CLI decide approval from the store when permissions are enabled.
 - Guests: bans, deletion, retention and idle sign-off also cover the guest's agent, and the consent record names it.
 - The auth log line carries a hashed `who=` instead of the email. No log line carries an email.
-
-### Fixed
-
-- Review fixes before release: a non-admin may DM, `/who` and `/read` their own personal agent (and no other nick); an MCP `read` past its limit leaves the rest unread; concurrent agent tool calls no longer see each other's errors; an invited user is promoted on any verified sign-in, including the Cloudflare Access `/login` path; agent nicks use the configured server name, so dashed server names work; the admin page can set a guest's agent extension; the per-line grant check reads the store's change counter once, sweeps revocations only after a change, and fails closed after a 0.25 s busy wait; owner metrics count the audit with one GROUP BY off the event loop; the last-admin guard is one atomic store operation shared by `/admin` and the CLI; `irc-lens extend` audits as `system`; the admin-only command set moved out of the cited `commands.py`.
 
 ## [0.16.1] - 2026-10-30
 
