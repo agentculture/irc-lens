@@ -10,11 +10,11 @@ resolution-markers = [
 
 [[package]]
 name = "agentfront"
-version = "0.21.0"
+version = "0.21.2"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/5b/ef/4ee5f66224d27364e5eace7058bec7af475d898c0ce10d414edda9d5740b/agentfront-0.21.0.tar.gz", hash = "sha256:58e68a1c1ba2317716ce641c0a53660298fe7f392935fb1d23eb2fbc1243476a", size = 567272, upload-time = "2026-10-31T10:38:22.972Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/58/e6/4b85343779b39c13c884500f05eee65c2bd7ee22be7460c747a0dd663d12/agentfront-0.21.2.tar.gz", hash = "sha256:326f13ed04723b51d0b511e3a184259042ecc0b519adb79666e6a54a9590e665", size = 568425, upload-time = "2026-10-31T15:24:32.636Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/75/b9/b6725e431a61b2351ff96a6c8b5f8f0a5574c1b7246c01e4756fea20af75/agentfront-0.21.0-py3-none-any.whl", hash = "sha256:3406d662f9e8ad59168138394c74e6bba1de8cf721b9508a4deb0fb2e05000ff", size = 153008, upload-time = "2026-10-31T10:38:21.905Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/90/bf63a5eef0245bee071a8b65c9f0da04f9c69a591dd6cf1eb822193e980f/agentfront-0.21.2-py3-none-any.whl", hash = "sha256:f0d645f2b297fd1d2326815a1e9ebf37eb1de56c916f7391cb24f41382de3226", size = 153454, upload-time = "2026-10-31T15:24:31.598Z" },
 ]
 
 [package.optional-dependencies]
@@ -737,7 +737,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "agentfront", extras = ["mcp"], specifier = ">=0.21.0" },
+    { name = "agentfront", extras = ["mcp"], specifier = ">=0.21.2" },
     { name = "aiohttp", specifier = ">=3.9" },
     { name = "argon2-cffi", specifier = ">=25.1.0" },
     { name = "jinja2", specifier = ">=3.1" },
