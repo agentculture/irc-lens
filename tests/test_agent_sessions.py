@@ -473,6 +473,15 @@ async def test_case_variant_of_a_granted_channel_is_refused(env: Env) -> None:
     assert not any("#OPS" in ln or "#Ops" in ln for ln in sent)
 
 
+async def test_whoami_never_lists_a_revoked_channel(env: Env) -> None:
+    """Finding 3: ``whoami`` lists only channels the human may still list."""
+    token = await env.issue(env.jwt(MEMBER))
+    await env.ok(token, "join", channel="#ops")
+    assert (await env.ok(token, "whoami"))["joined"] == ["#ops"]
+    env.access.remove_grant(MEMBER, "channel", "#ops", actor=None)
+    assert (await env.ok(token, "whoami"))["joined"] == []
+
+
 async def test_revoked_grant_bites_on_the_next_send(env: Env) -> None:
     token = await env.issue(env.jwt(MEMBER))
     await env.ok(token, "join", channel="#ops")

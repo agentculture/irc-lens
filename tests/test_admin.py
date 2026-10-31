@@ -307,6 +307,31 @@ async def test_revoke_of_a_missing_grant_says_so(env: Env) -> None:
     assert env.access.grants_for(MEMBER) == [("channel", "#Ops", "write")]
 
 
+async def test_reload_never_renders_a_revoked_channel(env: Env) -> None:
+    """Finding 3: after a grant is revoked, a page reload must not show the
+    channel's buffered lines or its sidebar entry. (The HISTORY query is
+    refused; the page used to fall back to the unfiltered buffer.)"""
+    from irc_lens.web.sessions import BACKEND_MESH
+
+    env.access.set_grant(MEMBER, "channel", "#lab", "write", actor=None)
+    h = env.jwt(MEMBER)
+    assert (await env.client.get("/", headers=h)).status == 200
+    session = dict(zip(env.app["registry"].keys(), env.app["registry"].values()))[
+        (MEMBER, BACKEND_MESH)
+    ]
+    session.joined_channels.add("#lab")
+    session.current_channel = "#lab"
+    session.buffer.add("#lab", "someone", "buffered-secret-line")
+    env.access.remove_grant(MEMBER, "channel", "#lab", actor=None)
+    r = await env.client.get("/", headers=h)
+    assert r.status == 200
+    body = await r.text()
+    assert "buffered-secret-line" not in body
+    assert "#lab" not in body
+    assert "#lab" not in session.joined_channels
+    assert session.current_channel == ""
+
+
 async def test_bad_grant_rejected(env: Env) -> None:
     for data in (
         {"email": MEMBER, "channel": "lab", "level": "read"},

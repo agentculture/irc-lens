@@ -195,9 +195,16 @@ def build_agent_front(app: web.Application | None = None):
     async def whoami() -> dict:
         """Report this agent's nick, its human's tier and its joined channels."""
         principal, agent = await _agent()
+        session = agent.session
         return {
             **describe_principal(principal),
-            "joined": sorted(agent.session.joined_channels),
+            # Only channels the human may still list: a revoked grant
+            # must not keep naming its channel here.
+            "joined": sorted(
+                c
+                for c in session.joined_channels
+                if session.may("list", c, audit=False)
+            ),
         }
 
     @front.tool

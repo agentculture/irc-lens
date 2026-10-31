@@ -560,6 +560,10 @@ async def get_index(request: web.Request) -> web.Response:
     # to a string when the live IRCd query actually ran, so `--seed`
     # preloaded fixtures still render on the initial page render.
     chat_log_html: str | None = None
+    # Apply revoked grants before anything renders: prune channels the
+    # viewer may no longer list and clear an unreadable current channel,
+    # so neither the sidebar nor the chat log can name or show them.
+    session.enforce_revocations()
     channel = session.current_channel
     # Both `connected` (post-welcome) and `healthy` (no broken pipe) must
     # hold — a pre-welcome session would block for QUERY_TIMEOUT (10s) on
@@ -568,6 +572,11 @@ async def get_index(request: web.Request) -> web.Response:
     if channel and session.healthy and session.connected:
         try:
             entries = await session.history(channel, limit=50)
+        except PermissionError:
+            # Never fall back to the buffer for a channel the viewer may
+            # not read: render an empty log instead.
+            entries = None
+            chat_log_html = ""
         except LensConnectionLost:
             # Page render shouldn't break on transport loss; the
             # connection-status indicator + 503 on next /input will
