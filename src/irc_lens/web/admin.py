@@ -10,7 +10,8 @@ agents all get 403.
 
 * ``POST /admin/users`` -- ``mode=add`` approves the address now;
   ``mode=invite`` stores it as ``invited`` and mails the existing
-  set-password link (``setpw``). An invited user becomes ``approved`` only
+  set-password link (``setpw``); ``mode=role`` (the users table's role
+  form) changes only the role of an existing user and keeps their state. An invited user becomes ``approved`` only
   once they finish an app sign-in (``app_session.promote_on_signin``).
 * ``POST /admin/users/remove`` -- marks the user removed and revokes their
   agent credential and sessions.
@@ -166,10 +167,16 @@ async def post_user(request: web.Request) -> web.Response:
         return _refuse(request, "Enter a valid email address.")
     if role not in ROLES:
         return _refuse(request, "Unknown role.")
-    if mode not in ("add", "invite"):
+    if mode not in ("add", "invite", "role"):
         return _refuse(request, "Unknown action.")
     existing = store.get_user(email)
-    if mode == "add":
+    if mode == "role":
+        # A role change keeps the user's state: changing a removed or
+        # invited user's role must never approve them (only "Add now" does).
+        if existing is None:
+            return _refuse(request, "No such user.")
+        state = existing["state"]
+    elif mode == "add":
         state = "approved"
     else:
         # Never downgrade someone who is already approved.

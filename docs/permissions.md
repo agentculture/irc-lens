@@ -75,7 +75,7 @@ In the app, an admin opens `/admin` (`src/irc_lens/web/admin.py`):
 
 | Route | Does |
 | --- | --- |
-| `POST /admin/users` | add a user now (`mode=add`) or invite them (`mode=invite`), with a role |
+| `POST /admin/users` | add a user now (`mode=add`) or invite them (`mode=invite`), with a role; `mode=role` changes an existing user's role and keeps their state, so it never approves a removed or invited user |
 | `POST /admin/users/remove` | mark the user removed; revokes their agent credential and sessions |
 | `POST /admin/grants` | set a channel grant at `read`, `write` or `ask`, or revoke it |
 | `POST /admin/extension` | approve an agent extension for a number of hours, or clear it |

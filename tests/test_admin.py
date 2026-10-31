@@ -347,13 +347,43 @@ async def test_role_change_applies_to_open_session(env: Env) -> None:
     h = env.jwt(MEMBER)
     assert (await env.client.get("/admin", headers=h)).status == 403
     await env.post(
-        "/admin/users", env.jwt(ADMIN), email=MEMBER, role="admin", mode="add"
+        "/admin/users", env.jwt(ADMIN), email=MEMBER, role="admin", mode="role"
     )
     assert (await env.client.get("/admin", headers=h)).status == 200
     await env.post(
-        "/admin/users", env.jwt(ADMIN), email=MEMBER, role="member", mode="add"
+        "/admin/users", env.jwt(ADMIN), email=MEMBER, role="member", mode="role"
     )
     assert (await env.client.get("/admin", headers=h)).status == 403
+
+
+@pytest.mark.parametrize("state", ["removed", "invited"])
+async def test_role_change_keeps_the_users_state(env: Env, state: str) -> None:
+    """Finding 7: changing a removed or invited user's role from the users
+    table must not approve them; only 'Add now' approves."""
+    env.access.set_user(NEWBIE, role="member", state=state, actor=None)
+    r = await env.post(
+        "/admin/users", env.jwt(ADMIN), email=NEWBIE, role="admin", mode="role"
+    )
+    assert r.status == 303
+    user = env.access.get_user(NEWBIE)
+    assert (user["role"], user["state"]) == ("admin", state)
+    assert app_session.approved_user(env.app, NEWBIE) is None
+
+
+async def test_role_forms_on_the_page_do_not_post_add(env: Env) -> None:
+    """Finding 7: the per-user role form posts mode=role, never mode=add."""
+    env.access.set_user(NEWBIE, role="member", state="removed", actor=None)
+    html = await (await env.client.get("/admin", headers=env.jwt(ADMIN))).text()
+    assert '<input type="hidden" name="mode" value="add">' not in html
+    assert '<input type="hidden" name="mode" value="role">' in html
+
+
+async def test_role_change_of_an_unknown_user_is_refused(env: Env) -> None:
+    r = await env.post(
+        "/admin/users", env.jwt(ADMIN), email=NEWBIE, role="admin", mode="role"
+    )
+    assert r.status == 400
+    assert env.access.get_user(NEWBIE) is None
 
 
 async def test_remove_user_and_last_admin_guard(env: Env) -> None:
@@ -363,10 +393,11 @@ async def test_remove_user_and_last_admin_guard(env: Env) -> None:
     # The only admin cannot be removed or demoted.
     r = await env.post("/admin/users/remove", env.jwt(ADMIN), email=ADMIN)
     assert r.status == 400
-    r = await env.post(
-        "/admin/users", env.jwt(ADMIN), email=ADMIN, role="member", mode="add"
-    )
-    assert r.status == 400
+    for mode in ("add", "role"):
+        r = await env.post(
+            "/admin/users", env.jwt(ADMIN), email=ADMIN, role="member", mode=mode
+        )
+        assert r.status == 400, mode
     assert env.access.admin_count() == 1
 
 
