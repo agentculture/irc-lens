@@ -162,6 +162,30 @@ def _admin_only(request: web.Request) -> web.Response | None:
     )
 
 
+def may_use_sandbox_view(
+    identity: Identity | None, *, access_enabled: bool, guest_enabled: bool
+) -> bool:
+    """True iff *identity* may enter or leave the sandbox Guest view.
+
+    The one rule behind both the ``/sandbox/enter`` and ``/sandbox/leave``
+    routes (their gate is :func:`admin_only_denial`) and every control that
+    offers the view (header button, palette and help entry, ``/sandbox``),
+    so the page never shows a control the route would refuse.
+    """
+    return guest_enabled and (
+        admin_only_denial(identity, access_enabled=access_enabled) is None
+    )
+
+
+def _sandbox_view_allowed(request: web.Request) -> bool:
+    config = request.app["config"]
+    return may_use_sandbox_view(
+        request.get("identity"),
+        access_enabled=bool(getattr(config, "access_enabled", False)),
+        guest_enabled=bool(config.guest_enabled),
+    )
+
+
 def _backend_for(request: web.Request) -> tuple[Identity, str]:
     """Pick (identity-for-registry, backend) from the VERIFIED tier only.
 
@@ -277,10 +301,8 @@ async def _resolve_session(request: web.Request, *, may_open_guest: bool = True)
     existed = prior is not None and session is prior
     app_session.note_registry_open(request, identity.principal, backend, existed)
     # UI context for the header / palette, from the verified tier only.
-    session.sandbox_available = (
-        backend == BACKEND_MESH
-        and identity.is_approved
-        and request.app["config"].guest_enabled
+    session.sandbox_available = backend == BACKEND_MESH and _sandbox_view_allowed(
+        request
     )
     return session
 
@@ -784,8 +806,7 @@ def _is_sandbox_enter(request: web.Request, parsed: ParsedCommand, text: str) ->
     return (
         parsed.type == CommandType.UNKNOWN
         and text.strip().lower() == SANDBOX_COMMAND
-        and identity.is_approved
-        and request.app["config"].guest_enabled
+        and _sandbox_view_allowed(request)
         and identity.principal not in request.app["sandbox_toggle"]
     )
 
