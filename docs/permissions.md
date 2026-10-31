@@ -212,14 +212,25 @@ unless an admin approves it to stay for a set number of hours.
   shown on the admin page.
 - Only an admin can set one. The store holds at most one per person.
 
-At this revision the extension is recorded and displayed, but nothing reads it
-yet: the idle sign-off that closes a guest's agent, and its bypass for an
-active extension, are not part of the merged code. A personal agent's lifetime
-today follows its credential and its human's standing
-(`sweep_once` in `src/irc_lens/web/agent_auth.py`), and the session reaper
-deliberately skips agent connections (`reap_idle` in
-`src/irc_lens/web/sessions.py`). Do not rely on extensions to change when an
-agent disconnects until that rule lands.
+How the extension changes when a guest's agent disconnects
+(`_reap_guest_agents`, called at the end of `reap_idle` in
+`src/irc_lens/web/sessions.py`):
+
+- Only the human's own actions count as activity. The agent's sends and reads
+  never keep its human's session alive.
+- When the guest's own sandbox session is gone (signed off for idleness, or
+  never opened) and no extension is live, the agent is disconnected on the
+  next reap.
+- While an extension is live, the agent stays connected. Once the extension
+  ends or is cleared, the next reap applies the normal rule.
+- For a guest, the extension is looked up under the bare email (what the
+  admin page and `irc-lens extend` set) and under `guest:<email>`. The admin
+  page accepts only known users, so a pure guest's extension is set with the
+  CLI.
+
+Approved users' agents are not reaped this way. Their lifetime follows their
+credential and their human's standing (`sweep_once` in
+`src/irc_lens/web/agent_auth.py`).
 
 ## Switches
 
