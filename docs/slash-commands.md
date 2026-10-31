@@ -32,9 +32,9 @@ channel" the way the console does.
 | (none) | text | `CHAT` — sends a PRIVMSG to the active channel; publishes a local-echo `chat` event. | `send` (explicit target, no "active channel" needed) |
 | `/join` | `#channel` | Joins the channel, sets it active, publishes `roster` + `info`, pulls recent backlog. | `join` |
 | `/part` | `#channel` | Parts the channel, publishes `roster` + `info`. | `part` |
-| `/send` | `<target> <text…>` | Sends a PRIVMSG to an explicit target (channel or nick). Local-echoes a `chat` event **only when `target == current_channel`**. | `send` |
+| `/send` | `<target> <text…>` | Sends a PRIVMSG to an explicit target (channel or nick). Local-echoes a `chat` event **only when `target == current_channel`**. With email permissions on, a non-admin may DM only their own personal agent ([permissions.md](permissions.md)). | `send` |
 | `/switch` | `#channel` | Pure view-state move to an already-joined channel — no IRC side-effect. | `switch` (joins the channel first, since an ephemeral session starts with nothing joined) |
-| `/read` | `[#channel] [-n N]` | Re-reads recent buffer for a channel (default: current channel, 50 lines, capped at 500). | `read` |
+| `/read` | `[#channel\|nick] [-n N]` | Re-reads recent buffer for a channel (default: current channel, 50 lines, capped at 500). With email permissions on, a non-admin may name only their own personal agent's nick. | `read` |
 | `/channels` | — | Lists channels reachable on the server (`LIST`). | `channels` |
 | `/who` | `[#channel\|nick]` | Refreshes the roster via `WHO` (default: current channel). | `who` |
 | `/agents` | — | Aggregates `WHO` across every currently-joined channel into one roster. | *(none — see "Console-only verbs" below)* |

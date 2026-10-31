@@ -68,7 +68,7 @@ from typing import Any
 from aiohttp import web
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
-from irc_lens.agent_nick import agent_nick_for, is_agent_nick
+from irc_lens.agent_nick import agent_nick_for, is_agent_nick, server_name_for
 from irc_lens.commands import CommandType, ParsedCommand
 from irc_lens.session import LensConnectionLost
 from irc_lens.web import app_session, input_gate
@@ -250,6 +250,8 @@ class AgentSession:
         self._seq = 0
         self._seen: dict[str, int] = {}
         self._last_audit: dict[tuple[str, str], float] = {}
+        #: Serialises this agent's tool calls (subscribe -> execute -> drain).
+        self._exec_lock = asyncio.Lock()
 
     # -- set-up -------------------------------------------------------------
 
@@ -271,12 +273,16 @@ class AgentSession:
     # -- ownership (lens state) -----------------------------------------------
 
     def _human_session(self) -> Any:
-        registry = self.app["registry"]
-        wanted = self.human.registry_principal.casefold()
-        for (principal, backend), session in zip(registry.keys(), registry.values()):
-            if backend == self.human.backend and principal.casefold() == wanted:
-                return session
-        return None
+        """The human's own browser session: one registry lookup, no scan.
+
+        Runs on every received line. The key is the human's normalised
+        address (``guest:<email>`` for a guest), which is how their browser
+        session is keyed while email permissions are on (``auth`` lowercases
+        an Access JWT's email then).
+        """
+        return self.app["registry"].peek(
+            self.human.registry_principal, self.human.backend
+        )
 
     def owner_nick(self) -> str | None:
         """The nick the human's own live lens-held connection holds, or None."""
@@ -375,26 +381,34 @@ class AgentSession:
             logger.exception("agent_delivery audit failed")
 
     def read(self, target: str = "", limit: int = 50) -> dict[str, Any]:
-        """Unread delivered lines (all targets, or one), oldest first."""
+        """Unread delivered lines (all targets, or one), oldest first.
+
+        At most *limit* lines are returned and marked read; any further
+        unread lines stay unread and come back, oldest first, on the next
+        read. A line from a channel the human may no longer read is skipped
+        (and marked read: it is never shown).
+        """
         limit = max(1, min(INBOX_MAX, int(limit)))
-        unread = [
-            ln
-            for ln in self._inbox
-            if ln.seq > self._seen.get(ln.target, 0)
-            and (not target or ln.target == target)
-        ]
-        for ln in unread:
-            self._seen[ln.target] = max(self._seen.get(ln.target, 0), ln.seq)
-        visible = [
-            ln
-            for ln in unread
-            if ln.target == DM_TARGET
-            or self.session.may("read", ln.target, audit=False)
-        ]
+        lines: list[AgentLine] = []
+        for ln in self._inbox:
+            if len(lines) >= limit:
+                break
+            if ln.seq <= self._seen.get(ln.target, 0):
+                continue
+            if target and ln.target != target:
+                continue
+            self._seen[ln.target] = ln.seq
+            if self._visible(ln):
+                lines.append(ln)
         return {
-            "lines": [ln.to_dict() for ln in visible[-limit:]],
+            "lines": [ln.to_dict() for ln in lines],
             "withheld": self.withheld,
         }
+
+    def _visible(self, line: AgentLine) -> bool:
+        return line.target == DM_TARGET or self.session.may(
+            "read", line.target, audit=False
+        )
 
     # -- send side ----------------------------------------------------------
 
@@ -413,16 +427,23 @@ class AgentSession:
             raise _refused(refusal.error, refusal.hint)
 
     async def _execute(self, parsed: ParsedCommand) -> None:
-        """Run *parsed* through ``Session.execute``; its error event -> raise."""
-        sub = self.session.event_bus.subscribe()
-        try:
-            await self.session.execute(parsed)
-            events = sub.drain_nowait()
-        except LensConnectionLost as exc:
-            await self._drop()
-            raise _refused(_LOST_ERROR, _LOST_HINT) from exc
-        finally:
-            sub.close()
+        """Run *parsed* through ``Session.execute``; its error event -> raise.
+
+        One tool call at a time per agent: the subscription that collects
+        this call's error event is opened, filled and drained under
+        :attr:`_exec_lock`, so a concurrent call's refusal never lands in
+        this call's result (nor this call's in its).
+        """
+        async with self._exec_lock:
+            sub = self.session.event_bus.subscribe()
+            try:
+                await self.session.execute(parsed)
+                events = sub.drain_nowait()
+            except LensConnectionLost as exc:
+                await self._drop()
+                raise _refused(_LOST_ERROR, _LOST_HINT) from exc
+            finally:
+                sub.close()
         for event in events:
             if event.name == "error":
                 message = json.loads(event.data).get("message", "refused")
@@ -564,6 +585,16 @@ async def _close_agent(app: web.Application, credential_key: str) -> None:
     await close_agent_connections(app, credential_key)
 
 
+def _nick_matches(app: web.Application, nick: str, human: HumanState) -> bool:
+    """Is *nick* the agent nick of *human*, on the configured server name?"""
+    server = server_name_for(app["config"], guest=human.backend == BACKEND_SANDBOX)
+    try:
+        expected = agent_nick_for(human.nick, server)
+    except ValueError:
+        return False
+    return is_agent_nick(nick, server) and nick == expected
+
+
 async def agent_session_for(app: web.Application, principal: Any) -> AgentSession:
     """The (lazily opened) lens-held session of the authenticated *principal*.
 
@@ -572,11 +603,7 @@ async def agent_session_for(app: web.Application, principal: Any) -> AgentSessio
     credential row and the human's current state only (o11).
     """
     human = await asyncio.to_thread(human_state, app, principal)
-    if (
-        human is None
-        or not is_agent_nick(principal.nick)
-        or principal.nick != agent_nick_for(human.nick)
-    ):
+    if human is None or not _nick_matches(app, principal.nick, human):
         logger.info("agent_session=refused reason=nick-mismatch")
         raise _refused(
             "this credential's agent nick no longer matches its human",

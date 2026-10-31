@@ -29,6 +29,7 @@ import hashlib
 import logging
 import secrets
 import sqlite3
+import threading
 import time
 from contextlib import closing, contextmanager
 from pathlib import Path
@@ -71,9 +72,34 @@ CREATE TABLE IF NOT EXISTS admin_imports (email_hash TEXT PRIMARY KEY);
 #: invalidated sooner, by the database's change counter (see _stamp).
 READ_CACHE_TTL_S = 5.0
 
+#: Busy timeout of the hot-path reads (the grant check on every received
+#: line), in seconds. A writer holding the database locked longer than this
+#: makes the check fail closed (deny, logged) instead of stalling the event
+#: loop for the 30 s write timeout.
+READ_BUSY_TIMEOUT_S = 0.25
+#: Busy timeout of writes and of the reads off the hot path.
+WRITE_BUSY_TIMEOUT_S = 30.0
+
+
+ROLE_ADMIN = "admin"
+STATE_APPROVED = "approved"
+_ADMIN_COUNT_SQL = "SELECT COUNT(*) FROM users WHERE role='admin' AND state='approved'"
+
+
+class LastAdminError(ValueError):
+    """A change would leave the store without an approved admin."""
+
 
 def _norm(email: str) -> str:
     return email.strip().lower()
+
+
+def _checked_email(email: str) -> str:
+    email = _norm(email)
+    if ":" in email:
+        # 'guest:<email>' is the guest credential key; refuse lookalikes.
+        raise ValueError("an email address may not contain ':'")
+    return email
 
 
 def _hash_token(token: str) -> str:
@@ -97,6 +123,29 @@ class AccessStore:
         # the change stamp it was read under and expires after
         # READ_CACHE_TTL_S at the latest.
         self._read_cache: dict[tuple, tuple[bytes, float, object]] = {}
+        # Per-thread pinned change stamp (see pinned_stamp).
+        self._pin = threading.local()
+
+    def change_stamp(self) -> bytes | None:
+        """The database's change counter now: equal stamps mean nothing was
+        committed in between. None when it cannot be read (assume changed)."""
+        pinned = getattr(self._pin, "stamp", None)
+        return pinned if pinned is not None else self._stamp()
+
+    @contextmanager
+    def pinned_stamp(self) -> Iterator[bytes | None]:
+        """Read the change counter once and reuse it for every cached read
+        made by this thread inside the block (one file read per received
+        line, however many checks the line needs). Nested blocks keep the
+        outer stamp. Other threads are unaffected."""
+        if getattr(self._pin, "stamp", None) is not None:
+            yield self._pin.stamp
+            return
+        self._pin.stamp = self._stamp()
+        try:
+            yield self._pin.stamp
+        finally:
+            self._pin.stamp = None
 
     def _stamp(self) -> bytes | None:
         """The database file's change counter (header bytes 24-27).
@@ -113,7 +162,7 @@ class AccessStore:
         return header[24:28] if len(header) == 28 else None
 
     def _cached(self, key: tuple, load: Callable[[], _T]) -> _T:
-        stamp = self._stamp()
+        stamp = self.change_stamp()
         now = time.monotonic()
         hit = self._read_cache.get(key)
         if stamp is not None and hit is not None:
@@ -130,9 +179,9 @@ class AccessStore:
     def _now(self) -> int:
         return int(self._clock())
 
-    def _connect(self) -> sqlite3.Connection:
+    def _connect(self, timeout: float = WRITE_BUSY_TIMEOUT_S) -> sqlite3.Connection:
         # isolation_level=None: transactions are explicit (see _tx).
-        con = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        con = sqlite3.connect(self.path, timeout=timeout, isolation_level=None)
         con.execute("PRAGMA secure_delete = ON")
         return con
 
@@ -152,6 +201,19 @@ class AccessStore:
     def _all(self, sql: str, args: tuple = ()) -> list[tuple]:
         with closing(self._connect()) as con:
             return [tuple(r) for r in con.execute(sql, args)]
+
+    def _hot_all(self, sql: str, args: tuple = ()) -> list[tuple]:
+        """A hot-path read with a short busy timeout; a locked database
+        raises (callers fail closed) and is logged, never waited out."""
+        try:
+            with closing(self._connect(timeout=READ_BUSY_TIMEOUT_S)) as con:
+                return [tuple(r) for r in con.execute(sql, args)]
+        except sqlite3.OperationalError:
+            logger.warning(
+                "access store read timed out after %.2fs (locked); denying",
+                READ_BUSY_TIMEOUT_S,
+            )
+            raise
 
     def _audit(
         self, con: sqlite3.Connection, actor: str | None, action: str, target: str
@@ -179,23 +241,56 @@ class AccessStore:
 
     # -- users & roles ---------------------------------------------------
     def set_user(self, email: str, *, role: str, state: str, actor: str | None) -> None:
-        email = _norm(email)
-        if ":" in email:
-            # 'guest:<email>' is the guest credential key; refuse lookalikes.
-            raise ValueError("an email address may not contain ':'")
+        email = _checked_email(email)
         with self._tx() as con:
-            con.execute(
-                "INSERT INTO users (email, role, state) VALUES (?,?,?) "
-                "ON CONFLICT(email) DO UPDATE SET role=excluded.role, state=excluded.state",
-                (email, role, state),
-            )
-            self._audit(con, actor, "user.set", f"{email_hash(email)}:{role}:{state}")
+            self._upsert_user(con, email, role, state, actor)
+
+    def set_user_keeping_admin(
+        self, email: str, *, role: str, state: str, actor: str | None
+    ) -> None:
+        """Set *email*'s role and state unless that leaves no approved admin.
+
+        The check and the write are one ``BEGIN IMMEDIATE`` transaction, so
+        two concurrent demotions can never both pass it. Raises
+        :class:`LastAdminError` (and changes nothing) when *email* is the
+        last approved admin and would stop being one. The one guard behind
+        both ``/admin`` and the ``irc-lens users`` verbs.
+        """
+        email = _checked_email(email)
+        with self._tx() as con:
+            row = con.execute(
+                "SELECT role, state FROM users WHERE email=?", (email,)
+            ).fetchone()
+            was_admin = row is not None and tuple(row) == (ROLE_ADMIN, STATE_APPROVED)
+            stays = (role, state) == (ROLE_ADMIN, STATE_APPROVED)
+            if was_admin and not stays and self._admins_in(con) <= 1:
+                raise LastAdminError("at least one approved admin must remain")
+            self._upsert_user(con, email, role, state, actor)
+
+    @staticmethod
+    def _admins_in(con: sqlite3.Connection) -> int:
+        return con.execute(_ADMIN_COUNT_SQL).fetchone()[0]
+
+    def _upsert_user(
+        self,
+        con: sqlite3.Connection,
+        email: str,
+        role: str,
+        state: str,
+        actor: str | None,
+    ) -> None:
+        con.execute(
+            "INSERT INTO users (email, role, state) VALUES (?,?,?) "
+            "ON CONFLICT(email) DO UPDATE SET role=excluded.role, state=excluded.state",
+            (email, role, state),
+        )
+        self._audit(con, actor, "user.set", f"{email_hash(email)}:{role}:{state}")
 
     def get_user(self, email: str) -> dict[str, str] | None:
         email = _norm(email)
         rows = self._cached(
             ("user", email),
-            lambda: self._all(
+            lambda: self._hot_all(
                 "SELECT email, role, state FROM users WHERE email=?", (email,)
             ),
         )
@@ -210,9 +305,7 @@ class AccessStore:
 
     def admin_count(self) -> int:
         """How many users are approved admins right now."""
-        return self._all(
-            "SELECT COUNT(*) FROM users WHERE role='admin' AND state='approved'"
-        )[0][0]
+        return self._all(_ADMIN_COUNT_SQL)[0][0]
 
     # -- grants ------------------------------------------------------------
     def set_grant(
@@ -274,7 +367,7 @@ class AccessStore:
             args += (resource_kind,)
         rows = self._cached(
             ("grants",) + args,
-            lambda: self._all(sql + " ORDER BY resource_kind, resource", args),
+            lambda: self._hot_all(sql + " ORDER BY resource_kind, resource", args),
         )
         return list(rows)
 
@@ -377,16 +470,23 @@ class AccessStore:
         )[0][0]
 
     # -- extensions ----------------------------------------------------------
-    def set_extension(self, email: str, *, until: int, set_by: str) -> None:
+    def set_extension(self, email: str, *, until: int, actor: str | None) -> None:
+        """Set *email*'s agent extension to end at *until* (unix seconds).
+
+        *actor* is the admin who set it (hashed in the audit row, stored as
+        ``set_by``); None means the operator CLI, recorded as the plain
+        :data:`SYSTEM_ACTOR` marker in both places.
+        """
         email = _norm(email)
+        set_by = _norm(actor) if actor else SYSTEM_ACTOR
         with self._tx() as con:
             con.execute(
                 "INSERT INTO agent_extensions (email, until, set_by) VALUES (?,?,?) "
                 "ON CONFLICT(email) DO UPDATE SET until=excluded.until, "
                 "set_by=excluded.set_by",
-                (email, until, _norm(set_by)),
+                (email, until, set_by),
             )
-            self._audit(con, set_by, "extension.set", f"{email_hash(email)}:{until}")
+            self._audit(con, actor, "extension.set", f"{email_hash(email)}:{until}")
 
     def clear_extension(self, email: str, *, actor: str | None) -> None:
         email = _norm(email)
@@ -458,6 +558,11 @@ class AccessStore:
             )
 
     # -- audit ---------------------------------------------------------------
+    def audit_action_counts(self) -> dict[str, int]:
+        """``{action: rows}`` over the audit table: one GROUP BY query."""
+        rows = self._all("SELECT action, COUNT(*) FROM audit GROUP BY action")
+        return dict(rows)
+
     def audit_rows(self) -> list[tuple[int, str, str, str]]:
         return self._all(
             "SELECT ts, actor_hash, action, target FROM audit ORDER BY rowid"

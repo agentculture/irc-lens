@@ -180,6 +180,39 @@ async def test_jwt_unknown_pending_and_allowlist_not_consulted(env: Env) -> None
     assert not await env.approved(env.jwt(BOB))
 
 
+# -- invited users promote on any verified sign-in (review 2, finding 4) ----------
+
+
+async def test_invited_user_with_a_valid_access_jwt_is_approved(env: Env) -> None:
+    # App sign-in off: password -> /login -> Cloudflare Access. The verified
+    # Access JWT is the sign-in, so an invited user is promoted by it.
+    env.access.set_user(BOB, role="member", state="invited", actor=ALICE)
+    assert await env.approved(env.jwt(BOB))
+
+
+async def test_access_jwt_promotion_is_recorded_in_the_store(env: Env) -> None:
+    env.access.set_user(BOB, role="member", state="invited", actor=ALICE)
+    await env.get(env.jwt(BOB))
+    assert env.access.get_user(BOB)["state"] == "approved"
+
+
+async def test_access_jwt_promotion_keeps_the_invited_role(env: Env) -> None:
+    env.access.set_user(BOB, role="admin", state="invited", actor=ALICE)
+    status, body = await env.get(env.jwt(BOB))
+    assert (status, body["role"]) == (200, "admin")
+
+
+async def test_removed_user_is_never_promoted_by_an_access_jwt(env: Env) -> None:
+    env.access.set_user(BOB, role="member", state="removed", actor=ALICE)
+    assert not await env.approved(env.jwt(BOB))
+
+
+async def test_removed_user_stays_removed_in_the_store(env: Env) -> None:
+    env.access.set_user(BOB, role="member", state="removed", actor=ALICE)
+    await env.get(env.jwt(BOB))
+    assert env.access.get_user(BOB)["state"] == "removed"
+
+
 async def test_changes_apply_on_next_request(env: Env) -> None:
     env.access.set_user(BOB, role="member", state="approved", actor=None)
     assert await env.approved(env.jwt(BOB))

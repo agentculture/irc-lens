@@ -116,3 +116,27 @@ def test_parse_chat_strips_surrounding_whitespace() -> None:
     parsed = parse_command("   hello   ")
     assert parsed.type is CommandType.CHAT
     assert parsed.text == "hello"
+
+
+# -- the admin-only set lives outside the cited module (review 2, extra) ----------
+
+
+def test_cited_commands_module_carries_no_access_policy() -> None:
+    from irc_lens import commands
+
+    assert not hasattr(commands, "ADMIN_ONLY")
+
+
+@pytest.mark.parametrize(
+    "ct", [CommandType.TOPIC, CommandType.KICK, CommandType.INVITE, CommandType.ICON]
+)
+def test_access_policy_marks_channel_changing_commands_admin_only(ct) -> None:
+    from irc_lens import access
+
+    assert access.is_admin_only(ParsedCommand(type=ct))
+
+
+def test_access_policy_leaves_chat_to_everyone() -> None:
+    from irc_lens import access
+
+    assert not access.is_admin_only(ParsedCommand(type=CommandType.CHAT, text="hi"))

@@ -417,7 +417,8 @@ Full reference: [permissions.md](permissions.md).
   running lens closes the agent's connection on its next sweep.
 - `extend <email> --days N` lets a guest's agent stay connected for N days
   after its human signs off; `extend <email> --clear` removes the extension.
-  The admin page sets the same extension in hours.
+  The audit records it under the plain `system` marker. The admin page sets
+  the same extension in hours, for a known user or a guest.
 
 ## App sign-in, set-password, guest limit and delivery alerts
 

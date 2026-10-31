@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-10-31
+
+### Fixed
+
+- A non-admin may DM, /who and /read their own personal agent (and no other nick); DMs to other humans and to mesh agents stay refused.
+- An agent's MCP read past its limit leaves the rest unread (returned oldest first next time); concurrent agent tool calls no longer see each other's errors.
+- An invited user is promoted to approved on any verified sign-in, including the Cloudflare Access /login path.
+- Agent nicks use the configured server name, so server names containing a dash work.
+- The admin page can set and clear a guest's agent extension; irc-lens extend audits as system.
+- The per-line grant check reads the store's change counter once per line, sweeps revocations only after a change, and fails closed after a 0.25 s busy wait instead of blocking the event loop.
+- Owner metrics count the audit table with one GROUP BY off the event loop.
+- The last-admin guard is one atomic store operation shared by /admin and the CLI.
+- The admin-only command set moved out of the cited commands.py, which is byte-faithful again.
+
 ## [0.17.0] - 2026-10-31
 
 ### Added

@@ -18,6 +18,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from irc_lens import metrics
+from irc_lens.agent_nick import agent_nick_for
 from irc_lens.web.identity import Identity
 
 if TYPE_CHECKING:
@@ -128,12 +129,16 @@ class SessionRegistry:
         clock: Callable[[], float] = time.monotonic,
         access_enabled: bool = False,
         access_store: StoreGetter | None = None,
+        server_name: str = "",
     ) -> None:
         self._factories: dict[str, SessionFactory] = {BACKEND_MESH: factory}
         # Email-keyed grants (deviation d2): when enabled, every mesh session
         # is opened with enforcement on, keyed by the verified principal.
         self._access_enabled = access_enabled
         self._access_store = access_store or (lambda: None)
+        # The mesh's configured server name: a human's own agent nick is
+        # derived from it and their verified nick (agent_nick_for).
+        self._server_name = server_name
         # Prefix of the private room every sandbox session joins on open:
         # guests may not /join (command allowlist), so this is how they
         # reach the sandbox agent, which follows them in.
@@ -414,6 +419,7 @@ class SessionRegistry:
         access_human: str,
         init: Callable[[Any], Any] | None,
         prepare: Callable[[Any], None] | None = None,
+        own_agent_nick: str | None = None,
     ) -> Any:
         """Build, connect and initialise one Session (caller holds the key lock).
 
@@ -432,7 +438,7 @@ class SessionRegistry:
                 # Fail closed: never hand out an unrestricted mesh
                 # session while email permissions are switched on.
                 raise PermissionError("email permissions on but no access store")
-            session.set_access(store, access_human)
+            session.set_access(store, access_human, own_agent_nick=own_agent_nick)
         if prepare is not None:
             prepare(session)
         # Two-step open: connect() opens the TCP socket and starts the
@@ -492,6 +498,19 @@ class SessionRegistry:
             self._sessions[key] = session
             return session
 
+    def _own_agent_nick(self, human_nick: str) -> str | None:
+        """The personal agent nick of the mesh human *human_nick*, or None.
+
+        From the verified nick and the configured server name only; None
+        (no DM to any agent) when either is missing or does not fit.
+        """
+        if not self._server_name:
+            return None
+        try:
+            return agent_nick_for(human_nick, self._server_name)
+        except ValueError:
+            return None
+
     async def get_or_open(self, identity: Identity, backend: str = BACKEND_MESH) -> Any:
         """Return the Session for (``identity.principal``, *backend*).
 
@@ -519,6 +538,7 @@ class SessionRegistry:
                 backend,
                 identity.nick,
                 access_human=identity.principal,
+                own_agent_nick=self._own_agent_nick(identity.nick),
                 init=(
                     (lambda s: self._init_sandbox(s, identity))
                     if backend == BACKEND_SANDBOX

@@ -320,6 +320,11 @@ def _authorize_principal(
         ))
     role = ""
     if is_email and approved_user is not None:
+        # The access store keys people by their lowercased address; key the
+        # identity (and so its registry sessions) the same way, so lookups
+        # by address -- e.g. a personal agent finding its human's session --
+        # are one exact match.
+        principal = principal.strip().lower()
         user = approved_user(principal)
         if user is None:
             raise _AuthDenied(_http_error(
@@ -457,7 +462,8 @@ def _store_decider(request: web.Request, ctx: _AccessContext):
     """Per-request approval lookup when email permissions are on, else None."""
     if not ctx.access_enabled:
         return None
-    return lambda email: app_session.approved_user(request.app, email)
+    # A valid Access JWT is a verified sign-in: it also finishes an invite.
+    return lambda email: app_session.approved_on_signin(request.app, email)
 
 
 async def _via_access_jwt(

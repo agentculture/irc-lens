@@ -40,7 +40,7 @@ from mcp.client.streamable_http import streamablehttp_client
 from _agentirc_server import AgentIRCTestServer
 from _jwks_server import FakeJWKS
 from irc_lens._errors import AfiError
-from irc_lens.agent_nick import agent_nick_for
+from irc_lens.agent_nick import agent_nick_for, is_agent_nick
 from irc_lens.config import (
     DEFAULT_AGENT_CREDENTIAL_TTL_S,
     load_config,
@@ -198,9 +198,28 @@ def _fake_agent(env: Env, key: str, backend: str = BACKEND_MESH) -> FakeAgentCon
 
 
 def test_agent_nick_keeps_server_prefix_and_ties_to_human() -> None:
-    assert agent_nick_for("testsrv-bob") == "testsrv-pa_-bob"
-    assert agent_nick_for(GUEST_NICK) == "sbx-pa_-gus"
+    assert agent_nick_for("testsrv-bob", "testsrv") == "testsrv-pa_-bob"
+    assert agent_nick_for(GUEST_NICK, "sbx") == "sbx-pa_-gus"
     assert agent_auth.agent_nick_for is agent_nick_for  # one scheme, one place
+
+
+def test_agent_nick_uses_the_configured_server_name_with_a_dash() -> None:
+    # The server name may itself contain '-': it is passed in, never
+    # guessed from the first '-' of the nick (review 2, finding 5).
+    assert agent_nick_for("spark-1-bob", "spark-1") == "spark-1-pa_-bob"
+
+
+def test_agent_namespace_uses_the_configured_server_name_with_a_dash() -> None:
+    assert is_agent_nick("spark-1-pa_-bob", "spark-1")
+
+
+def test_human_nick_on_a_dashed_server_is_not_an_agent_nick() -> None:
+    assert not is_agent_nick("spark-1-bob", "spark-1")
+
+
+def test_agent_nick_refuses_a_nick_from_another_server() -> None:
+    with pytest.raises(ValueError):
+        agent_nick_for("spark-bob", "spark-1")
 
 
 @pytest.mark.parametrize(
@@ -208,17 +227,17 @@ def test_agent_nick_keeps_server_prefix_and_ties_to_human() -> None:
 )
 def test_agent_nick_never_equals_a_derived_human_nick(email: str) -> None:
     human = derive_nick("testsrv", email)
-    assert agent_nick_for("testsrv-bob") != human
+    assert agent_nick_for("testsrv-bob", "testsrv") != human
     # Derived mesh nicks never contain "_"; guest nicks never contain "-"
     # after the server prefix. An agent nick always has both.
     assert "_" not in human
-    assert "_" in agent_nick_for("testsrv-bob")
+    assert "_" in agent_nick_for("testsrv-bob", "testsrv")
 
 
 def test_agent_nick_refuses_a_nick_without_server_prefix() -> None:
     for bad in ("nodash", "-x", "srv-"):
         with pytest.raises(ValueError):
-            agent_nick_for(bad)
+            agent_nick_for(bad, "srv")
 
 
 # -- TTL from config ------------------------------------------------------------------
@@ -303,7 +322,9 @@ async def test_token_shown_once_and_stored_only_as_hash(env: Env) -> None:
         rows = con.execute("SELECT token_hash, nick FROM agent_credentials").fetchall()
     assert len(rows) == 1
     assert rows[0][0] != token
-    assert rows[0][1] == agent_auth.agent_nick_for(derive_nick("testsrv", MEMBER))
+    assert rows[0][1] == agent_auth.agent_nick_for(
+        derive_nick("testsrv", MEMBER), "testsrv"
+    )
     # Not shown again: a later page view carries no token.
     page = await env.client.get("/agent-credential", headers=env.jwt(MEMBER))
     text = await page.text()
@@ -354,7 +375,7 @@ async def test_valid_credential_reaches_tool(env: Env) -> None:
     token = await env.issue(env.jwt(MEMBER))
     payload = await env.whoami(token)
     assert payload["result"] == {
-        "nick": agent_auth.agent_nick_for(derive_nick("testsrv", MEMBER)),
+        "nick": agent_auth.agent_nick_for(derive_nick("testsrv", MEMBER), "testsrv"),
         "tier": "approved",
     }
     assert env.calls == ["whoami"]

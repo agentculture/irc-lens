@@ -69,28 +69,27 @@ def _check_role(role: str) -> None:
         )
 
 
-def _keep_an_admin(store, email: str, role: str, state: str) -> None:
-    """Refuse a change that would leave no approved admin (as /admin does)."""
-    current = store.get_user(email)
-    is_admin_now = bool(
-        current and current["role"] == "admin" and current["state"] == STATE_APPROVED
-    )
-    stays = role == "admin" and state == STATE_APPROVED
-    if is_admin_now and not stays and store.admin_count() <= 1:
+def _set_user(store, email: str, role: str, state: str) -> None:
+    """Set the user, refusing a change that would leave no approved admin
+    (the store's one atomic guard, shared with /admin)."""
+    from irc_lens.access_store import LastAdminError
+
+    try:
+        store.set_user_keeping_admin(email, role=role, state=state, actor=None)
+    except LastAdminError as exc:
         raise AfiError(
             code=EXIT_USER_ERROR,
             message="at least one approved admin must remain",
             remediation="make another user an admin first: "
             "irc-lens users add <email> --role admin",
-        )
+        ) from exc
 
 
 def cmd_users_add(args: argparse.Namespace) -> int:
     _check_role(args.role)
     email = _email(args)
     store = _open_store(args)
-    _keep_an_admin(store, email, args.role, STATE_APPROVED)
-    store.set_user(email, role=args.role, state=STATE_APPROVED, actor=None)
+    _set_user(store, email, args.role, STATE_APPROVED)
     print(f"added {email} as {args.role}")
     return 0
 
@@ -100,8 +99,7 @@ def cmd_users_role(args: argparse.Namespace) -> int:
     email = _email(args)
     store = _open_store(args)
     user = _need_user(store, email)
-    _keep_an_admin(store, email, args.role, user["state"])
-    store.set_user(email, role=args.role, state=user["state"], actor=None)
+    _set_user(store, email, args.role, user["state"])
     print(f"{email} is now {args.role}")
     return 0
 
@@ -110,8 +108,7 @@ def cmd_users_remove(args: argparse.Namespace) -> int:
     email = _email(args)
     store = _open_store(args)
     user = _need_user(store, email)
-    _keep_an_admin(store, email, user["role"], STATE_REMOVED)
-    store.set_user(email, role=user["role"], state=STATE_REMOVED, actor=None)
+    _set_user(store, email, user["role"], STATE_REMOVED)
     n = store.revoke_agent_credential(email, actor=None)
     print(f"removed {email} ({n} agent credential(s) revoked)")
     return 0
@@ -194,7 +191,7 @@ def cmd_extend(args: argparse.Namespace) -> int:
         )
     store = _open_store(args)
     until = int(time.time()) + args.days * SECONDS_PER_DAY
-    store.set_extension(email, until=until, set_by="system")
+    store.set_extension(email, until=until, actor=None)
     print(f"extended {email} until {until}")
     return 0
 

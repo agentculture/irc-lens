@@ -18,7 +18,8 @@ agents all get 403.
 * ``POST /admin/grants`` -- set a channel grant (``read``/``write``/``ask``)
   or ``revoke`` it.
 * ``POST /admin/extension`` -- approve an *n*-hour agent extension; *n* is
-  typed per approval and has no fixed maximum (``clear`` removes it).
+  typed per approval and has no fixed maximum (``clear`` removes it). The
+  address may be a known user or a guest in the guest store.
 
 The last approved admin can be neither demoted nor removed. Pages are
 server-rendered and CSP-clean: no inline script or style.
@@ -32,7 +33,7 @@ import math
 
 from aiohttp import web
 
-from irc_lens.access_store import AccessStore
+from irc_lens.access_store import AccessStore, LastAdminError
 from irc_lens.web import app_session, setpw
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import (
@@ -55,6 +56,7 @@ SECONDS_PER_HOUR = 3600
 _MAX_UNTIL = 2**62
 MAX_CHANNEL_LEN = 200
 _NO_SUCH_USER = "No such user."
+_LAST_ADMIN = "At least one approved admin must remain."
 
 _DONE = {
     "user": "User saved.",
@@ -125,16 +127,6 @@ def _see_other(done: str) -> web.Response:
     return web.Response(status=303, headers={"Location": f"/admin?done={done}"})
 
 
-def _would_orphan_admins(store: AccessStore, email: str, role: str, state: str) -> bool:
-    """True if applying (role, state) to *email* leaves no approved admin."""
-    current = store.get_user(email)
-    is_admin_now = bool(
-        current and current["role"] == "admin" and current["state"] == "approved"
-    )
-    stays = role == "admin" and state == "approved"
-    return is_admin_now and not stays and store.admin_count() <= 1
-
-
 @allows_anonymous
 async def get_admin(request: web.Request) -> web.Response:
     _admin(request)
@@ -189,9 +181,12 @@ async def post_user(request: web.Request) -> web.Response:
     state = _target_state(mode, store.get_user(email))
     if state is None:
         return _refuse(request, _NO_SUCH_USER)
-    if _would_orphan_admins(store, email, role, state):
-        return _refuse(request, "At least one approved admin must remain.")
-    store.set_user(email, role=role, state=state, actor=admin.principal)
+    try:
+        store.set_user_keeping_admin(
+            email, role=role, state=state, actor=admin.principal
+        )
+    except LastAdminError:
+        return _refuse(request, _LAST_ADMIN)
     if mode == "invite":
         if not _invite_mail(request, email):
             return _refuse(request, "Mail is not available; the user was saved.")
@@ -210,9 +205,12 @@ async def post_remove(request: web.Request) -> web.Response:
     user = store.get_user(email)
     if user is None:
         return _refuse(request, _NO_SUCH_USER)
-    if _would_orphan_admins(store, email, user["role"], "removed"):
-        return _refuse(request, "At least one approved admin must remain.")
-    store.set_user(email, role=user["role"], state="removed", actor=admin.principal)
+    try:
+        store.set_user_keeping_admin(
+            email, role=user["role"], state="removed", actor=admin.principal
+        )
+    except LastAdminError:
+        return _refuse(request, _LAST_ADMIN)
     store.revoke_agent_credential(email, actor=admin.principal)
     await app_session.end_sessions_for_email(request.app, email)
     return _see_other("remove")
@@ -247,6 +245,21 @@ async def post_grant(request: web.Request) -> web.Response:
     return _see_other("grant")
 
 
+def _is_guest(request: web.Request, email: str) -> bool:
+    """Is *email* a guest the guest store knows? Fails closed (False).
+
+    A guest has no users row; their agent extension is keyed by the bare
+    address, which is what ``sessions._agent_extended`` reads.
+    """
+    guests = request.app.get("guest_store")
+    if guests is None or not email:
+        return False
+    try:
+        return bool(guests.get_guest(email))
+    except Exception:  # noqa: BLE001 - an unreadable store knows nobody
+        return False
+
+
 @allows_anonymous
 async def post_extension(request: web.Request) -> web.Response:
     admin = _admin(request)
@@ -254,7 +267,7 @@ async def post_extension(request: web.Request) -> web.Response:
     form = await request.post()
     email = _norm_email(form.get("email"))
     raw = str(form.get("hours") or "").strip().lower()
-    if store.get_user(email) is None:
+    if store.get_user(email) is None and not _is_guest(request, email):
         return _refuse(request, _NO_SUCH_USER)
     if raw == "clear":
         store.clear_extension(email, actor=admin.principal)
@@ -270,7 +283,7 @@ async def post_extension(request: web.Request) -> web.Response:
     )  # pylint: disable=protected-access
     if until >= _MAX_UNTIL:
         return _refuse(request, "That many hours is too large to store.")
-    store.set_extension(email, until=until, set_by=admin.principal)
+    store.set_extension(email, until=until, actor=admin.principal)
     return _see_other("extension")
 
 

@@ -68,12 +68,13 @@ def _factory(lines: list[str]):
     return make
 
 
-def _registry(lines, *, enabled: bool, store) -> SessionRegistry:
+def _registry(lines, *, enabled: bool, store, server_name: str = "") -> SessionRegistry:
     return SessionRegistry(
         factory=_factory(lines),
         sandbox_factory=_factory(lines),
         access_enabled=enabled,
         access_store=lambda: store,
+        server_name=server_name,
     )
 
 
@@ -120,3 +121,26 @@ def test_sandbox_sessions_are_not_given_mesh_grants(store):
     reg = _registry(lines, enabled=True, store=store)
     session = asyncio.run(reg.get_or_open(_identity(ADMIN), BACKEND_SANDBOX))
     assert not session.access_enforced
+
+
+def test_mesh_session_knows_its_own_agent_nick_from_lens_state(store):
+    # Derived from the verified identity's nick and the configured server
+    # name, never from anything the user types (finding 1).
+    reg = _registry([], enabled=True, store=store, server_name="lens")
+    session = asyncio.run(reg.get_or_open(_identity(USER), BACKEND_MESH))
+    assert session.own_agent_nick == "lens-pa_-alice"
+
+
+def test_member_session_from_registry_may_dm_own_agent_only(store):
+    lines: list[str] = []
+    reg = _registry(lines, enabled=True, store=store, server_name="lens")
+    session = asyncio.run(reg.get_or_open(_identity(USER), BACKEND_MESH))
+    for target in ("lens-pa_-alice", "lens-bob"):
+        asyncio.run(
+            session.execute(
+                ParsedCommand(type=CommandType.SEND, args=[target], text="hi")
+            )
+        )
+    assert [ln for ln in lines if ln.startswith("PRIVMSG")] == [
+        "PRIVMSG lens-pa_-alice :hi"
+    ]

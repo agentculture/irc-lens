@@ -1063,7 +1063,7 @@ async def get_healthz(_request: web.Request) -> web.Response:  # NOSONAR S7503
     return web.json_response({"ok": True})
 
 
-async def get_owner_metrics(request: web.Request) -> web.Response:  # NOSONAR S7503
+async def get_owner_metrics(request: web.Request) -> web.Response:
     """Owner-only guest-mode counters + sandbox-agent presence (JSON).
 
     Approved tier only. Deliberately NOT ``allows_anonymous``: the auth
@@ -1075,13 +1075,15 @@ async def get_owner_metrics(request: web.Request) -> web.Response:  # NOSONAR S7
         return denied
     from irc_lens.web.agent_auth import suppressed_refusals
 
+    access_counts = await asyncio.to_thread(
+        metrics.access_counts,
+        request.app.get(app_session.ACCESS_STORE),
+        suppressed_refusals=suppressed_refusals(request.app),
+    )
     return web.json_response(
         {
             "counters": metrics.get_metrics().snapshot(),
-            "access": metrics.access_counts(
-                request.app.get(app_session.ACCESS_STORE),
-                suppressed_refusals=suppressed_refusals(request.app),
-            ),
+            "access": access_counts,
             "agent": _owner_agent_state(request.app["registry"]),
         }
     )
