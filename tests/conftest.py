@@ -252,3 +252,44 @@ def _isolate_xdg_data_home(tmp_path_factory, monkeypatch):
     write to ~/.local/share/irc-lens/ on the developer's machine.
     """
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path_factory.mktemp("xdg-data")))
+
+
+@pytest.fixture
+def chosen_nicknames(monkeypatch):
+    """Every approved user the access store learns of has chosen a nickname.
+
+    For the suites that test grants, agents and admin (not the nickname
+    form, ``test_approved_nicknames.py``): a user added with ``set_user`` or
+    the one-time admin import gets the nickname ``helpers.TEST_NICKNAMES``
+    names for them (``u<n>`` for an address it does not list), as if they
+    had picked it on first sign-in. Opt in per module with
+    ``pytestmark = pytest.mark.usefixtures("chosen_nicknames")``.
+    """
+    import itertools
+
+    from helpers import TEST_NICKNAMES
+    from irc_lens.access_store import AccessStore
+
+    spare = itertools.count(1)
+    set_user = AccessStore.set_user
+    import_admins = AccessStore.import_admins
+
+    def ensure(store: AccessStore, email: str) -> None:
+        user = store.get_user(email)
+        if user is not None and user["nickname"] is None:
+            name = TEST_NICKNAMES.get(user["email"]) or f"u{next(spare)}"
+            store.set_nickname(user["email"], name, actor=None)
+
+    def patched_set_user(self, email, **kwargs):
+        set_user(self, email, **kwargs)
+        ensure(self, email)
+
+    def patched_import_admins(self, emails):
+        emails = list(emails)
+        count = import_admins(self, emails)
+        for email in emails:
+            ensure(self, email)
+        return count
+
+    monkeypatch.setattr(AccessStore, "set_user", patched_set_user)
+    monkeypatch.setattr(AccessStore, "import_admins", patched_import_admins)

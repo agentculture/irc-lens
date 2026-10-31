@@ -117,6 +117,12 @@ StoreGetter = Callable[[], Any]
 GUEST_RESERVATION_S = 120.0
 
 
+def _renamed(session: Any, nick: str) -> bool:
+    """True iff *session* is connected under a nick other than *nick*."""
+    current = getattr(session, "nick", None)
+    return isinstance(current, str) and current.casefold() != nick.casefold()
+
+
 class SessionRegistry:
     """Maps principal → Session, lazy-opening as needed."""
 
@@ -521,10 +527,19 @@ class SessionRegistry:
         if identity.principal.startswith(AGENT_PRINCIPAL_PREFIX):
             # Agent keys open only through get_or_open_agent (own set-up).
             raise ValueError("agent principals open via get_or_open_agent")
+        if not identity.nick:
+            # An approved user who has not chosen a nickname yet (email
+            # permissions on) gets no IRC session at all.
+            raise ValueError("no nick: choose a nickname first")
         if backend not in self._factories:
             raise ValueError(f"no session factory for backend {backend!r}")
         key = (identity.principal, backend)
         existing = self._sessions.get(key)
+        if existing is not None and _renamed(existing, identity.nick):
+            # Renamed (an admin or the CLI changed the nickname): reconnect
+            # under the new nick instead of reusing the old connection.
+            await self.close(*key)
+            existing = None
         if existing is not None:
             if backend == BACKEND_MESH or getattr(existing, "healthy", True):
                 return existing

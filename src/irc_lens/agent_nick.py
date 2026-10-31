@@ -7,15 +7,15 @@ namespace that no human nick can enter:
 * AgentIRC requires every nick to start with ``<server>-``, so the agent
   keeps its human's server prefix (the mesh name for an approved user, the
   sandbox name for a guest).
-* After the prefix comes :data:`AGENT_NICK_INFIX` (``pa_-``). A derived mesh
-  nick (``identity.derive_nick``) keeps only ``[a-z0-9-]``, so it never holds
-  ``_``; a guest nickname (``entry.sanitize_nickname``) keeps only
-  ``[a-z0-9_]``, so it never holds ``-`` after the prefix. A nick holding
-  both can be neither.
+* After the prefix comes :data:`AGENT_NICK_INFIX` (``pa_-``). A chosen
+  nickname, a guest's or an approved user's (``nickname.sanitize_nickname``),
+  keeps only ``[a-z0-9_]``, so it never holds ``-`` after the prefix; a legacy
+  derived mesh nick (``identity.derive_nick``, permissions off) keeps only
+  ``[a-z0-9-]``, so it never holds ``_``. A nick holding both can be neither.
 
-``testsrv-bob`` -> ``testsrv-pa_-bob``; ``sbx-gus`` -> ``sbx-pa_-gus``. The
-server name is the configured one, passed in by the caller: it may hold
-``-`` itself (``spark-1-bob`` -> ``spark-1-pa_-bob``).
+``testsrv-comet`` -> ``testsrv-pa_-comet``; ``sbx-gus`` -> ``sbx-pa_-gus``.
+The server name is the configured one, passed in by the caller: it may hold
+``-`` itself (``spark-1-comet`` -> ``spark-1-pa_-comet``).
 
 The nick is stored with the agent's credential when it is issued
 (``web/agent_auth.py``). Ownership is never inferred from nick text: the

@@ -44,6 +44,9 @@ from test_agent_auth import (  # noqa: F401 - fixtures + helpers
 )
 from test_session_routing import _config
 
+# Every approved user has chosen a nickname (q14); see conftest.
+pytestmark = pytest.mark.usefixtures("chosen_nicknames")
+
 _EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
 
 

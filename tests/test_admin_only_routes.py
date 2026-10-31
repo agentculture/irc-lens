@@ -14,6 +14,9 @@ from irc_lens.web import routes
 from irc_lens.web.identity import ROLE_ADMIN, TIER_APPROVED, TIER_GUEST, Identity
 from test_access_approval import ALICE, BOB, Env, _build
 
+# Every approved user has chosen a nickname (q14); see conftest.
+pytestmark = pytest.mark.usefixtures("chosen_nicknames")
+
 ADMIN_ONLY = [
     ("POST", "/sandbox/enter"),
     ("POST", "/sandbox/leave"),

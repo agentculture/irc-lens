@@ -47,15 +47,18 @@ from mcp.client.streamable_http import streamable_http_client
 
 from _agentirc_server import AgentIRCTestServer
 from _jwks_server import FakeJWKS
+from helpers import mesh_nick_of
 from irc_lens import config as config_module
 from irc_lens.agent_nick import agent_nick_for
 from irc_lens.mail import RecordingAdapter
 from irc_lens.session import Session
 from irc_lens.web import app_session, csrf, entry, make_app, setpw
-from irc_lens.web.identity import derive_nick
 from irc_lens.web.sessions import BACKEND_MESH
 from test_agent_sessions import RawClient, settle
 from test_session_routing import _config, consent  # noqa: F401 - fixture
+
+# Every approved user has chosen a nickname (q14); see conftest.
+pytestmark = pytest.mark.usefixtures("chosen_nicknames")
 
 ADMIN = "root@example.com"
 A = "ann@example.org"
@@ -71,7 +74,7 @@ SHARED = "#shared"
 _TOKEN_RE = re.compile(r'data-testid="agent-token"[^>]*>([A-Za-z0-9_-]+)<')
 _MARKER_RE = re.compile(r"XMARK-[a-z0-9]+-\d+")
 
-NICK = {e: derive_nick("testsrv", e) for e in (ADMIN, A, B)}
+NICK = {e: mesh_nick_of(e) for e in (ADMIN, A, B)}
 AGENT = {e: agent_nick_for(n, "testsrv") for e, n in NICK.items()}
 G_NICK = "sbx-gus"
 G_AGENT = agent_nick_for(G_NICK, "sbx")

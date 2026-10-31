@@ -26,6 +26,9 @@ from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.identity import ROLE_ADMIN, TIER_APPROVED, Identity
 from test_session_routing import _config
 
+# Every approved user has chosen a nickname (q14); see conftest.
+pytestmark = pytest.mark.usefixtures("chosen_nicknames")
+
 ALICE = "alice@example.com"
 BOB = "bob@example.org"
 SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}

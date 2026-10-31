@@ -72,7 +72,7 @@ from irc_lens.agent_nick import agent_nick_for, is_agent_nick, server_name_for
 from irc_lens.commands import CommandType, ParsedCommand
 from irc_lens.session import LensConnectionLost
 from irc_lens.web import app_session, input_gate
-from irc_lens.web.identity import TIER_APPROVED, derive_nick
+from irc_lens.web.identity import TIER_APPROVED, nick_for_user
 from irc_lens.web.sessions import (
     BACKEND_MESH,
     BACKEND_SANDBOX,
@@ -209,10 +209,13 @@ def human_state(app: web.Application, principal: Any) -> HumanState | None:
     """Blocking: the human behind *principal*, or None if unknown."""
     config = app["config"]
     if principal.tier == TIER_APPROVED:
+        user = app_session.approved_user(app, principal.email)
         try:
-            nick = derive_nick(config.server_name, principal.email)
+            nick = nick_for_user(config.server_name, principal.email, user)
         except ValueError:
             return None
+        if user is None or not nick:
+            return None  # no longer approved, or no nickname chosen yet
         return HumanState(principal.email, BACKEND_MESH, nick)
     store = app.get("guest_store")
     if store is None or not config.guest_enabled:

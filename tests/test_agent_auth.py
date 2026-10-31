@@ -47,9 +47,13 @@ from irc_lens.config import (
 )
 from irc_lens.session import Session
 from irc_lens.web import agent_auth, app_session, csrf, make_app, routes
+from helpers import mesh_nick_of
 from irc_lens.web.identity import derive_nick
 from irc_lens.web.sessions import BACKEND_MESH, BACKEND_SANDBOX
 from test_session_routing import _config, consent  # noqa: F401 - fixture
+
+# Every approved user has chosen a nickname (q14); see conftest.
+pytestmark = pytest.mark.usefixtures("chosen_nicknames")
 
 ADMIN = "alice@example.com"
 MEMBER = "bob@example.org"
@@ -322,9 +326,7 @@ async def test_token_shown_once_and_stored_only_as_hash(env: Env) -> None:
         rows = con.execute("SELECT token_hash, nick FROM agent_credentials").fetchall()
     assert len(rows) == 1
     assert rows[0][0] != token
-    assert rows[0][1] == agent_auth.agent_nick_for(
-        derive_nick("testsrv", MEMBER), "testsrv"
-    )
+    assert rows[0][1] == agent_auth.agent_nick_for(mesh_nick_of(MEMBER), "testsrv")
     # Not shown again: a later page view carries no token.
     page = await env.client.get("/agent-credential", headers=env.jwt(MEMBER))
     text = await page.text()
@@ -375,7 +377,7 @@ async def test_valid_credential_reaches_tool(env: Env) -> None:
     token = await env.issue(env.jwt(MEMBER))
     payload = await env.whoami(token)
     assert payload["result"] == {
-        "nick": agent_auth.agent_nick_for(derive_nick("testsrv", MEMBER), "testsrv"),
+        "nick": agent_auth.agent_nick_for(mesh_nick_of(MEMBER), "testsrv"),
         "tier": "approved",
     }
     assert env.calls == ["whoami"]

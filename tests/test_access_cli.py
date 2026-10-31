@@ -32,6 +32,7 @@ def test_users_add_role_remove(db, capsys):
         "email": EMAIL,
         "role": "member",
         "state": "approved",
+        "nickname": None,
     }
     assert run(db, "users", "role", EMAIL, "admin") == 0
     assert AccessStore(db).get_user(EMAIL)["role"] == "admin"
@@ -137,6 +138,7 @@ def test_users_role_and_remove_keep_the_last_admin(db, capsys):
         "email": EMAIL,
         "role": "admin",
         "state": "approved",
+        "nickname": None,
     }
     # With a second admin, either change is allowed.
     assert run(db, "users", "add", OTHER, "--role", "admin") == 0
