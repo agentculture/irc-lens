@@ -104,6 +104,9 @@ on `#Ops`) changes nothing and says "no such grant": the CLI exits 1 and
 `/admin` answers 400. A grant is one row per person and channel; setting it
 again changes its level in place.
 
+Like `/admin`, `users role`, `users add` and `users remove` refuse a change
+that would leave no approved admin.
+
 Every verb opens the store, makes one change and exits. Output names only the
 address you typed, plus counts, channels and levels.
 
@@ -137,7 +140,9 @@ an opaque bearer token that their agent sends to the MCP endpoint
   closed. A human never has two active credentials.
 - A credential expires after `auth.email_permissions.agent_credential_ttl_days`
   days (default 30). It can also be revoked from the CLI
-  (`irc-lens agents revoke`) or by removing the person.
+  (`irc-lens agents revoke <email>`, which revokes both the approved and the
+  guest credential of that address) or by removing the person. The live
+  agent connection is closed by the next agent sweep.
 - It is bound to its human through a credential key: the email for an approved
   member, `guest:<email>` for a guest, so a guest's credential can never
   resolve to a member's rows even when the two share an address.

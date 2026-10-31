@@ -21,6 +21,8 @@ CHANNEL_KIND = "channel"
 STATE_APPROVED = "approved"
 STATE_REMOVED = "removed"
 SECONDS_PER_DAY = 86400
+#: A guest's agent credential is keyed by this prefix plus the email.
+GUEST_KEY_PREFIX = "guest:"
 
 
 def _open_store(args: argparse.Namespace):
@@ -67,10 +69,28 @@ def _check_role(role: str) -> None:
         )
 
 
+def _keep_an_admin(store, email: str, role: str, state: str) -> None:
+    """Refuse a change that would leave no approved admin (as /admin does)."""
+    current = store.get_user(email)
+    is_admin_now = bool(
+        current and current["role"] == "admin" and current["state"] == STATE_APPROVED
+    )
+    stays = role == "admin" and state == STATE_APPROVED
+    if is_admin_now and not stays and store.admin_count() <= 1:
+        raise AfiError(
+            code=EXIT_USER_ERROR,
+            message="at least one approved admin must remain",
+            remediation="make another user an admin first: "
+            "irc-lens users add <email> --role admin",
+        )
+
+
 def cmd_users_add(args: argparse.Namespace) -> int:
     _check_role(args.role)
     email = _email(args)
-    _open_store(args).set_user(email, role=args.role, state=STATE_APPROVED, actor=None)
+    store = _open_store(args)
+    _keep_an_admin(store, email, args.role, STATE_APPROVED)
+    store.set_user(email, role=args.role, state=STATE_APPROVED, actor=None)
     print(f"added {email} as {args.role}")
     return 0
 
@@ -80,6 +100,7 @@ def cmd_users_role(args: argparse.Namespace) -> int:
     email = _email(args)
     store = _open_store(args)
     user = _need_user(store, email)
+    _keep_an_admin(store, email, args.role, user["state"])
     store.set_user(email, role=args.role, state=user["state"], actor=None)
     print(f"{email} is now {args.role}")
     return 0
@@ -89,6 +110,7 @@ def cmd_users_remove(args: argparse.Namespace) -> int:
     email = _email(args)
     store = _open_store(args)
     user = _need_user(store, email)
+    _keep_an_admin(store, email, user["role"], STATE_REMOVED)
     store.set_user(email, role=user["role"], state=STATE_REMOVED, actor=None)
     n = store.revoke_agent_credential(email, actor=None)
     print(f"removed {email} ({n} agent credential(s) revoked)")
@@ -142,8 +164,12 @@ def cmd_agents_list(args: argparse.Namespace) -> int:
 
 
 def cmd_agents_revoke(args: argparse.Namespace) -> int:
+    """Revoke *email*'s agent under both keys: approved (``<email>``) and
+    guest (``guest:<email>``), so a guest's agent is reachable too."""
     email = _email(args)
-    n = _open_store(args).revoke_agent_credential(email, actor=None)
+    store = _open_store(args)
+    n = store.revoke_agent_credential(email, actor=None)
+    n += store.revoke_agent_credential(GUEST_KEY_PREFIX + email, actor=None)
     print(f"revoked {n} agent credential(s) for {email}")
     return 0
 
@@ -220,7 +246,13 @@ def _build_grants(sub) -> None:
 
 def _build_agents(sub) -> None:
     _verb(sub, "list", "Show a user's agent status.", cmd_agents_list, "email")
-    _verb(sub, "revoke", "Revoke a user's agent.", cmd_agents_revoke, "email")
+    _verb(
+        sub,
+        "revoke",
+        "Revoke a person's agent (approved and guest credentials).",
+        cmd_agents_revoke,
+        "email",
+    )
 
 
 def register_into(app) -> None:
