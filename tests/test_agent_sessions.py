@@ -677,3 +677,23 @@ def test_names_me_still_ignores_other_words() -> None:
     agent = agent_sessions.AgentSession.__new__(agent_sessions.AgentSession)
     agent.session = _NickOnly(MEMBER_AGENT)
     assert not agent._names_me("hello \x02everyone\x02 \u200b here")
+
+
+def test_ambiguous_agent_nick_maps_to_nobody(tmp_path: Path, caplog) -> None:
+    """Low finding: two humans can derive the same agent nick (MEMBER and
+    NAMESAKE here). A flag against that nick must not be attributed to
+    either: the mapping refuses, and the log names no address."""
+    from irc_lens.access_store import AccessStore
+
+    assert derive_nick("testsrv", NAMESAKE) == MEMBER_NICK
+    store = AccessStore(tmp_path / "guests.db")
+    store.issue_agent_credential(MEMBER, MEMBER_AGENT, ttl=3600, actor=None)
+    assert agent_sessions.human_for_agent_nick(store, MEMBER_AGENT) == MEMBER
+    store.issue_agent_credential(MEMBER, MEMBER_AGENT, ttl=3600, actor=None)
+    assert agent_sessions.human_for_agent_nick(store, MEMBER_AGENT) == MEMBER
+    store.issue_agent_credential(NAMESAKE, MEMBER_AGENT, ttl=3600, actor=None)
+    with caplog.at_level("WARNING"):
+        assert agent_sessions.human_for_agent_nick(store, MEMBER_AGENT) is None
+    assert "ambiguous" in caplog.text
+    assert MEMBER not in caplog.text and NAMESAKE not in caplog.text
+    assert "example" not in caplog.text

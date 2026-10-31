@@ -26,6 +26,7 @@ Tables:
 from __future__ import annotations
 
 import hashlib
+import logging
 import secrets
 import sqlite3
 import time
@@ -34,6 +35,8 @@ from pathlib import Path
 from typing import Callable, Iterable, Iterator
 
 from irc_lens.guest_store import email_hash
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_ACTOR = "system"
 
@@ -300,17 +303,27 @@ class AccessStore:
         return rows[0] if rows else None
 
     def agent_key_for_nick(self, nick: str) -> str | None:
-        """The credential key whose agent was issued *nick* (newest row).
+        """The credential key whose agent was issued *nick*.
 
         Lens state, not nick text: revoked and expired rows still answer,
         so a flag raised against an agent after its credential lapsed still
-        reaches its human.
+        reaches its human. Two humans can derive the same agent nick (a
+        ``derive_nick`` collision); when rows for *nick* belong to more than
+        one key the answer is None, so a flag is never attributed to the
+        wrong human. That case is logged without any address.
         """
         rows = self._all(
-            "SELECT email FROM agent_credentials WHERE nick = ? COLLATE NOCASE "
-            "ORDER BY created DESC, rowid DESC LIMIT 1",
+            "SELECT DISTINCT email FROM agent_credentials "
+            "WHERE nick = ? COLLATE NOCASE",
             ((nick or "").strip(),),
         )
+        if len(rows) > 1:
+            logger.warning(
+                "agent nick is ambiguous: issued to %d credential keys; "
+                "not mapping it to a human",
+                len(rows),
+            )
+            return None
         return rows[0][0] if rows else None
 
     def guest_credential_emails(self) -> list[str]:

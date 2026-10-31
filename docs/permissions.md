@@ -158,7 +158,10 @@ an opaque bearer token that their agent sends to the MCP endpoint
 The agent's nick is derived from its human's nick and lives in a reserved
 namespace, `<server>-pa_-<name>` (`src/irc_lens/agent_nick.py`), which no human
 nick can enter. Ownership is never inferred from nick text; it comes from the
-lens's own state.
+lens's own state. Two people can derive the same nick; if credentials for
+one agent nick were issued to more than one person, a flag raised against
+that nick is not mapped to anyone (it is logged, without an address), so it
+is never attributed to the wrong human. Ban by address instead.
 
 ## MCP endpoint
 
