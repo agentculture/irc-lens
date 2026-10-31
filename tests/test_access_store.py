@@ -304,3 +304,65 @@ def test_set_user_refuses_an_email_with_a_colon(store: AccessStore) -> None:
     # 'guest:<email>' is the guest credential key; no approved user may look like one.
     with pytest.raises(ValueError):
         store.set_user("guest:" + ALICE, role="member", state="approved", actor=None)
+
+
+# -- last-admin guard: one atomic operation (review 2, finding 9) ------------------
+
+
+def test_demoting_the_last_admin_raises_a_typed_error(store: AccessStore) -> None:
+    from irc_lens.access_store import LastAdminError
+
+    store.set_user(ALICE, role="admin", state="approved", actor=None)
+    with pytest.raises(LastAdminError):
+        store.set_user_keeping_admin(ALICE, role="member", state="approved", actor=None)
+
+
+def test_refused_demotion_changes_nothing(store: AccessStore) -> None:
+    from irc_lens.access_store import LastAdminError
+
+    store.set_user(ALICE, role="admin", state="approved", actor=None)
+    with pytest.raises(LastAdminError):
+        store.set_user_keeping_admin(ALICE, role="admin", state="removed", actor=None)
+    assert store.admin_count() == 1
+
+
+def test_demotion_with_another_admin_is_allowed(store: AccessStore) -> None:
+    store.set_user(ALICE, role="admin", state="approved", actor=None)
+    store.set_user(BOB, role="admin", state="approved", actor=None)
+    store.set_user_keeping_admin(ALICE, role="member", state="approved", actor=None)
+    assert store.get_user(ALICE)["role"] == "member"
+
+
+def test_keeping_admin_change_of_a_member_is_unguarded(store: AccessStore) -> None:
+    store.set_user(ALICE, role="admin", state="approved", actor=None)
+    store.set_user_keeping_admin(BOB, role="member", state="removed", actor=None)
+    assert store.get_user(BOB)["state"] == "removed"
+
+
+def test_concurrent_demotions_never_leave_zero_admins(db: Path) -> None:
+    """Two admins demote each other at once: the check and the write are one
+    BEGIN IMMEDIATE transaction, so exactly one demotion wins."""
+    from irc_lens.access_store import LastAdminError
+
+    seed = AccessStore(db)
+    seed.set_user(ALICE, role="admin", state="approved", actor=None)
+    seed.set_user(BOB, role="admin", state="approved", actor=None)
+    barrier = threading.Barrier(2)
+    refused: list[str] = []
+
+    def demote(email: str) -> None:
+        store = AccessStore(db)
+        barrier.wait()
+        try:
+            store.set_user_keeping_admin(
+                email, role="member", state="approved", actor=None
+            )
+        except LastAdminError:
+            refused.append(email)
+
+    threads = [threading.Thread(target=demote, args=(e,)) for e in (ALICE, BOB)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert (AccessStore(db).admin_count(), len(refused)) == (1, 1)

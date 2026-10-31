@@ -72,8 +72,25 @@ CREATE TABLE IF NOT EXISTS admin_imports (email_hash TEXT PRIMARY KEY);
 READ_CACHE_TTL_S = 5.0
 
 
+ROLE_ADMIN = "admin"
+STATE_APPROVED = "approved"
+_ADMIN_COUNT_SQL = "SELECT COUNT(*) FROM users WHERE role='admin' AND state='approved'"
+
+
+class LastAdminError(ValueError):
+    """A change would leave the store without an approved admin."""
+
+
 def _norm(email: str) -> str:
     return email.strip().lower()
+
+
+def _checked_email(email: str) -> str:
+    email = _norm(email)
+    if ":" in email:
+        # 'guest:<email>' is the guest credential key; refuse lookalikes.
+        raise ValueError("an email address may not contain ':'")
+    return email
 
 
 def _hash_token(token: str) -> str:
@@ -179,17 +196,50 @@ class AccessStore:
 
     # -- users & roles ---------------------------------------------------
     def set_user(self, email: str, *, role: str, state: str, actor: str | None) -> None:
-        email = _norm(email)
-        if ":" in email:
-            # 'guest:<email>' is the guest credential key; refuse lookalikes.
-            raise ValueError("an email address may not contain ':'")
+        email = _checked_email(email)
         with self._tx() as con:
-            con.execute(
-                "INSERT INTO users (email, role, state) VALUES (?,?,?) "
-                "ON CONFLICT(email) DO UPDATE SET role=excluded.role, state=excluded.state",
-                (email, role, state),
-            )
-            self._audit(con, actor, "user.set", f"{email_hash(email)}:{role}:{state}")
+            self._upsert_user(con, email, role, state, actor)
+
+    def set_user_keeping_admin(
+        self, email: str, *, role: str, state: str, actor: str | None
+    ) -> None:
+        """Set *email*'s role and state unless that leaves no approved admin.
+
+        The check and the write are one ``BEGIN IMMEDIATE`` transaction, so
+        two concurrent demotions can never both pass it. Raises
+        :class:`LastAdminError` (and changes nothing) when *email* is the
+        last approved admin and would stop being one. The one guard behind
+        both ``/admin`` and the ``irc-lens users`` verbs.
+        """
+        email = _checked_email(email)
+        with self._tx() as con:
+            row = con.execute(
+                "SELECT role, state FROM users WHERE email=?", (email,)
+            ).fetchone()
+            was_admin = row is not None and tuple(row) == (ROLE_ADMIN, STATE_APPROVED)
+            stays = (role, state) == (ROLE_ADMIN, STATE_APPROVED)
+            if was_admin and not stays and self._admins_in(con) <= 1:
+                raise LastAdminError("at least one approved admin must remain")
+            self._upsert_user(con, email, role, state, actor)
+
+    @staticmethod
+    def _admins_in(con: sqlite3.Connection) -> int:
+        return con.execute(_ADMIN_COUNT_SQL).fetchone()[0]
+
+    def _upsert_user(
+        self,
+        con: sqlite3.Connection,
+        email: str,
+        role: str,
+        state: str,
+        actor: str | None,
+    ) -> None:
+        con.execute(
+            "INSERT INTO users (email, role, state) VALUES (?,?,?) "
+            "ON CONFLICT(email) DO UPDATE SET role=excluded.role, state=excluded.state",
+            (email, role, state),
+        )
+        self._audit(con, actor, "user.set", f"{email_hash(email)}:{role}:{state}")
 
     def get_user(self, email: str) -> dict[str, str] | None:
         email = _norm(email)
@@ -210,9 +260,7 @@ class AccessStore:
 
     def admin_count(self) -> int:
         """How many users are approved admins right now."""
-        return self._all(
-            "SELECT COUNT(*) FROM users WHERE role='admin' AND state='approved'"
-        )[0][0]
+        return self._all(_ADMIN_COUNT_SQL)[0][0]
 
     # -- grants ------------------------------------------------------------
     def set_grant(

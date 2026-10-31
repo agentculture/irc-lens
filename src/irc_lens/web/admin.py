@@ -33,7 +33,7 @@ import math
 
 from aiohttp import web
 
-from irc_lens.access_store import AccessStore
+from irc_lens.access_store import AccessStore, LastAdminError
 from irc_lens.web import app_session, setpw
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import (
@@ -56,6 +56,7 @@ SECONDS_PER_HOUR = 3600
 _MAX_UNTIL = 2**62
 MAX_CHANNEL_LEN = 200
 _NO_SUCH_USER = "No such user."
+_LAST_ADMIN = "At least one approved admin must remain."
 
 _DONE = {
     "user": "User saved.",
@@ -126,16 +127,6 @@ def _see_other(done: str) -> web.Response:
     return web.Response(status=303, headers={"Location": f"/admin?done={done}"})
 
 
-def _would_orphan_admins(store: AccessStore, email: str, role: str, state: str) -> bool:
-    """True if applying (role, state) to *email* leaves no approved admin."""
-    current = store.get_user(email)
-    is_admin_now = bool(
-        current and current["role"] == "admin" and current["state"] == "approved"
-    )
-    stays = role == "admin" and state == "approved"
-    return is_admin_now and not stays and store.admin_count() <= 1
-
-
 @allows_anonymous
 async def get_admin(request: web.Request) -> web.Response:
     _admin(request)
@@ -190,9 +181,12 @@ async def post_user(request: web.Request) -> web.Response:
     state = _target_state(mode, store.get_user(email))
     if state is None:
         return _refuse(request, _NO_SUCH_USER)
-    if _would_orphan_admins(store, email, role, state):
-        return _refuse(request, "At least one approved admin must remain.")
-    store.set_user(email, role=role, state=state, actor=admin.principal)
+    try:
+        store.set_user_keeping_admin(
+            email, role=role, state=state, actor=admin.principal
+        )
+    except LastAdminError:
+        return _refuse(request, _LAST_ADMIN)
     if mode == "invite":
         if not _invite_mail(request, email):
             return _refuse(request, "Mail is not available; the user was saved.")
@@ -211,9 +205,12 @@ async def post_remove(request: web.Request) -> web.Response:
     user = store.get_user(email)
     if user is None:
         return _refuse(request, _NO_SUCH_USER)
-    if _would_orphan_admins(store, email, user["role"], "removed"):
-        return _refuse(request, "At least one approved admin must remain.")
-    store.set_user(email, role=user["role"], state="removed", actor=admin.principal)
+    try:
+        store.set_user_keeping_admin(
+            email, role=user["role"], state="removed", actor=admin.principal
+        )
+    except LastAdminError:
+        return _refuse(request, _LAST_ADMIN)
     store.revoke_agent_credential(email, actor=admin.principal)
     await app_session.end_sessions_for_email(request.app, email)
     return _see_other("remove")
