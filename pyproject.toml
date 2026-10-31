@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "irc-lens"
-version = "0.18.0"
+version = "0.18.1"
 description = "Web chat console for CULTURE.DEV — the reactive, Playwright-driveable lens on the AgentIRC mesh behind chat.culture.dev."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -28,7 +28,7 @@ dependencies = [
     "jinja2>=3.1",
     "pyyaml>=6.0",
     "pyjwt[crypto]>=2.8",
-    "agentfront[mcp]>=0.21.0",
+    "agentfront[mcp]>=0.21.2",
     "argon2-cffi>=25.1.0",
 ]
 

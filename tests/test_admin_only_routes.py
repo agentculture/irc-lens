@@ -106,3 +106,50 @@ def test_backend_for_guest_is_sandbox_and_admin_toggle_honoured(env: Env) -> Non
     assert backend == routes.BACKEND_SANDBOX
     _, backend = routes._backend_for(_Req(admin, cfg))
     assert backend == routes.BACKEND_MESH
+
+
+async def _console_html(env: Env, email: str) -> str:
+    r = await env.client.get("/", headers=env.jwt(email))
+    assert r.status == 200
+    return await r.text()
+
+
+async def test_member_console_has_no_guest_view_control(env: Env) -> None:
+    html = await _console_html(env, BOB)
+    assert 'hx-post="/sandbox/enter"' not in html
+    assert ">Guest view<" not in html
+
+
+async def test_member_palette_has_no_sandbox_command(env: Env) -> None:
+    html = await _console_html(env, BOB)
+    assert 'data-cmd="/sandbox"' not in html
+
+
+async def test_admin_console_has_guest_view_control(env: Env) -> None:
+    html = await _console_html(env, ALICE)
+    assert 'hx-post="/sandbox/enter"' in html
+    assert ">Guest view<" in html
+
+
+async def test_admin_back_to_mesh_after_entering(env: Env) -> None:
+    await _call(env, "POST", "/sandbox/enter", env.jwt(ALICE))
+    html = await _console_html(env, ALICE)
+    assert 'hx-post="/sandbox/leave"' in html
+
+
+def test_may_use_sandbox_view_follows_the_route_rule() -> None:
+    admin = Identity("a", "n", "s", tier=TIER_APPROVED, role=ROLE_ADMIN)
+    member = Identity("b", "n", "s", tier=TIER_APPROVED, role="member")
+    on = {"access_enabled": True, "guest_enabled": True}
+    assert routes.may_use_sandbox_view(admin, **on)
+    assert not routes.may_use_sandbox_view(member, **on)
+    assert not routes.may_use_sandbox_view(None, **on)
+
+
+def test_may_use_sandbox_view_legacy_mode_unchanged() -> None:
+    member = Identity("b", "n", "s", tier=TIER_APPROVED)
+    legacy = {"access_enabled": False, "guest_enabled": True}
+    assert routes.may_use_sandbox_view(member, **legacy)
+    assert not routes.may_use_sandbox_view(
+        member, access_enabled=False, guest_enabled=False
+    )

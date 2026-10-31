@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-31
+
+### Fixed
+
+- The console no longer shows the Guest view button, the /sandbox palette and help entry, or accepts the /sandbox command for non-admin members when email permissions are on; the enter and leave routes were already admin-only. One helper, may_use_sandbox_view, now decides for the routes and the page. Legacy mode is unchanged.
+
 ## [0.18.0] - 2026-10-31
 
 ### Added
