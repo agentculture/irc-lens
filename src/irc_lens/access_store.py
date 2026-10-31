@@ -513,6 +513,11 @@ class AccessStore:
             )
 
     # -- audit ---------------------------------------------------------------
+    def audit_action_counts(self) -> dict[str, int]:
+        """``{action: rows}`` over the audit table: one GROUP BY query."""
+        rows = self._all("SELECT action, COUNT(*) FROM audit GROUP BY action")
+        return {action: count for action, count in rows}
+
     def audit_rows(self) -> list[tuple[int, str, str, str]]:
         return self._all(
             "SELECT ts, actor_hash, action, target FROM audit ORDER BY rowid"

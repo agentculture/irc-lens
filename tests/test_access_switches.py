@@ -493,6 +493,44 @@ def test_access_counts_are_plain_integers(tmp_path: Path) -> None:
     assert all(type(v) is int for v in counts.values())
 
 
+def test_access_counts_never_read_the_whole_audit(tmp_path: Path, monkeypatch) -> None:
+    # Review 2, finding 8: one GROUP BY query, not every audit row.
+    store = _init_store(tmp_path / "a.db")
+    store.set_grant(MEMBER, "channel", "#x", "read", actor=ADMIN)
+
+    def whole_table():
+        raise AssertionError("access_counts read the whole audit table")
+
+    monkeypatch.setattr(store, "audit_rows", whole_table)
+    assert lens_metrics.access_counts(store)["grant_changes"] == 1
+
+
+def test_audit_action_counts_group_by_action(tmp_path: Path) -> None:
+    store = _init_store(tmp_path / "a.db")
+    store.set_grant(MEMBER, "channel", "#x", "read", actor=ADMIN)
+    store.set_grant(MEMBER, "channel", "#y", "read", actor=ADMIN)
+    assert store.audit_action_counts()["grant.set"] == 2
+
+
+async def test_owner_metrics_count_access_off_the_event_loop(
+    live: Env, monkeypatch
+) -> None:
+    import threading
+
+    seen: list[str] = []
+    real = lens_metrics.access_counts
+
+    def spy(*args, **kwargs):
+        seen.append(threading.current_thread().name)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(lens_metrics, "access_counts", spy)
+    r = await live.client.get("/owner/metrics", headers=live.jwt(ADMIN))
+    assert r.status == 200
+    assert seen
+    assert threading.main_thread().name not in seen
+
+
 async def test_owner_metrics_expose_access_counts_only(live: Env) -> None:
     await live.rpc({})
     live.access.set_grant(MEMBER, "channel", "#lab", "read", actor=ADMIN)
