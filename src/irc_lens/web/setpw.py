@@ -260,5 +260,5 @@ async def post_token(request: web.Request) -> web.Response:
         return _invalid()
     await asyncio.to_thread(store.set_password, email, password)
     ended = await end_sessions_for_email(request.app, email)
-    logger.info("password set principal=%s sessions_ended=%d", email, ended)
+    logger.info("password set sessions_ended=%d", ended)
     return _page("done")

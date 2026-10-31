@@ -34,6 +34,7 @@ from jwt.algorithms import RSAAlgorithm
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
+from irc_lens.guest_store import email_hash
 from irc_lens.web import app_session
 from irc_lens.web.identity import (
     ANONYMOUS_IDENTITY,
@@ -400,13 +401,18 @@ def _adopt_app_session(request: web.Request) -> bool:
         return False
     request["identity"] = app_identity
     logger.info(
-        "auth=ok via=app-session principal=%s nick=%s method=%s path=%s",
-        app_identity.principal,
+        "auth=ok via=app-session who=%s nick=%s method=%s path=%s",
+        _who(app_identity.principal),
         app_identity.nick,
         request.method,
         request.path,
     )
     return True
+
+
+def _who(principal: str) -> str:
+    """Short, address-free handle for an audit line: a hash prefix."""
+    return email_hash(principal)[:12]
 
 
 @dataclass(frozen=True)
@@ -482,8 +488,8 @@ async def _via_access_jwt(
         )
     request["identity"] = identity
     logger.info(
-        "auth=ok principal=%s nick=%s method=%s path=%s",
-        identity.principal,
+        "auth=ok who=%s nick=%s method=%s path=%s",
+        _who(identity.principal),
         identity.nick,
         request.method,
         request.path,

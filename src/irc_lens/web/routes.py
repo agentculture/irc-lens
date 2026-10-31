@@ -1087,6 +1087,7 @@ async def get_owner_metrics(request: web.Request) -> web.Response:  # NOSONAR S7
     return web.json_response(
         {
             "counters": metrics.get_metrics().snapshot(),
+            "access": metrics.access_counts(request.app.get(app_session.ACCESS_STORE)),
             "agent": _owner_agent_state(request.app["registry"]),
         }
     )
