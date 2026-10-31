@@ -124,11 +124,18 @@ refused for having no admin does not mark it.
 
 An admin can invite a person instead of approving them outright. The invite
 stores the address as `invited` and mails the existing set-password link. An
-invited person is not approved: they have no access until they finish the
-normal app sign-in (set a password, enter the emailed code). The first
-successful sign-in promotes them from `invited` to `approved`
-(`promote_on_signin` in `src/irc_lens/web/app_session.py`). The sign-in
-mechanics themselves are in [auth.md](auth.md).
+invited person is not approved: they have no access until they finish a
+verified sign-in. The first one promotes them from `invited` to `approved`
+(`promote_on_signin` in `src/irc_lens/web/app_session.py`), whichever way
+they sign in:
+
+- the app sign-in (set a password, enter the emailed code), or
+- with app sign-in off, the password step followed by `/login`, or any
+  other request carrying a valid Cloudflare Access JWT for their address
+  (`approved_on_signin`, called by the Access middleware).
+
+A `removed` person is never promoted, and in the admins-only state (below)
+nobody is. The sign-in mechanics themselves are in [auth.md](auth.md).
 
 ## Agent credential
 

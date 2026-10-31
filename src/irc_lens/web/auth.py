@@ -462,7 +462,8 @@ def _store_decider(request: web.Request, ctx: _AccessContext):
     """Per-request approval lookup when email permissions are on, else None."""
     if not ctx.access_enabled:
         return None
-    return lambda email: app_session.approved_user(request.app, email)
+    # A valid Access JWT is a verified sign-in: it also finishes an invite.
+    return lambda email: app_session.approved_on_signin(request.app, email)
 
 
 async def _via_access_jwt(
