@@ -110,9 +110,9 @@ def test_feature_off_leaves_sessions_unrestricted(store):
 
 def test_enabled_without_store_refuses_to_open(store):
     reg = _registry([], enabled=True, store=None)
-    identity = _identity(USER)
+    opening = reg.get_or_open(_identity(USER), BACKEND_MESH)
     with pytest.raises(PermissionError):
-        asyncio.run(reg.get_or_open(identity, BACKEND_MESH))
+        asyncio.run(opening)
 
 
 def test_sandbox_sessions_are_not_given_mesh_grants(store):
