@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-10-30T19:16:30Z",
-  "updated": "2026-10-31T05:04:02Z",
+  "updated": "2026-10-31T05:21:27Z",
   "claims": [
     {
       "id": "c1",
@@ -1105,6 +1105,28 @@
       ],
       "origin": "llm",
       "status": "approved"
+    },
+    {
+      "id": "l3",
+      "code": "control-absent",
+      "what": "t19 (agentfront): tests were written first but their RED step was only an import error at collection (new modules absent), not failing assertions",
+      "skipped_check": "see each new test fail on its own assertion before implementing",
+      "refs": [
+        "t19"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l4",
+      "code": "control-absent",
+      "what": "t19 (agentfront): pre-commit hooks not run (not installed in the worktree); black/isort/flake8/markdownlint run by hand, pylint warnings left",
+      "skipped_check": "run the repo's pre-commit hooks",
+      "refs": [
+        "t19"
+      ],
+      "origin": "llm",
+      "status": "proposed"
     }
   ],
   "obligations": [

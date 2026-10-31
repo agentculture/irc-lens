@@ -5,7 +5,7 @@
   "schema_version": 5,
   "status": "exported",
   "created": "2026-10-31T05:04:19Z",
-  "updated": "2026-10-31T05:12:16Z",
+  "updated": "2026-10-31T06:39:10Z",
   "targets": [
     {
       "id": "c1",
@@ -707,7 +707,8 @@
         "new web/admin.py routes + templates/admin.html.j2 let an admin add or invite a user, set role and grants, and approve an n-hour agent extension; non-admins, guests and agents get 403 (o18)",
         "an invite mails the existing set-password link; the user is approved only after completing app sign-in",
         "a grant added while the user's session is open is visible on their next action, with no restart",
-        "the admin page is CSP-clean (no inline script), matching existing templates"
+        "the admin page is CSP-clean (no inline script), matching existing templates",
+        "sign-in (entry.py), set-password (setpw.py) and the guests CLI decide 'approved' from the access store when the feature is enabled; install_access runs in make_app so a zero-admin store refuses startup (deviation d1)"
       ],
       "deps": [
         "t7"

@@ -251,6 +251,8 @@ def make_app(
         sandbox_factory=sandbox_factory,
         room_prefix=config.guest_room_prefix,
         guest_store=lambda: app.get("guest_store"),
+        access_enabled=config.access_enabled,
+        access_store=lambda: app.get(app_session.ACCESS_STORE),
     )
     app["registry"] = registry
     app["config"] = config

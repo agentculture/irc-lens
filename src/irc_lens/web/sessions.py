@@ -121,8 +121,14 @@ class SessionRegistry:
         room_prefix: str = "#g-",
         guest_store: StoreGetter | None = None,
         clock: Callable[[], float] = time.monotonic,
+        access_enabled: bool = False,
+        access_store: StoreGetter | None = None,
     ) -> None:
         self._factories: dict[str, SessionFactory] = {BACKEND_MESH: factory}
+        # Email-keyed grants (deviation d2): when enabled, every mesh session
+        # is opened with enforcement on, keyed by the verified principal.
+        self._access_enabled = access_enabled
+        self._access_store = access_store or (lambda: None)
         # Prefix of the private room every sandbox session joins on open:
         # guests may not /join (command allowlist), so this is how they
         # reach the sandbox agent, which follows them in.
@@ -353,6 +359,13 @@ class SessionRegistry:
             if key in self._sessions:  # double-check
                 return self._sessions[key]
             session = self._factories[backend](identity.nick)
+            if backend == BACKEND_MESH and self._access_enabled:
+                store = self._access_store()
+                if store is None:
+                    # Fail closed: never hand out an unrestricted mesh
+                    # session while email permissions are switched on.
+                    raise PermissionError("email permissions on but no access store")
+                session.set_access(store, identity.principal)
             # Two-step open: connect() opens the TCP socket and starts the
             # read task; wait_for_welcome() blocks for 001 RPL_WELCOME (or
             # raises on 432/433 nick rejection / timeout). If the second
