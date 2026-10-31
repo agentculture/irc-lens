@@ -31,6 +31,9 @@ from irc_lens.session import Session
 from irc_lens.web import app_session, csrf, entry, make_app, setpw
 from test_session_routing import _config
 
+# Every approved user has chosen a nickname (q14); see conftest.
+pytestmark = pytest.mark.usefixtures("chosen_nicknames")
+
 ADMIN = "alice@example.com"
 MEMBER = "bob@example.org"
 NEWBIE = "carol@example.net"

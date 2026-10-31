@@ -4,12 +4,15 @@ Every verb opens the sqlite file, makes one store call and exits, so a
 running console (which reads the store on every request) sees the change
 without a restart. No verb prints an email address it was not given on the
 command line: output names only the address the operator typed, counts,
-nicks, channels and levels.
+nicks, nicknames, channels and levels.
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
+import concurrent.futures
+import sys
 import time
 
 from irc_lens.cli._commands.guests import _resolve_store_path
@@ -69,13 +72,20 @@ def _check_role(role: str) -> None:
         )
 
 
-def _set_user(store, email: str, role: str, state: str) -> None:
+def _set_user(
+    store, email: str, role: str, state: str, nickname: str | None = None
+) -> None:
     """Set the user, refusing a change that would leave no approved admin
-    (the store's one atomic guard, shared with /admin)."""
-    from irc_lens.access_store import LastAdminError
+    (the store's one atomic guard, shared with /admin). With *nickname* the
+    nickname is set in the same transaction; a refused one adds nobody."""
+    from irc_lens.access_store import LastAdminError, NicknameError
 
     try:
-        store.set_user_keeping_admin(email, role=role, state=state, actor=None)
+        store.set_user_keeping_admin(
+            email, role=role, state=state, actor=None, nickname=nickname
+        )
+    except NicknameError as exc:
+        raise _nickname_error(exc.reason) from exc
     except LastAdminError as exc:
         raise AfiError(
             code=EXIT_USER_ERROR,
@@ -85,12 +95,102 @@ def _set_user(store, email: str, role: str, state: str) -> None:
         ) from exc
 
 
+def _check_nickname(args: argparse.Namespace, raw: str) -> str:
+    """The stored form of *raw*, or exit 1 saying why it is refused.
+
+    Besides the store's rules, a nick a resident agent holds (the culture
+    residents list in the config, as ``/admin`` checks it) is refused as
+    taken. The CLI cannot see the lens's live mesh rosters: the IRCd's own
+    nick uniqueness still has the final say.
+    """
+    from irc_lens import nickname
+
+    nick = nickname.normalize_approved(raw)
+    if nick is None:
+        raise _nickname_error(
+            nickname.approved_refusal(raw) or nickname.REFUSAL_INVALID
+        )
+    if _resident_holds(args, nick):
+        raise _nickname_error(nickname.REFUSAL_TAKEN)
+    return nick
+
+
+def _resident_holds(args: argparse.Namespace, nick: str) -> bool:
+    """Does a resident agent hold ``<server>-<nick>``? Best effort."""
+    from irc_lens.config import resolve_config
+    from irc_lens.nickname import mesh_nick
+    from irc_lens.web.nickname import resident_nicks
+
+    try:
+        cfg = resolve_config(getattr(args, "config", None))
+    except AfiError:
+        print(
+            "note: no config read, so resident agents' nicks were not checked "
+            "(the IRCd still refuses a nick in use)",
+            file=sys.stderr,
+        )
+        return False
+    held = _run_coroutine(lambda: resident_nicks(cfg))
+    return mesh_nick(cfg.server_name, nick).casefold() in held
+
+
+def _run_coroutine(make):
+    """Run the coroutine *make()* to completion from sync code.
+
+    In its own thread when an event loop is already running here (a verb
+    dispatched from the MCP surface), where ``asyncio.run`` would refuse.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(make())
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(lambda: asyncio.run(make())).result()
+
+
+def _nickname_error(reason: str) -> AfiError:
+    return AfiError(
+        code=EXIT_USER_ERROR,
+        message=f"nickname refused: {reason}",
+        remediation=(
+            "2-16 letters, digits or _, not an address, not a reserved name, "
+            "not starting with pa_, and not another user's nickname"
+        ),
+    )
+
+
+def _set_nickname(store, email: str, nick: str) -> str:
+    from irc_lens.access_store import NicknameError
+
+    try:
+        return store.set_nickname(email, nick, actor=None)
+    except NicknameError as exc:
+        raise _nickname_error(exc.reason) from exc
+
+
 def cmd_users_add(args: argparse.Namespace) -> int:
     _check_role(args.role)
     email = _email(args)
+    nick = _check_nickname(args, args.nick) if args.nick is not None else None
     store = _open_store(args)
-    _set_user(store, email, args.role, STATE_APPROVED)
-    print(f"added {email} as {args.role}")
+    _set_user(store, email, args.role, STATE_APPROVED, nickname=nick)
+    suffix = f", nickname {nick}" if nick is not None else ""
+    print(f"added {email} as {args.role}{suffix}")
+    return 0
+
+
+def cmd_users_nick(args: argparse.Namespace) -> int:
+    """Set or rename a user's nickname (their IRC nick is <server>-<nickname>).
+
+    A running lens closes the user's sessions and agent connection on its
+    next sweep or request; their agent credential must be re-issued.
+    """
+    email = _email(args)
+    nick = _check_nickname(args, args.nickname)
+    store = _open_store(args)
+    _need_user(store, email)
+    nick = _set_nickname(store, email, nick)
+    print(f"{email} is now known as {nick}")
     return 0
 
 
@@ -228,8 +328,21 @@ def _verb(sub, name: str, help_text: str, func, *positionals: str):
 def _build_users(sub) -> None:
     add = _verb(sub, "add", "Approve a user.", cmd_users_add, "email")
     add.add_argument("--role", default="member", help="member (default) or admin.")
+    add.add_argument(
+        "--nick",
+        default=None,
+        help="The nickname others see (else the user picks one on first sign-in).",
+    )
     _verb(sub, "remove", "Remove a user.", cmd_users_remove, "email")
     _verb(sub, "role", "Set a user's role.", cmd_users_role, "email", "role")
+    _verb(
+        sub,
+        "nick",
+        "Set or rename a user's nickname.",
+        cmd_users_nick,
+        "email",
+        "nickname",
+    )
 
 
 def _build_grants(sub) -> None:
@@ -257,7 +370,7 @@ def register_into(app) -> None:
     _noun(
         app,
         "users",
-        "Manage approved users and roles (add, remove, role).",
+        "Manage approved users, roles and nicknames (add, remove, role, nick).",
         _build_users,
     )
     _noun(app, "grants", "Manage channel grants (add, list, revoke).", _build_grants)

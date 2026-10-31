@@ -22,7 +22,9 @@ explicit tier fails closed — it can never be mistaken for ``approved``.
 
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import Mapping, NamedTuple
+
+from irc_lens.nickname import mesh_nick
 
 TIER_APPROVED = "approved"
 TIER_GUEST = "guest"
@@ -80,3 +82,21 @@ def derive_nick(server_name: str, principal: str) -> str:
             f"nick derivation produced empty result for principal={principal!r}"
         )
     return f"{server_name}-{sanitized}"
+
+
+def nick_for_user(
+    server_name: str, principal: str, user: Mapping[str, object] | None
+) -> str:
+    """The IRC nick of an approved *principal*; ``""`` until one is chosen.
+
+    *user* is the approval decision (``app_session.approved_user``). A row
+    from the access store (email permissions on) always carries a
+    ``nickname`` key: the nick is ``<server>-<nickname>``, or ``""`` while
+    the person has not chosen one (they then get no IRC session). Only the
+    legacy allowlist decision has no such key, and only it still derives
+    the nick from the address (:func:`derive_nick`, may raise ValueError).
+    """
+    if user is not None and "nickname" in user:
+        chosen = user.get("nickname")
+        return mesh_nick(server_name, str(chosen)) if chosen else ""
+    return derive_nick(server_name, principal)

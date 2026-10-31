@@ -41,7 +41,7 @@ from irc_lens.web.identity import (
     TIER_APPROVED,
     TIER_GUEST,
     Identity,
-    derive_nick,
+    nick_for_user,
 )
 from irc_lens.web.mcp_http import is_mcp_request
 
@@ -300,7 +300,7 @@ def _authorize_principal(
     server_name: str,
     approved_user: Callable[[str], dict[str, str] | None] | None = None,
 ) -> Identity:
-    """Extract the principal, enforce the allowlist, derive the nick.
+    """Extract the principal, enforce the allowlist, resolve the nick.
 
     Emails and service tokens are sibling lists. The ``is_email`` flag
     prevents a service-token JWT from accidentally matching an entry
@@ -319,6 +319,7 @@ def _authorize_principal(
             "verify the Access policy issues an email or service-token JWT",
         ))
     role = ""
+    user = None
     if is_email and approved_user is not None:
         # The access store keys people by their lowercased address; key the
         # identity (and so its registry sessions) the same way, so lookups
@@ -346,7 +347,8 @@ def _authorize_principal(
             "add to auth.allowed_service_tokens in the lens config",
         ))
     try:
-        nick = derive_nick(server_name, principal)
+        # Email permissions on: the chosen nickname ("" until chosen).
+        nick = nick_for_user(server_name, principal, user)
     except ValueError as exc:
         logger.error("nick derivation failed: %s", exc)
         raise _AuthDenied(_http_error(

@@ -47,15 +47,18 @@ from mcp.client.streamable_http import streamable_http_client
 
 from _agentirc_server import AgentIRCTestServer
 from _jwks_server import FakeJWKS
+from helpers import mesh_nick_of
 from irc_lens import config as config_module
 from irc_lens.agent_nick import agent_nick_for
 from irc_lens.mail import RecordingAdapter
 from irc_lens.session import Session
 from irc_lens.web import app_session, csrf, entry, make_app, setpw
-from irc_lens.web.identity import derive_nick
 from irc_lens.web.sessions import BACKEND_MESH
 from test_agent_sessions import RawClient, settle
 from test_session_routing import _config, consent  # noqa: F401 - fixture
+
+# Every approved user has chosen a nickname (q14); see conftest.
+pytestmark = pytest.mark.usefixtures("chosen_nicknames")
 
 ADMIN = "root@example.com"
 A = "ann@example.org"
@@ -71,7 +74,7 @@ SHARED = "#shared"
 _TOKEN_RE = re.compile(r'data-testid="agent-token"[^>]*>([A-Za-z0-9_-]+)<')
 _MARKER_RE = re.compile(r"XMARK-[a-z0-9]+-\d+")
 
-NICK = {e: derive_nick("testsrv", e) for e in (ADMIN, A, B)}
+NICK = {e: mesh_nick_of(e) for e in (ADMIN, A, B)}
 AGENT = {e: agent_nick_for(n, "testsrv") for e, n in NICK.items()}
 G_NICK = "sbx-gus"
 G_AGENT = agent_nick_for(G_NICK, "sbx")
@@ -403,6 +406,68 @@ async def test_owner_lines_arrive_marked_owner_symmetrically(env: Env) -> None:
         ambient = by_text[f"just chatting {theirs}"]
         assert ambient["owner"] is False  # untrusted input, marked as such
         assert all(isinstance(ln["owner"], bool) for ln in lines)
+
+
+# -- q14: chosen nicknames, never the email -----------------------------------------
+
+#: What either member's address could leak as: the addresses, their domain,
+#: the old derived nicks and the bare local parts (as whole words, so
+#: "channel" does not count as "ann").
+_EMAIL_TRACES = re.compile(
+    r"ann@|ben@|example\.org|testsrv-ann|testsrv-ben|(?<![a-z])(?:ann|ben)(?![a-z])",
+    re.I,
+)
+
+
+def _record_inbound(session) -> list[str]:
+    """Every IRC line *session*'s connection receives from now on."""
+    seen: list[str] = []
+    transport = session._transport  # noqa: SLF001
+    handle = transport._handle  # noqa: SLF001
+
+    async def recording(msg):
+        seen.append(msg.format())
+        await handle(msg)
+
+    transport._handle = recording  # noqa: SLF001
+    return seen
+
+
+async def test_members_see_chosen_nicknames_and_no_email(env: Env) -> None:
+    """Two approved members in a shared channel see each other's chosen
+    nicknames; nothing derived from either address reaches the other: not
+    in the roster, a /who, the channel lines, nor the agent's MCP reads."""
+    ta, tb = await env.member_with_agent(A), await env.member_with_agent(B)
+    inbound = {e: _record_inbound(env.human_session(e)) for e in (A, B)}
+    await settle()
+    for t in (ta, tb):
+        await env.ok(t, "read")  # drain the joins
+    for me in (A, B):
+        assert (await env.say(env.jwt(me), f"hello from {NICK[me]}")).status == 204
+    await settle()
+    for me, other, token in ((A, B, ta), (B, A, tb)):
+        session = env.human_session(me)
+        assert session.nick == NICK[me]
+        await session.refresh_roster()
+        roster = {entry.nick for entry in session.roster}
+        assert NICK[other] in roster
+        who = await session.who(SHARED)
+        assert NICK[other] in json.dumps(who)
+        read = await env.ok(token, "read")
+        assert any(ln["nick"] == NICK[other] for ln in read["lines"])
+        whoami = await env.ok(token, "whoami")
+        received = json.dumps(
+            {
+                "roster": sorted(roster),
+                "who": who,
+                "irc": inbound[me],
+                "read": read,
+                "whoami": whoami,
+            }
+        )
+        assert NICK[other] in received
+        assert any(NICK[other] in line for line in inbound[me])
+        assert not _EMAIL_TRACES.search(received), _EMAIL_TRACES.search(received)
 
 
 # -- three credentials, one endpoint, three scopes -------------------------------------

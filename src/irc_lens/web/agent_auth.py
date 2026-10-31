@@ -522,8 +522,13 @@ async def sweep_once(app: web.Application) -> list[str]:
 
     Catches what no request will: a credential revoked or expired from
     another process (CLI) or by an admin, and a human removed, banned or
-    deleted while their agent sits idle.
+    deleted while their agent sits idle. Then closes connections held under
+    a nick a rename retired (``nickname.sweep_once``): the human's browser
+    sessions and the agent, whose credential must be re-issued.
     """
+
+    from irc_lens.web import nickname
+
     registry = app.get("registry")
     if registry is None:
         return []
@@ -539,6 +544,9 @@ async def sweep_once(app: web.Application) -> list[str]:
             closed.append(principal)
     if closed:
         logger.info("agent_sweep closed=%d", len(closed))
+    for principal, _backend in await nickname.sweep_once(app):
+        if principal.startswith(AGENT_PRINCIPAL_PREFIX) and principal not in closed:
+            closed.append(principal)
     return closed
 
 

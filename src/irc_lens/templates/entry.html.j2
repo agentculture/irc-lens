@@ -148,6 +148,26 @@
           </div>
         </form>
 
+        {% elif step == "nickname" %}
+        <form method="post" action="/nickname" class="entry-form">
+          <p class="entry-note">Pick the nickname others in your channels will see. You only do this once; it is never taken from your email address.</p>
+          <label for="entry-nickname">Nickname</label>
+          <div class="entry-prefixed">
+            <span class="entry-prefix" aria-hidden="true">{{ nick_prefix }}</span>
+            <input id="entry-nickname" name="nickname" type="text" value="{{ nickname }}"
+                   autocomplete="off" autocapitalize="none" spellcheck="false"
+                   required minlength="2" maxlength="{{ nick_max }}" autofocus
+                   aria-describedby="entry-nickname-hint">
+          </div>
+          <p id="entry-nickname-hint" class="entry-note">2&ndash;{{ nick_max }} letters, digits or _.</p>
+          {% if error %}
+          <p class="entry-error" role="alert">{{ error }}</p>
+          {% endif %}
+          <div class="entry-actions">
+            <button type="submit" class="btn btn-primary">Continue</button>
+          </div>
+        </form>
+
         {% elif step == "busy" %}
         <div class="entry-form">
           <p class="entry-note" role="status">{{ busy }}</p>

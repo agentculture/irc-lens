@@ -25,6 +25,7 @@ from irc_lens.web import (
     csrf,
     deletion,
     entry,
+    nickname,
     retention,
     routes,
     setpw,
@@ -247,7 +248,14 @@ def make_app(
     # is safe to compute even when media is disabled.
     app = web.Application(
         client_max_size=config.media_max_file_bytes + _CLIENT_MAX_SIZE_MEDIA_HEADROOM,
-        middlewares=[_security_headers_middleware, csrf.csrf_middleware, middleware],
+        middlewares=[
+            _security_headers_middleware,
+            csrf.csrf_middleware,
+            middleware,
+            # After the identity: an approved user with no chosen nickname
+            # (email permissions on) is held at /nickname, no IRC session.
+            nickname.nickname_gate,
+        ],
     )
 
     csrf.install(app)
@@ -293,6 +301,8 @@ def make_app(
     app.router.add_get("/owner/metrics", routes.get_owner_metrics)
     if access_store is not None:
         admin.install(app)
+        # Approved users choose the nickname others see (never the email).
+        nickname.install(app)
         # Personal agents: /agent-credential + the MCP endpoint at
         # web.mcp_path, authenticated by agent bearer credentials only.
         agent_auth.install(app, sweep_interval_s=ban_sweep_interval_s)

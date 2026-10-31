@@ -48,7 +48,6 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import re
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -70,6 +69,11 @@ from irc_lens.mail import (
     render_signin_notice,
     render_token_email,
     send_with_alert,
+)
+from irc_lens.nickname import (  # shared with approved users' nicknames
+    NICK_MAX,
+    RESERVED_NICKNAMES,
+    sanitize_nickname,
 )
 from irc_lens.web import app_session, csrf
 from irc_lens.web.auth import allows_anonymous
@@ -98,9 +102,6 @@ SIGNIN_CODE_PURPOSE = PURPOSE_SIGNIN
 SIGNIN_IP_ATTEMPTS_PER_15MIN = 3
 SIGNIN_IP_KIND = "signin-ip"
 NICK_PREFIX = "sbx-"
-NICK_MIN, NICK_MAX = 2, 16
-#: Nicknames a guest may never take (``sbx-ask`` is the sandbox agent).
-RESERVED_NICKNAMES = frozenset({"ask"})
 MAX_EMAIL_LEN = 254
 
 ERR_SIGNIN = "Email or password is wrong"
@@ -274,18 +275,6 @@ def _state(request: web.Request) -> EntryState:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-# No "-": approved users' sandbox nicks are sbx-op-<x> (d7).
-_NICK_DROP = re.compile(r"[^a-z0-9_]")
-
-
-def sanitize_nickname(raw: str) -> str | None:
-    """Lowercase, keep ``[a-z0-9_]``; None unless 2..16 chars remain."""
-    nick = _NICK_DROP.sub("", (raw or "").lower())
-    if not NICK_MIN <= len(nick) <= NICK_MAX:
-        return None
-    return nick
 
 
 def _norm_email(raw: object) -> str:

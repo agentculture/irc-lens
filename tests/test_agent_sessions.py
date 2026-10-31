@@ -42,9 +42,14 @@ from irc_lens.agent_nick import AGENT_NICK_INFIX, agent_nick_for, is_agent_nick
 from irc_lens.cli import main as cli_main
 from irc_lens.session import Session
 from irc_lens.web import agent_auth, agent_sessions, app_session, csrf, make_app
+from helpers import mesh_nick_of, nickname_of
+from irc_lens.access_store import NicknameError
 from irc_lens.web.identity import derive_nick
 from irc_lens.web.sessions import BACKEND_MESH, BACKEND_SANDBOX
 from test_session_routing import _config, consent  # noqa: F401 - fixture
+
+# Every approved user has chosen a nickname (q14); see conftest.
+pytestmark = pytest.mark.usefixtures("chosen_nicknames")
 
 ADMIN = "alice@example.com"
 MEMBER = "bob@example.org"
@@ -57,7 +62,7 @@ SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 MCP_PATH = "/mcp"
 _TOKEN_RE = re.compile(r'data-testid="agent-token"[^>]*>([A-Za-z0-9_-]+)<')
 
-MEMBER_NICK = derive_nick("testsrv", MEMBER)
+MEMBER_NICK = mesh_nick_of(MEMBER)
 MEMBER_AGENT = agent_nick_for(MEMBER_NICK, "testsrv")
 GUEST_AGENT = agent_nick_for(GUEST_NICK, "sbx")
 
@@ -424,9 +429,9 @@ async def test_owner_is_found_when_the_access_jwt_email_has_capitals(
 
 
 async def test_owner_is_lens_state_not_nick_text(env: Env) -> None:
-    """A namesake (same derived nick) signed in through the lens, or a raw
-    client holding the human's nick while the human is offline, is never the
-    agent's owner."""
+    """A raw client holding the human's nick while the human is offline is
+    never the agent's owner, and a namesake signed in through the lens can no
+    longer get that nick at all: nicknames are unique (q14)."""
     token = await env.issue(env.jwt(MEMBER))
     await env.ok(token, "join", channel="#ops")
     # MEMBER is not online; their nick is free. A raw client takes it.
@@ -436,9 +441,12 @@ async def test_owner_is_lens_state_not_nick_text(env: Env) -> None:
     assert (await env.ok(token, "read"))["lines"] == []
     await imposter.close()
     await settle()
-    # The namesake signs in through the lens and gets that very nick.
+    # The namesake signs in through the lens under their own nickname.
     await env.human_online(env.jwt(NAMESAKE))
-    assert env.human_session(NAMESAKE).nick == MEMBER_NICK
+    assert env.human_session(NAMESAKE).nick != MEMBER_NICK
+    taken = nickname_of(MEMBER)
+    with pytest.raises(NicknameError):
+        env.access.set_nickname(NAMESAKE, taken, actor=None)
     await env.human_session(NAMESAKE).send_raw(f"PRIVMSG {MEMBER_AGENT} :me too")
     await settle()
     assert (await env.ok(token, "read"))["lines"] == []
@@ -593,7 +601,7 @@ async def test_agents_never_run_admin_only_commands(env: Env) -> None:
     token = await env.issue(env.jwt(ADMIN))
     await env.ok(token, "join", channel="#ops")
     await env.ok(token, "send", target="#ops", text="/topic #ops pwned")
-    admin_agent = agent_nick_for(derive_nick("testsrv", ADMIN), "testsrv")
+    admin_agent = agent_nick_for(mesh_nick_of(ADMIN), "testsrv")
     sent = env.sent_by(env.mesh, admin_agent)
     assert not any(ln.startswith("TOPIC") for ln in sent)
     assert "PRIVMSG #ops :/topic #ops pwned" in sent
@@ -737,12 +745,14 @@ def test_names_me_still_ignores_other_words() -> None:
 
 
 def test_ambiguous_agent_nick_maps_to_nobody(tmp_path: Path, caplog) -> None:
-    """Low finding: two humans can derive the same agent nick (MEMBER and
-    NAMESAKE here). A flag against that nick must not be attributed to
-    either: the mapping refuses, and the log names no address."""
+    """Low finding: two humans can hold credentials for the same agent nick
+    (legacy derived nicks of MEMBER and NAMESAKE collide, and a credential
+    issued before a rename keeps the old nick). A flag against that nick
+    must not be attributed to either: the mapping refuses, and the log
+    names no address."""
     from irc_lens.access_store import AccessStore
 
-    assert derive_nick("testsrv", NAMESAKE) == MEMBER_NICK
+    assert derive_nick("testsrv", NAMESAKE) == derive_nick("testsrv", MEMBER)
     store = AccessStore(tmp_path / "guests.db")
     store.issue_agent_credential(MEMBER, MEMBER_AGENT, ttl=3600, actor=None)
     assert agent_sessions.human_for_agent_nick(store, MEMBER_AGENT) == MEMBER

@@ -59,6 +59,7 @@ import asyncio
 import json
 import logging
 import re
+import sqlite3
 import time
 import unicodedata
 from collections import deque
@@ -72,7 +73,7 @@ from irc_lens.agent_nick import agent_nick_for, is_agent_nick, server_name_for
 from irc_lens.commands import CommandType, ParsedCommand
 from irc_lens.session import LensConnectionLost
 from irc_lens.web import app_session, input_gate
-from irc_lens.web.identity import TIER_APPROVED, derive_nick
+from irc_lens.web.identity import TIER_APPROVED, nick_for_user
 from irc_lens.web.sessions import (
     BACKEND_MESH,
     BACKEND_SANDBOX,
@@ -104,6 +105,8 @@ _NICK_RE = re.compile(rf"[{_NICK_CHARS}]{{1,64}}")
 #: Refusal texts shared by several tools.
 _LOST_ERROR = "connection to IRC lost"
 _LOST_HINT = "call the tool again"
+_BUSY_ERROR = "the access store is busy"
+_BUSY_HINT = "call the tool again shortly"
 _CHANNEL_HINT = "a #channel name"
 
 #: The ``target`` of a delivered direct message.
@@ -205,21 +208,40 @@ class HumanState:
     room: str = ""  # a guest's private sandbox room
 
 
-def human_state(app: web.Application, principal: Any) -> HumanState | None:
-    """Blocking: the human behind *principal*, or None if unknown."""
+#: The human is no longer approved (removed, not approved, an admins-only
+#: switch) or, for a guest, no longer present: the agent's access ended.
+HUMAN_NOT_APPROVED = "human-not-approved"
+#: The approved human has no nickname (yet): no agent nick to match.
+HUMAN_NO_NICKNAME = "no-nickname"
+
+
+@dataclass(frozen=True)
+class HumanRefusal:
+    """Why :func:`human_state` found no human to act for (a log reason)."""
+
+    reason: str
+
+
+def human_state(app: web.Application, principal: Any) -> HumanState | HumanRefusal:
+    """Blocking: the human behind *principal*, or why there is none."""
     config = app["config"]
     if principal.tier == TIER_APPROVED:
+        user = app_session.approved_user(app, principal.email)
+        if user is None:
+            return HumanRefusal(HUMAN_NOT_APPROVED)
         try:
-            nick = derive_nick(config.server_name, principal.email)
+            nick = nick_for_user(config.server_name, principal.email, user)
         except ValueError:
-            return None
+            nick = ""
+        if not nick:
+            return HumanRefusal(HUMAN_NO_NICKNAME)
         return HumanState(principal.email, BACKEND_MESH, nick)
     store = app.get("guest_store")
     if store is None or not config.guest_enabled:
-        return None
+        return HumanRefusal(HUMAN_NOT_APPROVED)
     rows = store.get_guest(principal.email)
     if not rows:
-        return None
+        return HumanRefusal(HUMAN_NOT_APPROVED)
     room = config.guest_room_prefix + store.room_id(principal.email)
     return HumanState(
         GUEST_PRINCIPAL_PREFIX + principal.email, BACKEND_SANDBOX, rows[-1][1], room
@@ -585,6 +607,19 @@ async def _close_agent(app: web.Application, credential_key: str) -> None:
     await close_agent_connections(app, credential_key)
 
 
+def _human_refusal(reason: str) -> AfiError:
+    """The refusal for a :class:`HumanRefusal` (never the re-issue advice)."""
+    if reason == HUMAN_NO_NICKNAME:
+        return _refused(
+            "your human has not chosen a nickname yet",
+            "your human picks one in the app (/nickname), then call again",
+        )
+    return _refused(
+        "your human's access has ended, so this agent's access ended too",
+        "an admin must approve your human again",
+    )
+
+
 def _nick_matches(app: web.Application, nick: str, human: HumanState) -> bool:
     """Is *nick* the agent nick of *human*, on the configured server name?"""
     server = server_name_for(app["config"], guest=human.backend == BACKEND_SANDBOX)
@@ -602,12 +637,28 @@ async def agent_session_for(app: web.Application, principal: Any) -> AgentSessio
     :class:`~irc_lens.web.agent_auth.AgentPrincipal` -- built from the
     credential row and the human's current state only (o11).
     """
-    human = await asyncio.to_thread(human_state, app, principal)
-    if human is None or not _nick_matches(app, principal.nick, human):
+    try:
+        human = await asyncio.to_thread(human_state, app, principal)
+    except sqlite3.Error as exc:
+        # The store stayed locked past the hot-path busy timeout: refuse
+        # this call (fail closed) but keep the agent's connection, since
+        # nothing says its nick is stale.
+        logger.warning("agent_session=refused reason=store-busy")
+        raise _refused(_BUSY_ERROR, _BUSY_HINT) from exc
+    if isinstance(human, HumanRefusal):
+        why = human.reason  # a fixed reason code, never an address
+        logger.info("agent_session=refused reason=%s", why)
+        await _close_agent(app, principal.credential_key)
+        raise _human_refusal(why)
+    if not _nick_matches(app, principal.nick, human):
         logger.info("agent_session=refused reason=nick-mismatch")
+        # Issued under an old nick (a rename): drop any connection still
+        # held under it.
+        await _close_agent(app, principal.credential_key)
         raise _refused(
-            "this credential's agent nick no longer matches its human",
-            "re-issue the agent credential from the app",
+            "this credential was issued under an old nick and no longer "
+            "matches its human's nickname",
+            "re-issue the agent credential from the app (/agent-credential)",
         )
     if human.backend == BACKEND_SANDBOX:
         await _guest_agent_gate(app, principal)
@@ -656,6 +707,9 @@ __all__ = [
     "WITHHELD_ACTION",
     "AgentLine",
     "AgentSession",
+    "HUMAN_NOT_APPROVED",
+    "HUMAN_NO_NICKNAME",
+    "HumanRefusal",
     "HumanState",
     "agent_session_for",
     "human_for_agent_nick",

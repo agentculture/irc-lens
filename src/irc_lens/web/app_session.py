@@ -10,7 +10,8 @@ times; the raw id lives only in the ``lens_session`` cookie
 The auth middleware (``auth.build_cloudflare_middleware``) consults
 :func:`identity_for` before the Cloudflare Access JWT path. The identity it
 produces is exactly the one an Access JWT yields for the same email
-(principal = email, nick via ``derive_nick``, tier ``approved``), so the
+(principal = email, tier ``approved``, nick ``<server>-<nickname>`` from the
+access store, or ``derive_nick`` in the legacy allowlist mode), so the
 session registry shares one IRC connection per user however they signed
 in. The email is re-checked against ``auth.allowed_emails`` on every
 request. A missing, unknown, expired or no-longer-allowed session simply
@@ -51,7 +52,7 @@ from irc_lens import metrics
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.access_store import AccessStore
 from irc_lens.guest_store import session_id_hash
-from irc_lens.web.identity import TIER_APPROVED, Identity, derive_nick
+from irc_lens.web.identity import TIER_APPROVED, Identity, nick_for_user
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,8 @@ REQUEST_SESSION_HASH = "app_session_hash"
 #: ``{(principal, backend): id_hash}`` for registry sessions opened via an
 #: app session.
 LINKS = web.AppKey("app_session_links", dict)
+#: The app key of the session registry (``web.app`` stores it).
+REGISTRY_KEY = "registry"
 
 #: The :class:`~irc_lens.access_store.AccessStore` when
 #: ``auth.email_permissions.enabled``; absent otherwise.
@@ -336,7 +339,7 @@ def identity_for(request: web.Request) -> Identity | None:
     if user is None:
         return None
     try:
-        nick = derive_nick(config.server_name, email)
+        nick = nick_for_user(config.server_name, email, user)
     except ValueError:
         return None
     if store.now() - last_seen >= TOUCH_INTERVAL_S:
@@ -380,7 +383,7 @@ def note_registry_open(
 
 async def _close_links(app: web.Application, keys: list[tuple[str, str]]) -> None:
     links = app.get(LINKS)
-    registry = app["registry"]
+    registry = app[REGISTRY_KEY]
     for key in keys:
         if links is not None:
             links.pop(key, None)
@@ -397,7 +400,7 @@ async def sweep_once(app: web.Application) -> list[tuple[str, str]]:
     store = _store(app)
     if not links or store is None:
         return []
-    registry = app["registry"]
+    registry = app[REGISTRY_KEY]
     ended: list[tuple[str, str]] = []
     for key, id_hash in tuple(links.items()):  # snapshot: links.pop below
         if not registry.has(*key):
@@ -469,5 +472,10 @@ async def post_logout(request: web.Request) -> web.Response:
 
 def install(app: web.Application) -> None:
     """Enable app sessions on *app*: the link table and ``POST /logout``."""
-    app[LINKS] = {}
+    links: dict[tuple[str, str], str] = {}
+    app[LINKS] = links
+    registry = app.get(REGISTRY_KEY)
+    if registry is not None:
+        # A nick change retires the entry: forget who opened the old one.
+        registry.on_retire(lambda key: links.pop(key, None))
     app.router.add_post("/logout", post_logout)

@@ -51,3 +51,31 @@ def make_app_for(session: "Session") -> "web.Application":
     app = make_app(DEV_CONFIG, lambda _nick: session)
     app["registry"].register(DEV_CONFIG.dev_email, session)
     return app
+
+
+#: Nicknames the permission suites give their approved test users (q14).
+#: Chosen by hand and unrelated to the addresses, so a test can also check
+#: that nothing derived from an email reaches anyone else.
+TEST_NICKNAMES = {
+    "alice@example.com": "aurora",
+    "root@example.com": "chief",
+    "bob@example.org": "basil",
+    "bob@example.net": "brook",
+    "ann@example.org": "amber",
+    "ben@example.org": "birch",
+    "carol@example.net": "cedar",
+    "pat@example.com": "pepper",
+    "sam@example.org": "sage",
+    "pending@example.org": "pip",
+    "nobody@example.org": "nemo",
+}
+
+
+def nickname_of(email: str) -> str:
+    """The nickname :data:`TEST_NICKNAMES` gives *email*."""
+    return TEST_NICKNAMES[email.strip().lower()]
+
+
+def mesh_nick_of(email: str, server: str = "testsrv") -> str:
+    """The IRC nick an approved test user gets: ``<server>-<nickname>``."""
+    return f"{server}-{nickname_of(email)}"

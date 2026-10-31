@@ -15,6 +15,11 @@ agents all get 403.
   once they finish an app sign-in (``app_session.promote_on_signin``).
 * ``POST /admin/users/remove`` -- marks the user removed and revokes their
   agent credential and sessions.
+* ``POST /admin/users/nickname`` -- sets or renames the nickname others see
+  (the same rules as the person's own ``/nickname`` form, ``web/nickname``).
+  A rename closes the user's IRC sessions and their agent's connection, so
+  they reconnect under the new nick (the agent after its credential is
+  re-issued).
 * ``POST /admin/grants`` -- set a channel grant (``read``/``write``/``ask``)
   or ``revoke`` it.
 * ``POST /admin/extension`` -- approve an *n*-hour agent extension; *n* is
@@ -30,11 +35,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import sqlite3
 
 from aiohttp import web
 
-from irc_lens.access_store import AccessStore, LastAdminError
-from irc_lens.web import app_session, setpw
+from irc_lens import nickname as nickname_rules
+from irc_lens.access_store import AccessStore, LastAdminError, NicknameError
+from irc_lens.web import app_session, nickname, setpw
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import (
     ENTRY_PAGE_MARKER,
@@ -66,6 +73,7 @@ _DONE = {
     "revoke": "Grant revoked.",
     "extension": "Agent extension approved.",
     "clear": "Agent extension cleared.",
+    "nickname": "Nickname saved.",
 }
 
 
@@ -107,6 +115,7 @@ def _page(
         users=users,
         roles=ROLES,
         levels=LEVELS,
+        nick_max=nickname_rules.NICK_MAX,
         error=error,
         done=_DONE.get(done, ""),
         now=store._now(),  # pylint: disable=protected-access
@@ -216,6 +225,55 @@ async def post_remove(request: web.Request) -> web.Response:
     return _see_other("remove")
 
 
+async def _nickname_refusal(
+    request: web.Request, raw: str, current: str | None
+) -> tuple[str, str | None]:
+    """``(stored form, refusal reason or None)`` of an admin's nickname input.
+
+    The store's rules (``normalize_approved``) plus, for a change, a nick a
+    resident agent or anyone on the mesh holds right now.
+    """
+    chosen = nickname_rules.normalize_approved(raw)
+    if chosen is None:
+        refusal = nickname_rules.approved_refusal(raw)
+        return "", refusal or nickname_rules.REFUSAL_INVALID
+    if chosen != current:
+        server = request.app["config"].server_name
+        if await nickname.nick_in_use(
+            request.app, nickname_rules.mesh_nick(server, chosen)
+        ):
+            return chosen, nickname_rules.REFUSAL_TAKEN
+    return chosen, None
+
+
+@allows_anonymous
+async def post_nickname(request: web.Request) -> web.Response:
+    admin = _admin(request)
+    store = _store(request)
+    form = await request.post()
+    email = _norm_email(form.get("email"))
+    raw = str(form.get("nickname") or "")[:200]
+    try:
+        user = await asyncio.to_thread(store.get_user, email)
+        if user is None:
+            return _refuse(request, _NO_SUCH_USER)
+        chosen, refusal = await _nickname_refusal(request, raw, user["nickname"])
+        if refusal is not None:
+            return _refuse(request, nickname.error_text(refusal))
+        await asyncio.to_thread(
+            store.set_nickname, email, chosen, actor=admin.principal
+        )
+    except NicknameError as exc:
+        return _refuse(request, nickname.error_text(exc.reason))
+    except sqlite3.Error:
+        logger.warning("admin rename failed: access store error")
+        return _refuse(request, nickname.ERR_STORE)
+    if user["nickname"] not in (None, chosen):
+        await nickname.close_user_connections(request.app, email)
+        logger.info("admin renamed a user")
+    return _see_other("nickname")
+
+
 @allows_anonymous
 async def post_grant(request: web.Request) -> web.Response:
     admin = _admin(request)
@@ -291,5 +349,6 @@ def install(app: web.Application) -> None:
     app.router.add_get("/admin", get_admin)
     app.router.add_post("/admin/users", post_user)
     app.router.add_post("/admin/users/remove", post_remove)
+    app.router.add_post("/admin/users/nickname", post_nickname)
     app.router.add_post("/admin/grants", post_grant)
     app.router.add_post("/admin/extension", post_extension)
