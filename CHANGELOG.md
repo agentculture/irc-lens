@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Email-keyed permissions: admins have full access; other approved users reach only the mesh channels granted to them, at read or write/ask, and nothing by default. Approval, roles and grants live in the lens store (one-time import of the old allowlist) and take effect without a restart.
-- In-app admin page (/admin): add or invite users, set roles and channel grants, approve n-hour agent extensions. Invited users become approved on their first sign-in. Matching `irc-lens access` CLI verbs.
+- In-app admin page (/admin): add or invite users, set roles and channel grants, approve n-hour agent extensions. Invited users become approved on their first sign-in. Matching CLI verbs: `irc-lens users`, `grants`, `agents` and `extend`.
 - Personal agents over MCP: every human (admin, approved or guest) may connect one agent to the remote MCP endpoint (streamable HTTP, path from config) with a credential issued at /agent-credential. The agent has exactly its human's permissions, its own lens-held IRC connection in a reserved nick namespace, and only its own human can reach it. Lines from anyone else that DM or @-address it are withheld, and every delivered line is marked owner or not-owner.
 - Switches: an agent kill switch and a fail-closed off switch (enabled / legacy before migration / admins-only after). Refusals and grant/credential events are audited, and owner metrics show counts.
 - docs/permissions.md and docs/deployment-permissions.md (restricting the mesh IRCd, plus a verify script).

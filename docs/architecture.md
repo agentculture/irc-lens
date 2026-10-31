@@ -55,6 +55,9 @@ src/irc_lens/
 │   └── buffer.py          # MessageBuffer (cited, with optional timestamp)
 ├── session.py             # Session, SessionEventBus, Subscription, dispatch
 ├── seed.py                # apply_seed / load_seed (Phase 8)
+├── access_store.py        # users, roles, grants, agent credentials, extensions, audit (sqlite)
+├── access.py              # default-deny grant policy: can_list / can_read / can_write
+├── agent_nick.py          # personal-agent nick namespace (<server>-pa_-<name>)
 ├── web/
 │   ├── __init__.py        # public make_app re-export
 │   ├── app.py             # Application factory + client_max_size
@@ -63,6 +66,11 @@ src/irc_lens/
 │   ├── auth.py            # Cloudflare Access JWT verification + middleware
 │   ├── identity.py        # Identity dataclass + nick derivation
 │   ├── sessions.py        # SessionFactory / SessionRegistry (per-principal sessions)
+│   ├── admin.py           # /admin: add/invite users, roles, grants, agent extensions
+│   ├── agent_auth.py      # /agent-credential + MCP bearer authenticator + agent sweeps
+│   ├── agent_sessions.py  # personal agents' lens-held IRC sessions + owner-only filter
+│   ├── input_gate.py      # shared input gate (allowlist, rate limit, input log) for /input and agents
+│   ├── mcp_http.py        # mounts agentfront's remote MCP transport at web.mcp_path
 │   ├── media.py           # classify_url + render_message_html + compose_media_message
 │   ├── store.py           # MediaStore (blob-file management + token safety)
 │   ├── render.py          # Jinja2 env + render_index/render_fragment
@@ -105,7 +113,11 @@ See `docs/security-checklist.md` for the CSP directives and rationale.
 | `/events` | `GET` | — | 200 SSE stream |
 | `/static/{path}` | `GET` | — | 200 vendored assets |
 | `/agent`, `/agent/{slug}` | `GET` | — | 200 markdown/XML (agentfront HTTP front) |
-| `/residents` | `GET` | — | 200 HTML, always (kind-specific notice on degrade) |
+| `/residents` | `GET` | — | 200 HTML, always (kind-specific notice on degrade); admin-only with email permissions on |
+| `/admin` | `GET` | — | 200 HTML (admins only; 403 otherwise) |
+| `/admin/users`, `/admin/users/remove`, `/admin/grants`, `/admin/extension` | `POST` | form-encoded | 303/400/403 (admins only) |
+| `/agent-credential` | `GET`/`POST` | form-encoded | 200 HTML; credential shown once (`no-store`) |
+| `web.mcp_path` (default `/mcp`) | `POST` | MCP JSON-RPC, `Authorization: Bearer` | 200/401 (remote MCP endpoint) |
 
 Details: `/input` accepts JSON or form-encoded `text` field; errors are
 bad JSON, oversize, unhealthy. `/upload` media responses include

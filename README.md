@@ -61,6 +61,9 @@ uv run pytest -m playwright -v           # browser e2e
   fragment templates, `data-testid` contract.
 * [`docs/playwright.md`](docs/playwright.md) — driving the lens
   with pytest-playwright or Playwright MCP.
+* [`docs/permissions.md`](docs/permissions.md) — email-keyed
+  permissions (admins, approved users, guests), the in-app admin page,
+  and personal agents over the remote MCP endpoint
 * [`docs/architecture.md`](docs/architecture.md) — runtime
   topology, module layout, decision log.
 * [`CITATION.md`](CITATION.md) — culture citations + divergences.
