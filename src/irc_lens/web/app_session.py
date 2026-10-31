@@ -292,6 +292,26 @@ def promote_on_signin(app: web.Application, email: str) -> None:
         store.set_user(email, role=user["role"], state="approved", actor=email)
 
 
+def approved_on_signin(app: web.Application, email: str) -> dict[str, str] | None:
+    """:func:`approved_user` for a *verified* sign-in (a valid Access JWT).
+
+    A verified sign-in finishes an invitation however it happened (app
+    sign-in code, or the password -> ``/login`` -> Cloudflare Access path),
+    so an ``invited`` user who may sign in is promoted first
+    (:func:`promote_on_signin`). A ``removed`` user is never promoted, and
+    the admins-only state promotes nobody (:func:`can_sign_in`).
+    """
+    user = approved_user(app, email)
+    if user is not None or not can_sign_in(app, email):
+        return user
+    try:
+        promote_on_signin(app, email)
+    except Exception:  # noqa: BLE001 - a failed promotion approves nobody
+        logger.exception("invite promotion on sign-in failed; refusing")
+        return None
+    return approved_user(app, email)
+
+
 def identity_for(request: web.Request) -> Identity | None:
     """Approved identity from a valid ``lens_session`` cookie, else None.
 

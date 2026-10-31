@@ -169,19 +169,22 @@ def access_counts(store: Any, *, suppressed_refusals: int = 0) -> dict[str, int]
 
     Derived from the access store's append-only audit table, so they survive
     restarts and agree with it. Integers only; an unreadable store reads as
-    zero rather than failing the metrics route. *suppressed_refusals* adds
+    zero rather than failing the metrics route. One ``GROUP BY`` query
+    (never the whole table); blocking, so the route runs it off the event
+    loop. *suppressed_refusals* adds
     the agent refusals the in-memory throttle kept out of the audit
     (``agent_auth.RefusalThrottle``), so every refusal is counted once.
     """
+
     counts = dict.fromkeys(dict.fromkeys(_ACCESS_COUNTERS.values()), 0)
     try:
-        rows = store.audit_rows() if store is not None else ()
+        per_action = store.audit_action_counts() if store is not None else {}
     except Exception:  # noqa: BLE001 - metrics must never raise
-        rows = ()
-    for _ts, _actor, action, _target in rows:
+        per_action = {}
+    for action, n in per_action.items():
         name = _ACCESS_COUNTERS.get(action)
         if name:
-            counts[name] += 1
+            counts[name] += int(n)
     counts["agent_refusals"] += int(suppressed_refusals)
     return counts
 

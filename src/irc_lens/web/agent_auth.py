@@ -72,7 +72,7 @@ from typing import Any, Callable, ClassVar
 
 from aiohttp import web
 
-from irc_lens.agent_nick import agent_nick_for
+from irc_lens.agent_nick import agent_nick_for, server_name_for
 from irc_lens.web import app_session
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.identity import TIER_ANONYMOUS, TIER_APPROVED, TIER_GUEST
@@ -597,6 +597,14 @@ async def _requester(request: web.Request) -> tuple[str, str, str] | web.Respons
     return email, identity.nick, email
 
 
+def _agent_nick(config, credential_key: str, human_nick: str) -> str:
+    """The agent nick for *credential_key*'s human, on the configured server
+    name of that human's backend (the sandbox for a guest). Raises
+    ``ValueError`` when *human_nick* does not live on that server."""
+    guest = _split_key(credential_key)[1] == TIER_GUEST
+    return agent_nick_for(human_nick, server_name_for(config, guest=guest))
+
+
 def _endpoint(config) -> str:
     base = (config.app_signin_base_url or "").rstrip("/")
     return f"{base}{config.mcp_path}"
@@ -616,7 +624,7 @@ def _page(
         "agent_credential.html.j2",
         token=token,
         active=store.active_credential_count(credential_key) > 0,
-        agent_nick=agent_nick_for(human_nick),
+        agent_nick=_agent_nick(config, credential_key, human_nick),
         endpoint=_endpoint(config),
         ttl_days=max(1, config.agent_credential_ttl_s // 86400),
         css_url=static_url("entry.css"),
@@ -654,7 +662,7 @@ async def post_issue(request: web.Request) -> web.Response:
         return found
     key, human_nick, actor = found
     try:
-        nick = agent_nick_for(human_nick)
+        nick = _agent_nick(request.app["config"], key, human_nick)
     except ValueError:
         return _deny(400, "no agent nick for this account", "contact an admin")
     store = request.app[app_session.ACCESS_STORE]

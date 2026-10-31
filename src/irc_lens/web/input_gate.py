@@ -27,12 +27,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from irc_lens import metrics
+from irc_lens.access import is_admin_only
 from irc_lens.commands import (
     DELETE_COMMAND,
     CommandType,
     ParsedCommand,
     allowed_in_sandbox,
-    is_admin_only,
 )
 from irc_lens.web.identity import TIER_GUEST
 from irc_lens.web.sessions import BACKEND_SANDBOX

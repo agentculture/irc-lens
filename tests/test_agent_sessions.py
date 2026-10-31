@@ -58,8 +58,8 @@ MCP_PATH = "/mcp"
 _TOKEN_RE = re.compile(r'data-testid="agent-token"[^>]*>([A-Za-z0-9_-]+)<')
 
 MEMBER_NICK = derive_nick("testsrv", MEMBER)
-MEMBER_AGENT = agent_nick_for(MEMBER_NICK)
-GUEST_AGENT = agent_nick_for(GUEST_NICK)
+MEMBER_AGENT = agent_nick_for(MEMBER_NICK, "testsrv")
+GUEST_AGENT = agent_nick_for(GUEST_NICK, "sbx")
 
 
 class RawClient:
@@ -231,10 +231,11 @@ async def env(
     "email", ["pa_-bob@example.org", "pa-bob@example.org", "pa_bob@example.org"]
 )
 def test_no_human_nick_is_in_the_agent_namespace(email: str) -> None:
-    assert not is_agent_nick(derive_nick("testsrv", email))
-    assert not is_agent_nick("sbx-pa_bob")  # a guest nickname keeps only [a-z0-9_]
-    assert is_agent_nick(MEMBER_AGENT)
-    assert is_agent_nick(GUEST_AGENT)
+    assert not is_agent_nick(derive_nick("testsrv", email), "testsrv")
+    # A guest nickname keeps only [a-z0-9_].
+    assert not is_agent_nick("sbx-pa_bob", "sbx")
+    assert is_agent_nick(MEMBER_AGENT, "testsrv")
+    assert is_agent_nick(GUEST_AGENT, "sbx")
     assert AGENT_NICK_INFIX in MEMBER_AGENT
 
 
@@ -371,6 +372,55 @@ async def test_owner_lines_are_delivered_and_marked(env: Env) -> None:
         ("DM", "private note", True),
     }
     assert all(isinstance(ln["owner"], bool) for ln in got)
+
+
+async def test_human_dm_to_own_agent_through_the_console_is_delivered(
+    env: Env,
+) -> None:
+    # Review 2, finding 1: the owner's /send to their own agent passes the
+    # session's DM check and reaches the agent as an owner DM.
+    token = await _member_agent_in_ops(env)
+    r = await env.human_input(env.jwt(MEMBER), f"/send {MEMBER_AGENT} private note")
+    assert r.status == 204, await r.text()
+    await settle()
+    got = (await env.ok(token, "read"))["lines"]
+    assert [(ln["target"], ln["text"], ln["owner"]) for ln in got] == [
+        ("DM", "private note", True)
+    ]
+
+
+async def test_member_console_dm_to_anyone_else_never_reaches_irc(env: Env) -> None:
+    await env.human_online(env.jwt(MEMBER))
+    # A mesh resident agent, another human, another person's agent.
+    for target in ("testsrv-claude", "testsrv-mallory", "testsrv-pa_-mallory"):
+        r = await env.human_input(env.jwt(MEMBER), f"/send {target} hi")
+        assert r.status == 204, await r.text()
+    await settle()
+    sent = env.sent_by(env.mesh, MEMBER_NICK)
+    assert not any(ln.startswith("PRIVMSG") for ln in sent)
+
+
+async def test_owner_is_found_when_the_access_jwt_email_has_capitals(
+    env: Env,
+) -> None:
+    # The owner lookup is one registry peek on the normalised address
+    # (finding 10), so a mixed-case Access email must key the human's
+    # session by that same normalised address.
+    shouty = env.jwt(MEMBER.upper())
+    await env.human_online(shouty)
+    token = await env.issue(shouty)
+    await env.ok(token, "whoami")
+    human = next(
+        conn
+        for (principal, backend), conn in zip(
+            env.registry.keys(), env.registry.values()
+        )
+        if backend == BACKEND_MESH and principal.casefold() == MEMBER
+    )
+    await human.send_raw(f"PRIVMSG {MEMBER_AGENT} :caps")
+    await settle()
+    got = (await env.ok(token, "read"))["lines"]
+    assert [(ln["text"], ln["owner"]) for ln in got] == [("caps", True)]
 
 
 async def test_owner_is_lens_state_not_nick_text(env: Env) -> None:
@@ -543,7 +593,7 @@ async def test_agents_never_run_admin_only_commands(env: Env) -> None:
     token = await env.issue(env.jwt(ADMIN))
     await env.ok(token, "join", channel="#ops")
     await env.ok(token, "send", target="#ops", text="/topic #ops pwned")
-    admin_agent = agent_nick_for(derive_nick("testsrv", ADMIN))
+    admin_agent = agent_nick_for(derive_nick("testsrv", ADMIN), "testsrv")
     sent = env.sent_by(env.mesh, admin_agent)
     assert not any(ln.startswith("TOPIC") for ln in sent)
     assert "PRIVMSG #ops :/topic #ops pwned" in sent
