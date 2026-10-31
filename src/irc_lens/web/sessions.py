@@ -36,6 +36,11 @@ BACKENDS = frozenset({BACKEND_MESH, BACKEND_SANDBOX})
 #: an approved user's can never share that user's Session.
 GUEST_PRINCIPAL_PREFIX = "guest:"
 
+#: Registry-key prefix for a personal agent's lens-held connection
+#: (``agent:<credential key>``, see ``web/agent_auth.py``). Never a guest
+#: seat, never closed by its human's browser logout (irc-lens#70).
+AGENT_PRINCIPAL_PREFIX = "agent:"
+
 
 def _presence_listener(msg: Any) -> None:
     """Feed the sandbox-agent presence tracker from incoming traffic."""
@@ -165,6 +170,10 @@ class SessionRegistry:
 
     def has(self, principal: str, backend: str) -> bool:
         return (principal, backend) in self._sessions
+
+    def peek(self, principal: str, backend: str) -> Any:
+        """The open Session for (*principal*, *backend*), or None. Never opens."""
+        return self._sessions.get((principal, backend))
 
     def keys(self) -> list[tuple[str, str]]:
         return list(self._sessions)
@@ -297,6 +306,11 @@ class SessionRegistry:
         closed = []
         sandbox = [(k, s) for k, s in self._sessions.items() if k[1] == BACKEND_SANDBOX]
         for key, session in sandbox:
+            if key[0].startswith(AGENT_PRINCIPAL_PREFIX):
+                # A personal agent has no tab; its lifetime follows its
+                # credential and its human (agent_auth.sweep_once), not
+                # the event-stream rule below.
+                continue
             if self._counts_as_guest(*key):
                 idle = now - self._last_action.setdefault(key, now) >= idle_s
             elif _has_open_tab(session):
@@ -338,6 +352,92 @@ class SessionRegistry:
             )
         await _open_sandbox_rooms(session, own, others)
 
+    async def _open(
+        self,
+        backend: str,
+        nick: str,
+        *,
+        access_human: str,
+        init: Callable[[Any], Any] | None,
+        prepare: Callable[[Any], None] | None = None,
+    ) -> Any:
+        """Build, connect and initialise one Session (caller holds the key lock).
+
+        *prepare* runs on the fresh Session before it connects (so receive
+        listeners it installs see the very first line); *init* after the
+        welcome.
+
+        Mesh sessions get grant enforcement keyed by *access_human* while
+        email permissions are on. Not registered here: a failed open leaves
+        nothing behind.
+        """
+        session = self._factories[backend](nick)
+        if backend == BACKEND_MESH and self._access_enabled:
+            store = self._access_store()
+            if store is None:
+                # Fail closed: never hand out an unrestricted mesh
+                # session while email permissions are switched on.
+                raise PermissionError("email permissions on but no access store")
+            session.set_access(store, access_human)
+        if prepare is not None:
+            prepare(session)
+        # Two-step open: connect() opens the TCP socket and starts the
+        # read task; wait_for_welcome() blocks for 001 RPL_WELCOME (or
+        # raises on 432/433 nick rejection / timeout). If a later step
+        # raises after the first succeeded, the socket and read task are
+        # still alive — disconnect to avoid leaking transport state on
+        # every failed handshake.
+        try:
+            await session.connect()
+            await session.wait_for_welcome()
+            if init is not None:
+                await _maybe_await(init(session))
+        except BaseException:
+            try:
+                await session.disconnect()
+            except Exception:  # noqa: BLE001 — never mask the original
+                pass
+            raise
+        return session
+
+    async def get_or_open_agent(
+        self,
+        principal: str,
+        backend: str,
+        nick: str,
+        *,
+        access_human: str,
+        init: Callable[[Any], Any] | None = None,
+        prepare: Callable[[Any], None] | None = None,
+    ) -> Any:
+        """Return (or open) a personal agent's lens-held Session.
+
+        *principal* must be an ``agent:`` key, so the session never shares
+        its human's browser key (logout cannot tear it down) and never
+        counts as a guest seat. Grants are *access_human*'s (the agent has
+        no rows of its own). *init* replaces the browser sandbox set-up:
+        an agent joins only what *init* joins -- never the all-rooms
+        guest view.
+        """
+        if not principal.startswith(AGENT_PRINCIPAL_PREFIX):
+            raise ValueError("agent sessions live under an 'agent:' principal")
+        if backend not in self._factories:
+            raise ValueError(f"no session factory for backend {backend!r}")
+        key = (principal, backend)
+        existing = self._sessions.get(key)
+        if existing is not None:
+            if getattr(existing, "healthy", True):
+                return existing
+            await self.close(*key)
+        async with self._locks[key]:
+            if key in self._sessions:  # double-check
+                return self._sessions[key]
+            session = await self._open(
+                backend, nick, access_human=access_human, init=init, prepare=prepare
+            )
+            self._sessions[key] = session
+            return session
+
     async def get_or_open(self, identity: Identity, backend: str = BACKEND_MESH) -> Any:
         """Return the Session for (``identity.principal``, *backend*).
 
@@ -345,6 +445,9 @@ class SessionRegistry:
         (``routes._resolve_session``); the sandbox backend is the only one
         a guest-tier principal may ever be given.
         """
+        if identity.principal.startswith(AGENT_PRINCIPAL_PREFIX):
+            # Agent keys open only through get_or_open_agent (own set-up).
+            raise ValueError("agent principals open via get_or_open_agent")
         if backend not in self._factories:
             raise ValueError(f"no session factory for backend {backend!r}")
         key = (identity.principal, backend)
@@ -358,31 +461,16 @@ class SessionRegistry:
         async with self._locks[key]:
             if key in self._sessions:  # double-check
                 return self._sessions[key]
-            session = self._factories[backend](identity.nick)
-            if backend == BACKEND_MESH and self._access_enabled:
-                store = self._access_store()
-                if store is None:
-                    # Fail closed: never hand out an unrestricted mesh
-                    # session while email permissions are switched on.
-                    raise PermissionError("email permissions on but no access store")
-                session.set_access(store, identity.principal)
-            # Two-step open: connect() opens the TCP socket and starts the
-            # read task; wait_for_welcome() blocks for 001 RPL_WELCOME (or
-            # raises on 432/433 nick rejection / timeout). If the second
-            # step raises after the first succeeded, the socket and read
-            # task are still alive — disconnect to avoid leaking transport
-            # state on every failed handshake.
-            try:
-                await session.connect()
-                await session.wait_for_welcome()
-            except BaseException:
-                try:
-                    await session.disconnect()
-                except Exception:  # noqa: BLE001 — never mask the original
-                    pass
-                raise
-            if backend == BACKEND_SANDBOX:
-                await self._init_sandbox(session, identity)
+            session = await self._open(
+                backend,
+                identity.nick,
+                access_human=identity.principal,
+                init=(
+                    (lambda s: self._init_sandbox(s, identity))
+                    if backend == BACKEND_SANDBOX
+                    else None
+                ),
+            )
             self._sessions[key] = session
             if self._counts_as_guest(*key):
                 # The open consumes the guest's reservation; it counts as

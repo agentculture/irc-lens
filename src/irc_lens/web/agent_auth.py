@@ -36,9 +36,10 @@ Authenticating (every MCP request)
     admin-only gate (``routes.admin_only_denial``).
 
 Agent connections
-    An agent's lens-held IRC connection (task t13) lives in the session
-    registry under :func:`agent_registry_principal` (``agent:<key>``), apart
-    from its human's browser sessions, and never counts as a guest seat.
+    An agent's lens-held IRC connection (``web/agent_sessions.py``) lives in
+    the session registry under :func:`agent_registry_principal`
+    (``agent:<key>``), apart from its human's browser sessions, and never
+    counts as a guest seat.
     :func:`close_agent_connections` closes it; :func:`sweep_once` (on the ban
     sweeper's cadence) closes any whose credential was revoked or expired
     out of band (CLI, admin removal) or whose human no longer passes.
@@ -63,6 +64,7 @@ from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.identity import TIER_ANONYMOUS, TIER_APPROVED, TIER_GUEST
 from irc_lens.web.mcp_http import MCP_ROUTES, mount_mcp
 from irc_lens.web.render import render_fragment, static_url
+from irc_lens.web.sessions import AGENT_PRINCIPAL_PREFIX as _REGISTRY_AGENT_PREFIX
 from irc_lens.web.sessions import BACKENDS, GUEST_PRINCIPAL_PREFIX
 
 logger = logging.getLogger(__name__)
@@ -74,7 +76,7 @@ PAGE_PATH = "/agent-credential"
 GUEST_KEY_PREFIX = GUEST_PRINCIPAL_PREFIX
 
 #: Registry-principal prefix for agent connections (t13): ``agent:<key>``.
-AGENT_PRINCIPAL_PREFIX = "agent:"
+AGENT_PRINCIPAL_PREFIX = _REGISTRY_AGENT_PREFIX
 
 #: The background task closing agents whose credential or human lapsed.
 SWEEP_TASK = web.AppKey("agent_sweep_task", asyncio.Task)
@@ -118,6 +120,9 @@ class AgentPrincipal:
     tier: str
     nick: str
     token: str = field(repr=False, compare=False, default="")
+    #: The caller's address (``CF-Connecting-IP`` or the peer), for the
+    #: per-IP leg of the shared input gate's rate limit (t13). Not a scope.
+    ip: str = field(repr=False, compare=False, default="")
 
     #: Agents are never browser identities: the admin-only gate refuses them.
     is_admin = False
@@ -140,18 +145,24 @@ def describe_principal(principal: Any) -> dict[str, str]:
     return {"nick": principal.nick, "tier": principal.tier}
 
 
-def build_agent_front():
+def build_agent_front(app: web.Application | None = None):
     """The agentfront ``App`` served at the MCP endpoint.
 
     Deliberately *not* ``irc_lens.cli.build_app()``: those live tools are the
     identity-less dev path (fixed config nick) and must never be reachable
-    from the endpoint (o14). Task t13 adds the agent's real tools here,
-    each running under the request's :class:`AgentPrincipal`.
+    from the endpoint (o14). Every tool here resolves its caller through
+    ``agentfront.current_caller()`` -- the :class:`AgentPrincipal` the
+    authenticator built for this request -- and acts only through that
+    agent's own lens-held session (``web/agent_sessions.py``): grant checks,
+    the shared input gate and the receive-side owner filter. A call without
+    an authenticated agent principal (or without the lens *app*) is refused
+    before anything touches IRC.
     """
     from agentfront import current_caller
     from agentfront.app import App
 
     from irc_lens import __version__
+    from irc_lens.web import agent_sessions
 
     front = App(
         name="irc-lens-agent",
@@ -159,12 +170,73 @@ def build_agent_front():
         description="Personal-agent endpoint of the irc-lens console.",
     )
 
+    async def _agent() -> tuple[AgentPrincipal, Any]:
+        principal = current_caller()
+        if not isinstance(principal, AgentPrincipal) or app is None:
+            raise _no_caller()
+        return principal, await agent_sessions.agent_session_for(app, principal)
+
     @front.tool
-    def whoami() -> dict:
-        """Report this agent's nick and its human's tier."""
-        return describe_principal(current_caller())
+    async def whoami() -> dict:
+        """Report this agent's nick, its human's tier and its joined channels."""
+        principal, agent = await _agent()
+        return {
+            **describe_principal(principal),
+            "joined": sorted(agent.session.joined_channels),
+        }
+
+    @front.tool
+    async def read(channel: str = "", limit: int = 50) -> dict:
+        """Unread lines delivered to this agent, each marked owner / not-owner.
+
+        Only lines that reached the agent's own connection, after the
+        owner-only filter: DMs and lines naming the agent from anyone but its
+        human are withheld (``withheld`` counts them). ``channel`` limits the
+        read to one #channel (or ``DM``).
+        """
+        _principal, agent = await _agent()
+        return agent.read(channel, limit)
+
+    @front.tool
+    async def send(target: str = "", text: str = "") -> dict:
+        """Send one line to a #channel (default: the current one) or to your human.
+
+        Passes the same gate as the human's own input (allowlist, rate
+        limit, input log) and the human's channel grants. Text is always
+        chat, never a command.
+        """
+        principal, agent = await _agent()
+        return await agent.send(target, text, ip=principal.ip)
+
+    @front.tool
+    async def channels() -> dict:
+        """Channels this agent has joined (and, on the mesh, may list)."""
+        _principal, agent = await _agent()
+        return await agent.channels()
+
+    @front.tool
+    async def join(channel: str = "") -> dict:
+        """Join a #channel your human is granted (not available to guests)."""
+        principal, agent = await _agent()
+        return await agent.join(channel, ip=principal.ip)
+
+    @front.tool
+    async def part(channel: str = "") -> dict:
+        """Leave a #channel (not available to guests)."""
+        principal, agent = await _agent()
+        return await agent.part(channel, ip=principal.ip)
 
     return front
+
+
+def _no_caller():
+    from irc_lens._errors import EXIT_USER_ERROR, AfiError
+
+    return AfiError(
+        code=EXIT_USER_ERROR,
+        message="no authenticated agent",
+        remediation="call the MCP endpoint with your agent credential",
+    )
 
 
 # -- the human behind a credential ---------------------------------------------
@@ -211,7 +283,12 @@ def _resolve(app: web.Application, token: str, ip: str) -> tuple[str, Any]:
         return "human", credential_key
     email, tier = _split_key(credential_key)
     return "ok", AgentPrincipal(
-        credential_key=credential_key, email=email, tier=tier, nick=nick, token=token
+        credential_key=credential_key,
+        email=email,
+        tier=tier,
+        nick=nick,
+        token=token,
+        ip=ip,
     )
 
 
@@ -453,7 +530,7 @@ def install(app: web.Application, *, sweep_interval_s: float) -> None:
     app.router.add_get(PAGE_PATH, get_page)
     app.router.add_post(PAGE_PATH, post_issue)
     mount_mcp(
-        app, build_agent_front(), app["config"], authenticate=make_authenticator(app)
+        app, build_agent_front(app), app["config"], authenticate=make_authenticator(app)
     )
 
     async def start(app: web.Application) -> None:  # NOSONAR S7503 - on_startup

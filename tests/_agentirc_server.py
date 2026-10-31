@@ -77,7 +77,7 @@ class AgentIRCTestServer:
     proves the query round-trips, not that it returns real backlog.
     """
 
-    def __init__(self, auto_welcome: bool = True) -> None:
+    def __init__(self, auto_welcome: bool = True, relay: bool = False) -> None:
         #: send ``001 RPL_WELCOME`` on ``USER`` (t5 behavior, required by
         #: the live-verb tools' ``wait_for_welcome()``). The shared conftest
         #: fixture opts OUT to preserve the pre-t5 semantics its consumers
@@ -96,6 +96,61 @@ class AgentIRCTestServer:
         #: it (in the same or a later connection to this same server
         #: instance) sees consistent, immediate results.
         self.channel_members: dict[str, set[str]] = {}
+        #: t13: opt-in multi-client mode. Tracks each connection's own nick,
+        #: refuses a nick already in use (``433``, like a real ircd's
+        #: uniqueness rule) and relays ``PRIVMSG``/``NOTICE`` to channel
+        #: members or to the target nick's connection, with a
+        #: ``:nick!nick@test`` prefix. Off by default so every existing
+        #: single-connection consumer keeps its exact behaviour.
+        self._relay = relay
+        self._nicks: dict[asyncio.StreamWriter, str] = {}
+
+    def _conn_nick(self, writer: asyncio.StreamWriter) -> str:
+        if self._relay and writer in self._nicks:
+            return self._nicks[writer]
+        return self._nick or "lens"
+
+    async def _write(self, writer: asyncio.StreamWriter, line: str) -> None:
+        try:
+            writer.write(f"{line}\r\n".encode("utf-8"))
+            await writer.drain()
+        except (ConnectionResetError, BrokenPipeError) as exc:
+            logger.debug("test server: write failed: %s", exc)
+
+    async def _relay_nick(self, line: _ReceivedLine, writer: asyncio.StreamWriter) -> bool:
+        """Relay-mode NICK: refuse a nick another connection holds."""
+        nick = line.params[0]
+        taken = {n.casefold() for w, n in self._nicks.items() if w is not writer}
+        if nick.casefold() in taken:
+            await self._write(
+                writer, f":test-agentirc 433 * {nick} :Nickname is already in use"
+            )
+            return False
+        self._nicks[writer] = nick
+        return True
+
+    async def _relay_message(
+        self, line: _ReceivedLine, writer: asyncio.StreamWriter
+    ) -> None:
+        """Relay-mode PRIVMSG/NOTICE: deliver like a real ircd would."""
+        if len(line.params) < 2 or writer not in self._nicks:
+            return
+        sender = self._nicks[writer]
+        target, text = line.params[0], line.params[-1]
+        out = f":{sender}!{sender}@test {line.command} {target} :{text}"
+        if target.startswith("#"):
+            members = {m.casefold() for m in self.channel_members.get(target, set())}
+            dests = [
+                w
+                for w, n in self._nicks.items()
+                if n.casefold() in members and w is not writer
+            ]
+        else:
+            dests = [
+                w for w, n in self._nicks.items() if n.casefold() == target.casefold()
+            ]
+        for dest in dests:
+            await self._write(dest, out)
 
     async def start(self) -> None:
         self._server = await asyncio.start_server(
@@ -150,6 +205,10 @@ class AgentIRCTestServer:
             # test server down for the next test.
             logger.debug("test server: connection error: %s", exc)
         finally:
+            gone = self._nicks.pop(writer, None)
+            if gone is not None:  # relay mode: a closed client leaves its rooms
+                for members in self.channel_members.values():
+                    members.discard(gone)
             try:
                 writer.close()
             except Exception as exc:
@@ -159,20 +218,27 @@ class AgentIRCTestServer:
         self, line: _ReceivedLine, writer: asyncio.StreamWriter
     ) -> None:
         if line.command == "NICK" and line.params:
+            if self._relay and not await self._relay_nick(line, writer):
+                return
             self._nick = line.params[0]
             return
+        if self._relay and line.command in ("PRIVMSG", "NOTICE"):
+            await self._relay_message(line, writer)
+            return
         if line.command == "USER":
+            if self._relay and writer not in self._nicks:
+                return  # nick refused (433): registration does not complete
             if self._auto_welcome:
                 await self._send_welcome(writer)
             return
         if line.command == "JOIN" and line.params:
             channel = line.params[0]
-            self.channel_members.setdefault(channel, set()).add(self._nick or "lens")
+            self.channel_members.setdefault(channel, set()).add(self._conn_nick(writer))
             await self._echo_membership(writer, "JOIN", channel)
             return
         if line.command == "PART" and line.params:
             channel = line.params[0]
-            self.channel_members.get(channel, set()).discard(self._nick or "lens")
+            self.channel_members.get(channel, set()).discard(self._conn_nick(writer))
             await self._echo_membership(writer, "PART", channel)
             return
         if line.command == "LIST":
@@ -201,7 +267,7 @@ class AgentIRCTestServer:
         would reject every query, and ``wait_for_welcome()`` would raise
         after its 5s timeout.
         """
-        nick = self._nick or "lens"
+        nick = self._conn_nick(writer)
         line = f":test-agentirc 001 {nick} :Welcome to the AgentIRC test server, {nick}\r\n"
         try:
             writer.write(line.encode("utf-8"))
@@ -218,7 +284,7 @@ class AgentIRCTestServer:
         a real ircd sends and what `Session.dispatch`'s JOIN/PART
         listener parses.
         """
-        nick = self._nick or "lens"
+        nick = self._conn_nick(writer)
         line = f":{nick}!{nick}@test {verb} :{channel}\r\n"
         try:
             writer.write(line.encode("utf-8"))

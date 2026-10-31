@@ -235,6 +235,20 @@ class AccessStore:
         )
         return rows[0] if rows else None
 
+    def agent_key_for_nick(self, nick: str) -> str | None:
+        """The credential key whose agent was issued *nick* (newest row).
+
+        Lens state, not nick text: revoked and expired rows still answer,
+        so a flag raised against an agent after its credential lapsed still
+        reaches its human.
+        """
+        rows = self._all(
+            "SELECT email FROM agent_credentials WHERE nick = ? COLLATE NOCASE "
+            "ORDER BY created DESC, rowid DESC LIMIT 1",
+            ((nick or "").strip(),),
+        )
+        return rows[0][0] if rows else None
+
     def active_credential_count(self, email: str) -> int:
         return self._all(
             "SELECT COUNT(*) FROM agent_credentials "

@@ -138,7 +138,7 @@ def _counting_front(calls: list[str]):
     """The real agent front, with its tools wrapped to count executions."""
     real = agent_auth.build_agent_front
 
-    def build() -> App:
+    def build(_app=None) -> App:
         front = App(name="agent-test", version="0.0.0", description="t12 test front")
 
         @front.tool
@@ -635,8 +635,13 @@ async def test_dev_mode_mcp_path_carries_no_browser_identity(tmp_path: Path) -> 
 def test_production_front_exposes_no_identityless_tools() -> None:
     """The endpoint serves the agent front, never cli.build_app()'s live tools."""
     module = agent_auth  # no env fixture here, so nothing is monkeypatched
-    names = [getattr(t, "name", t) for t in module.build_agent_front().list_tools()]
-    assert names == ["whoami"]
+    tools = module.build_agent_front().list_tools()
+    names = sorted(getattr(t, "name", t) for t in tools)
+    # t13's real agent tools; none of them is a tools.py (dev path) function.
+    assert names == ["channels", "join", "part", "read", "send", "whoami"]
+    from irc_lens import tools as dev_tools
+
+    assert not any(t.func.__module__ == dev_tools.__name__ for t in tools)
     principal = module.AgentPrincipal(
         credential_key=MEMBER, email=MEMBER, tier="approved", nick="n", token="t"
     )

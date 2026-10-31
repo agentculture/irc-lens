@@ -40,4 +40,17 @@ def agent_nick_for(human_nick: str) -> str:
     return f"{server}-{AGENT_NICK_INFIX}{rest}"
 
 
-__all__ = ["AGENT_NICK_INFIX", "agent_nick_for"]
+def is_agent_nick(nick: str) -> bool:
+    """True iff *nick* lies in the personal-agent namespace.
+
+    A namespace test only: it says nothing about *whose* agent a nick is.
+    Ownership always comes from the lens's credential rows
+    (``web/agent_sessions.py``), never from this text.
+    """
+    _server, sep, rest = (nick or "").partition("-")
+    return bool(sep and _server and rest.startswith(AGENT_NICK_INFIX)) and len(
+        rest
+    ) > len(AGENT_NICK_INFIX)
+
+
+__all__ = ["AGENT_NICK_INFIX", "agent_nick_for", "is_agent_nick"]
