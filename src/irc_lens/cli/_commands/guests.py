@@ -47,10 +47,34 @@ def _warn_if_unapproved(args: argparse.Namespace, email: str) -> None:
             file=sys.stderr,
         )
         return
+    if getattr(cfg, "access_enabled", False):
+        _warn_if_not_in_store(args, email)
+        return
     if email not in {e.lower() for e in cfg.allowed_emails}:
         print(
             f"warning: {email} is not in allowed_emails; sign-in also "
             "requires the allowlist",
+            file=sys.stderr,
+        )
+
+
+def _warn_if_not_in_store(args: argparse.Namespace, email: str) -> None:
+    """Email permissions on: approval lives in the access store, not the config."""
+    try:
+        from irc_lens.access_store import AccessStore
+
+        path = _resolve_store_path(args)
+        user = AccessStore(path).get_user(email) if path.exists() else None
+    except Exception:  # noqa: BLE001 -- the warning is best effort
+        print(
+            "warning: could not read the access store to check the approved list",
+            file=sys.stderr,
+        )
+        return
+    if not user or user["state"] not in ("approved", "invited"):
+        print(
+            f"warning: {email} is not an approved user in the access store; "
+            "sign-in also requires approval (irc-lens users add)",
             file=sys.stderr,
         )
 

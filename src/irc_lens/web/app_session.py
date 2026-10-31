@@ -188,6 +188,12 @@ def _sql_count(store: AccessStore, sql: str) -> int:
         return con.execute(sql).fetchone()[0]
 
 
+def _store_path(config) -> str:
+    from irc_lens.config import _default_guest_store_path
+
+    return config.guest_store_path or _default_guest_store_path()
+
+
 def install_access(app: web.Application) -> AccessStore | None:
     """Open the access store and run the one-time admin import.
 
@@ -201,14 +207,10 @@ def install_access(app: web.Application) -> AccessStore | None:
     config = app["config"]
     if not getattr(config, "access_enabled", False):
         return None
-    store = AccessStore(config.guest_store_path)
+    store = AccessStore(_store_path(config))
     if _sql_count(store, "SELECT COUNT(*) FROM admin_imports") == 0:
         store.import_admins(config.allowed_emails)
-    admins = _sql_count(
-        store,
-        "SELECT COUNT(*) FROM users WHERE role='admin' AND state='approved'",
-    )
-    if admins == 0:
+    if store.admin_count() == 0:
         raise AfiError(
             code=EXIT_USER_ERROR,
             message=(
@@ -240,6 +242,41 @@ def approved_user(app: web.Application, email: str) -> dict[str, str] | None:
     if email.lower() in allowed_lower(config):
         return {"email": email.lower(), "role": "", "state": "approved"}
     return None
+
+
+#: States that may complete the password / code sign-in. ``invited`` is an
+#: admin-invited user who has not yet signed in; finishing the code step
+#: promotes them to ``approved`` (:func:`promote_on_signin`).
+SIGNIN_STATES = frozenset({"approved", "invited"})
+
+
+def can_sign_in(app: web.Application, email: str) -> bool:
+    """May *email* take part in the app sign-in / set-password flows?
+
+    With the feature on the access store decides (approved or invited; fail
+    closed without a store); otherwise ``auth.allowed_emails`` does.
+    """
+    config = app["config"]
+    if not getattr(config, "access_enabled", False):
+        return email.lower() in allowed_lower(config)
+    store = app.get(ACCESS_STORE)
+    if store is None:
+        return False
+    try:
+        user = store.get_user(email)
+    except Exception:  # noqa: BLE001 - unreadable store => closed
+        return False
+    return bool(user) and user["state"] in SIGNIN_STATES
+
+
+def promote_on_signin(app: web.Application, email: str) -> None:
+    """After a right sign-in code: an ``invited`` user becomes ``approved``."""
+    store = app.get(ACCESS_STORE)
+    if store is None:
+        return
+    user = store.get_user(email)
+    if user and user["state"] == "invited":
+        store.set_user(email, role=user["role"], state="approved", actor=email)
 
 
 def identity_for(request: web.Request) -> Identity | None:

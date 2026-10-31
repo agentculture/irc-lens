@@ -18,6 +18,7 @@ from aiohttp import web
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
 from irc_lens.web import (
+    admin,
     app_session,
     bans,
     csrf,
@@ -264,6 +265,9 @@ def make_app(
             "codes can't be mailed (approved users use /login); set a provider"
         )
     _install_guest_state(app, config)
+    # Email-keyed permissions: open the access store, run the one-time admin
+    # import and refuse to start with no approved admin (no-op when off).
+    access_store = app_session.install_access(app)
     _install_media_state(app, config)
 
     app.router.add_get("/", routes.get_index)
@@ -275,6 +279,8 @@ def make_app(
     app.router.add_get("/residents", routes.get_residents)
     app.router.add_get("/healthz", routes.get_healthz)
     app.router.add_get("/owner/metrics", routes.get_owner_metrics)
+    if access_store is not None:
+        admin.install(app)
     # Guest-mode entry card (/entry, /entry/*): 404 while guest mode is off.
     entry.install(app, config)
     if config.guest_enabled:

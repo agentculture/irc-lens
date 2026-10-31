@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="referrer" content="same-origin">
+    <title>culture admin</title>
+    <link rel="icon" href="{{ static_url('favicon.ico') }}">
+    <link rel="stylesheet" href="{{ css_url }}">
+    <link rel="stylesheet" href="{{ admin_css_url }}">
+  </head>
+  <body class="entry">
+    <main class="admin-layout">
+      <h1>Access admin</h1>
+      <p><a href="/">Back to the console</a></p>
+      {% if error %}<p class="entry-error" role="alert">{{ error }}</p>{% endif %}
+      {% if done %}<p class="entry-done" role="status">{{ done }}</p>{% endif %}
+
+      <section class="admin-section" aria-label="Add or invite a user">
+        <h2>Add or invite a user</h2>
+        <form method="post" action="/admin/users" class="admin-inline">
+          <label for="adm-new-email">Email</label>
+          <input id="adm-new-email" name="email" type="email" required maxlength="254">
+          <label for="adm-new-role">Role</label>
+          <select id="adm-new-role" name="role">
+            {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+          </select>
+          <button type="submit" name="mode" value="add" class="btn btn-outline">Add now</button>
+          <button type="submit" name="mode" value="invite" class="btn btn-primary">Invite by email</button>
+        </form>
+        <p class="admin-muted">An invited user gets a set-password link and is approved once they finish signing in.</p>
+      </section>
+
+      <section class="admin-section" aria-label="Users">
+        <h2>Users</h2>
+        <table class="admin-table">
+          <thead>
+            <tr><th>Email</th><th>Role</th><th>State</th><th>Channel grants</th><th>Agent</th><th></th></tr>
+          </thead>
+          <tbody>
+            {% for u in users %}
+            <tr>
+              <td>{{ u.email }}</td>
+              <td>
+                <form method="post" action="/admin/users" class="admin-inline">
+                  <input type="hidden" name="email" value="{{ u.email }}">
+                  <input type="hidden" name="mode" value="add">
+                  <select name="role" aria-label="Role for {{ u.email }}">
+                    {% for r in roles %}<option value="{{ r }}"{% if r == u.role %} selected{% endif %}>{{ r }}</option>{% endfor %}
+                  </select>
+                  <button type="submit" class="btn btn-outline">Set</button>
+                </form>
+              </td>
+              <td>{{ u.state }}</td>
+              <td>
+                {% for g in u.grants %}
+                <form method="post" action="/admin/grants" class="admin-inline">
+                  <input type="hidden" name="email" value="{{ u.email }}">
+                  <input type="hidden" name="channel" value="{{ g.channel }}">
+                  <input type="hidden" name="level" value="revoke">
+                  <span>{{ g.channel }} ({{ g.level }})</span>
+                  <button type="submit" class="btn btn-outline" aria-label="Revoke {{ g.channel }} from {{ u.email }}">Revoke</button>
+                </form>
+                {% else %}<span class="admin-muted">none</span>{% endfor %}
+                <form method="post" action="/admin/grants" class="admin-inline">
+                  <input type="hidden" name="email" value="{{ u.email }}">
+                  <input name="channel" type="text" placeholder="#channel" required maxlength="200" aria-label="Channel for {{ u.email }}">
+                  <select name="level" aria-label="Level for {{ u.email }}">
+                    {% for l in levels %}<option value="{{ l }}">{{ l }}</option>{% endfor %}
+                  </select>
+                  <button type="submit" class="btn btn-outline">Grant</button>
+                </form>
+              </td>
+              <td>
+                {% if u.extension_until and u.extension_until > now %}
+                <span>extended, {{ ((u.extension_until - now) / 3600) | round(1) }} h left</span>
+                {% else %}<span class="admin-muted">no extension</span>{% endif %}
+                <form method="post" action="/admin/extension" class="admin-inline">
+                  <input type="hidden" name="email" value="{{ u.email }}">
+                  <input name="hours" type="text" inputmode="decimal" placeholder="hours" required maxlength="12" aria-label="Extension hours for {{ u.email }}">
+                  <button type="submit" class="btn btn-outline">Approve</button>
+                </form>
+                {% if u.extension_until %}
+                <form method="post" action="/admin/extension" class="admin-inline">
+                  <input type="hidden" name="email" value="{{ u.email }}">
+                  <input type="hidden" name="hours" value="clear">
+                  <button type="submit" class="btn btn-outline">Clear extension</button>
+                </form>
+                {% endif %}
+              </td>
+              <td>
+                {% if u.state != "removed" %}
+                <form method="post" action="/admin/users/remove" class="admin-inline">
+                  <input type="hidden" name="email" value="{{ u.email }}">
+                  <button type="submit" class="btn btn-outline" aria-label="Remove {{ u.email }}">Remove</button>
+                </form>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>

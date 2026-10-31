@@ -1,0 +1,17 @@
+/* Admin page extras on top of entry.css (no inline styles anywhere). */
+.admin-layout { max-width: 64rem; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+.admin-layout h1, .admin-layout h2 { font-weight: 600; }
+.admin-section { margin: 2rem 0; }
+.admin-table { width: 100%; border-collapse: collapse; }
+.admin-table th, .admin-table td {
+  text-align: left; padding: .5rem; vertical-align: top;
+  border-bottom: 1px solid var(--entry-border);
+}
+.admin-inline { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.admin-inline input, .admin-inline select {
+  background: var(--entry-surface); color: var(--entry-fg);
+  border: 1px solid var(--entry-input-border); border-radius: 6px;
+  padding: .4rem .6rem; font: inherit;
+}
+.admin-inline .btn { flex: 0 0 auto; }
+.admin-muted { color: var(--entry-muted); }
