@@ -2,7 +2,7 @@
   "plan_slug": "email-keyed-permissions-one-sponsored-agent",
   "schema_version": 2,
   "created": "2026-10-31T06:39:10Z",
-  "updated": "2026-10-31T09:00:39Z",
+  "updated": "2026-10-31T20:47:35Z",
   "deviations": [
     {
       "id": "d1",
@@ -67,7 +67,667 @@
       "seq": 5
     }
   ],
-  "evidence": [],
-  "deltas": [],
+  "evidence": [
+    {
+      "id": "e1",
+      "obligation_ref": "o1",
+      "test_ref": "tests/test_access_store.py::test_issue_credential_revokes_prior; tests/test_access_store.py::test_concurrent_issue_leaves_one_active; tests/test_agent_auth.py::test_issue_again_replaces_and_closes_old_agent",
+      "behavior_text": "issuing a credential for a human revokes any prior one in the same transaction; two concurrent issues leave exactly one active credential, and the replaced agent's IRC connection is closed",
+      "contract_text": "Every human (approved or guest) may bring exactly one personal agent; the agent connects over MCP, is authenticated through its human's email, and counts as that human (same tier, same permissions, no extra seat)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "3 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 6
+    },
+    {
+      "id": "e2",
+      "obligation_ref": "o2",
+      "test_ref": "tests/test_agent_sessions.py::test_addressed_channel_lines_from_others_are_withheld; tests/test_agent_sessions.py::test_owner_lines_are_delivered_and_marked; tests/test_agent_sessions.py::test_owner_is_lens_state_not_nick_text; tests/test_e2e_permissions.py::test_zero_cross_human_deliveries; tests/test_e2e_permissions.py::test_owner_lines_arrive_marked_owner_symmetrically",
+      "behavior_text": "a line from any sender other than the agent's human that DMs or @-addresses the agent is withheld; every delivered line carries an owner/not-owner mark taken from lens state",
+      "contract_text": "A human can talk with their own agent; no human can talk with another human's agent (user A can't reach user B's agent, user A can reach user A's agent)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "5 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 7
+    },
+    {
+      "id": "e3",
+      "obligation_ref": "o3",
+      "test_ref": "tests/test_session_access.py::test_join_ungranted_refused_no_line; tests/test_session_access.py::test_send_and_chat_and_me_ungranted_emit_nothing; tests/test_session_access.py::test_read_ungranted_refused_no_history_line; tests/test_session_access.py::test_who_ungranted_refused_no_line; tests/test_session_access.py::test_channels_lists_only_granted_and_does_not_audit_each; tests/test_session_access.py::test_agents_only_queries_granted_joined; tests/test_session_access.py::test_mesh_names_only_granted_channels_and_their_nicks; tests/test_session_access.py::test_dispatch_drops_lines_from_revoked_channel",
+      "behavior_text": "join, send, read/history, channels, who, mesh, agents and live PRIVMSG dispatch each consult the grant check; an ungranted request emits no IRC line and returns a refusal",
+      "contract_text": "Channel permissions are enforced server-side in the lens Session for every path \u2014 join, send, read/history, channels listing, roster/who, raw /input \u2014 not only by hiding channels in the UI",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "8 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 8
+    },
+    {
+      "id": "e4",
+      "obligation_ref": "o4",
+      "test_ref": "tests/test_session_access.py::test_admin_passes_every_channel_check; tests/test_session_access.py::test_unapproved_or_missing_human_fails_closed; tests/test_access_policy.py::test_unknown_or_unapproved_denied; tests/test_access_policy.py::test_unreadable_store_fails_closed; tests/test_access_policy.py::test_unreadable_grants_fail_closed; tests/test_access_policy.py::test_missing_database_file_fails_closed",
+      "behavior_text": "an admin passes every channel check; a non-admin with no grant row fails every check (default-deny, never default-allow on a missing or unreadable grant)",
+      "contract_text": "Roles: admins have full access to every channel; for everyone else no grant means no channels (default-deny)",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "6 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 9
+    },
+    {
+      "id": "e5",
+      "obligation_ref": "o5",
+      "test_ref": "tests/test_access_policy.py::test_role_level_matrix; tests/test_access_policy.py::test_grant_is_per_channel; tests/test_session_access.py::test_send_granted_allowed",
+      "behavior_text": "a read-level grant allows list/history/live lines and refuses every send verb; write/ask allows both",
+      "contract_text": "Two per-channel access levels: read, and write/ask",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "3 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 10
+    },
+    {
+      "id": "e6",
+      "obligation_ref": "o6",
+      "test_ref": "tests/test_admin_only_routes.py::test_backend_for_member_never_sandbox_even_if_stale_toggle; tests/test_admin_only_routes.py::test_backend_for_guest_is_sandbox_and_admin_toggle_honoured; tests/test_admin_only_routes.py::test_non_admin_approved_gets_403; tests/test_registry_access.py::test_sandbox_sessions_are_not_given_mesh_grants",
+      "behavior_text": "a guest principal always maps to the sandbox backend; an approved non-admin maps to the mesh, with no route to the sandbox guest view",
+      "contract_text": "Guests stay separate on the sandbox; approved (signed) users reach the real mesh, limited to their granted channels",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "4 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 11
+    },
+    {
+      "id": "e7",
+      "obligation_ref": "o7",
+      "test_ref": "tests/test_access_policy.py::test_revocation_refuses_agent_next_check; tests/test_access_policy.py::test_agent_follows_downgrade_and_bad_token; tests/test_agent_sessions.py::test_revoked_grant_bites_on_the_next_send; tests/test_e2e_permissions.py::test_revoked_grant_mid_session_refuses_the_agents_next_calls",
+      "behavior_text": "an agent's grants are read from its human's current rows on every check; revoking the human's grant refuses the agent's next call",
+      "contract_text": "A personal agent can be wherever its owner is, with exactly its owner's permissions",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "4 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 12
+    },
+    {
+      "id": "e8",
+      "obligation_ref": "o8",
+      "test_ref": "tests/test_agent_auth.py::test_missing_or_bad_credential_refused_before_tool; tests/test_agent_auth.py::test_expired_credential_refused; tests/test_agent_auth.py::test_revoked_credential_refused; tests/test_agent_auth.py::test_replaced_credential_refused; tests/test_agent_auth.py::test_token_shown_once_and_stored_only_as_hash; tests/test_agent_auth.py::test_token_in_query_string_is_not_accepted; tests/test_mcp_http.py::test_rejecting_authenticator_gives_401_and_runs_no_tool",
+      "behavior_text": "a request without a valid, unexpired, unrevoked credential is refused before any tool runs; credentials are stored only as hashes",
+      "contract_text": "The single remote MCP endpoint (HTTP, not stdio) authenticates each agent with its own bearer credential: issued through its human's existing approval path (allowlist sign-in for approved users, email code for guests \u2014 per q5), stored hashed, bound to the human, revocable and expiring; the agent gets its own IRC connection and a nick visibly tied to its human",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "7 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 13
+    },
+    {
+      "id": "e9",
+      "obligation_ref": "o9",
+      "test_ref": "tests/test_agent_auth.py::test_removed_user_cut_off_and_agent_closed; tests/test_agent_auth.py::test_banned_guest_cut_off; tests/test_agent_auth.py::test_deleted_guest_cut_off; tests/test_guest_agent.py::test_ban_refuses_and_disconnects_agent_and_removes_rows; tests/test_guest_agent.py::test_self_service_deletion_closes_agent_and_removes_rows; tests/test_guest_agent.py::test_idle_reap_closes_agent_with_its_human",
+      "behavior_text": "banning or deleting a human refuses and disconnects their agent and removes its credential rows",
+      "contract_text": "The agent is accounted as its human everywhere the human is: it takes no extra guest seat, is checked against is_banned(email, ip), its flags use the human's key, idle sign-off and deletion (delete_guest_inputs, delete_sessions_for_email) and the retention sweep cover it",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "6 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 14
+    },
+    {
+      "id": "e10",
+      "obligation_ref": "o10",
+      "test_ref": "tests/test_deployment_permissions.py::test_verify_script_exits_zero_when_connect_is_refused; tests/test_deployment_permissions.py::test_verify_script_exits_nonzero_when_connect_succeeds",
+      "behavior_text": "a TCP connect to the mesh IRC port from a non-allowed source is refused; the lens, mesh agents and links still connect",
+      "contract_text": "The mesh IRCd accepts connections only from the lens, the mesh's own agents and its federation links \u2014 restricting it is part of this feature, because the IRCd has no access control and lens-side grants are otherwise bypassable",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "2 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 15
+    },
+    {
+      "id": "e11",
+      "obligation_ref": "o11",
+      "test_ref": "tests/test_agent_auth.py::test_three_tiers_three_scopes_on_one_endpoint; tests/test_agent_auth.py::test_request_parameters_cannot_change_scope; tests/test_agent_auth.py::test_guest_key_never_resolves_to_approved_grants; tests/test_e2e_permissions.py::test_three_credentials_get_three_scopes; tests/test_e2e_permissions.py::test_one_endpoint_one_credential_per_human",
+      "behavior_text": "one endpoint serves all tiers; the scope comes only from the credential's bound human, never from request parameters",
+      "contract_text": "One MCP endpoint for all tiers (admin, approved, guest), reached through the lens's public host; for now an agent is approved the same way a human is today",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "5 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 16
+    },
+    {
+      "id": "e12",
+      "obligation_ref": "o12",
+      "test_ref": "tests/test_admin_only_routes.py::test_non_admin_approved_gets_403; tests/test_admin_only_routes.py::test_require_admin_helper_refuses_non_admin_and_agents; tests/test_agent_auth.py::test_agent_principal_never_passes_admin_gate; tests/test_agent_auth.py::test_bearer_alone_does_not_open_other_routes",
+      "behavior_text": "a non-admin approved user or any agent gets 403",
+      "contract_text": "Admin-only surfaces: the sandbox 'guest view' toggle (which joins every guest's private room), the owner metrics page and the residents page are available to admins only \u2014 never to non-admin approved users or any agent",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "4 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 17
+    },
+    {
+      "id": "e13",
+      "obligation_ref": "o13",
+      "test_ref": "tests/test_agent_sessions.py::test_raw_client_dm_never_reaches_the_agent; tests/test_agent_sessions.py::test_raw_client_cannot_take_the_agents_nick",
+      "behavior_text": "a DM to the agent from a raw IRC client that bypasses the lens is withheld from MCP reads",
+      "contract_text": "Owner-only filtering runs on the receive side of the agent's lens-held IRC connection, so it covers every sender \u2014 other lens users, federated peers, and any client that reached the IRCd directly",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "2 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 18
+    },
+    {
+      "id": "e14",
+      "obligation_ref": "o14",
+      "test_ref": "tests/test_agent_auth.py::test_production_front_exposes_no_identityless_tools; tests/test_agent_auth.py::test_dev_mode_mcp_path_carries_no_browser_identity; tests/test_agent_sessions.py::test_endpoint_front_has_no_dev_tools; tests/test_agent_sessions.py::test_dev_verbs_are_unreachable_from_the_endpoint",
+      "behavior_text": "no tool call runs without a resolved human identity; the dev-only identity-less tools path is never reachable from the endpoint",
+      "contract_text": "The MCP endpoint does not reuse the identity-less tools.py path (fixed dev nick, dev-mode only); every MCP tool call carries its credential's human and passes the same grant check as the web Session",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "4 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 19
+    },
+    {
+      "id": "e15",
+      "obligation_ref": "o15",
+      "test_ref": "tests/test_agent_sessions.py::test_guest_agent_shares_the_guests_rate_limit; tests/test_agent_sessions.py::test_guest_agent_gets_the_guest_allowlist; tests/test_agent_sessions.py::test_guest_agent_sends_are_in_the_humans_input_log; tests/test_agent_sessions.py::test_agent_flags_resolve_to_the_human",
+      "behavior_text": "agent sends go through the same allowlist, rate limit, input log and flag path as the human's web input",
+      "contract_text": "An agent's sends pass the same gates as its human's: the guest command allowlist, the per-human rate limit, the input log and the flag path; one agent cannot exhaust a shared resident's answer capacity",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "4 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 20
+    },
+    {
+      "id": "e16",
+      "obligation_ref": "o16",
+      "test_ref": "tests/test_agent_auth.py::test_reapproval_is_rechecked_not_cached; tests/test_agent_auth.py::test_removed_user_cut_off_and_agent_closed",
+      "behavior_text": "each request re-checks the human is still approved / not banned / not deleted",
+      "contract_text": "Every agent request re-checks its human's current status (still approved, not banned, not deleted), so removing an approved user or banning a guest cuts off their agent on its next request",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "2 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 21
+    },
+    {
+      "id": "e17",
+      "obligation_ref": "o17",
+      "test_ref": "tests/test_access_switches.py::test_kill_switch_refuses_every_credential_tier; tests/test_access_switches.py::test_kill_switch_refuses_a_live_credential; tests/test_access_switches.py::test_disabled_after_migration_refuses_non_admin_the_mesh; tests/test_access_switches.py::test_disabled_after_migration_agents_are_refused; tests/test_access_switches.py::test_disabled_after_migration_no_fallback_to_config_allowlist; tests/test_e2e_permissions.py::test_kill_switch_flipped_mid_test_refuses_the_next_agent_call",
+      "behavior_text": "the kill switch refuses every agent call; disabling permissions refuses non-admins the mesh instead of granting all of it",
+      "contract_text": "Rollback fails closed: a single switch disables the MCP endpoint and blocks all agent credentials, and turning the permissions feature off never restores full mesh access to non-admin approved users",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "6 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 22
+    },
+    {
+      "id": "e18",
+      "obligation_ref": "o18",
+      "test_ref": "tests/test_admin.py::test_non_admins_get_403; tests/test_admin.py::test_real_agent_token_gets_403; tests/test_admin.py::test_invite_mails_setpw_link_and_is_not_yet_approved; tests/test_admin.py::test_invited_user_approved_only_after_signin_completes; tests/test_admin.py::test_guest_extension_stays_admin_only",
+      "behavior_text": "a non-admin approved user, a guest or any agent calling these routes gets 403; an invite never grants access before the invited user completes sign-in",
+      "contract_text": "Admins add and invite non-admin approved users, and manage their grants, from within the app",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "5 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 23
+    },
+    {
+      "id": "e19",
+      "obligation_ref": "o19",
+      "test_ref": "tests/test_guest_agent.py::test_idle_reap_closes_agent_with_its_human; tests/test_guest_agent.py::test_live_extension_keeps_the_agent_after_its_human_signs_off; tests/test_guest_agent.py::test_agent_closes_once_the_extension_ends; tests/test_guest_agent.py::test_cleared_extension_ends_the_exemption; tests/test_guest_agent.py::test_extension_of_another_email_does_not_keep_the_agent",
+      "behavior_text": "with no live admin extension the agent's connection closes in the same reap as its human; with one it stays until the extension's end time, then follows the normal rule",
+      "contract_text": "A guest's agent is disconnected when its human is signed off for idleness, unless an admin has approved that agent to stay for a set period of n hours (chosen by the admin), after which the normal rule applies again",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "5 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 24
+    },
+    {
+      "id": "e20",
+      "obligation_ref": "o20",
+      "test_ref": "tests/test_access_approval.py::test_enable_with_zero_admins_refuses_with_hint; tests/test_access_approval.py::test_first_start_imports_allowed_emails_as_admins; tests/test_admin.py::test_zero_admin_store_refuses_startup",
+      "behavior_text": "enabling permissions with zero admins in the store is refused with a hint; after migration the previously approved users are admins",
+      "contract_text": "The migration marks currently approved users as admins (today only the operator); the feature refuses to enable while zero admins exist",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "3 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 25
+    },
+    {
+      "id": "e21",
+      "obligation_ref": "o21",
+      "test_ref": "tests/test_access_store.py::test_import_admins_once; tests/test_access_store.py::test_import_survives_restart; tests/test_access_approval.py::test_allowed_emails_never_read_again; tests/test_access_approval.py::test_jwt_unknown_pending_and_allowlist_not_consulted; tests/test_admin.py::test_allowlist_entry_not_in_store_cannot_sign_in",
+      "behavior_text": "the migration imports the config allowlist exactly once (re-running it imports nothing new) and afterwards the config list is never read for access",
+      "contract_text": "Approved users and admin flags live in the lens store; the migration imports the existing config allowlist once and the config list is then retired",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "5 feature tests ran green in one pytest run on main at release 0.18.1 (irc-lens has no behavioral marker or folder, so the feature's own test modules are the behavioral set; IRC-level tests use the in-repo AgentIRC test server)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T21:56:21+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 26
+    },
+    {
+      "id": "e22",
+      "obligation_ref": "o2",
+      "test_ref": "staging clickthrough.py (session scratchpad), checks for this obligation",
+      "behavior_text": "bob's DM and @mention to alice's agent never reached alice's agent read; alice's own DM did",
+      "contract_text": "A human can talk with their own agent; no human can talk with another human's agent (user A can't reach user B's agent, user A can reach user A's agent)",
+      "evidence_type": "integration",
+      "strength": "execution",
+      "strength_basis": "real-browser Playwright click-through (5 browser contexts: admin, 2 members, 2 guests) against a staging lens + relay AgentIRC on irc-lens 0.18.1 / agentfront 0.21.2; 31/31 checks passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T17:31:56+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 27
+    },
+    {
+      "id": "e23",
+      "obligation_ref": "o3",
+      "test_ref": "staging clickthrough.py (session scratchpad), checks for this obligation",
+      "behavior_text": "alice's /join of an ungranted channel was refused and the channel never shown",
+      "contract_text": "Channel permissions are enforced server-side in the lens Session for every path \u2014 join, send, read/history, channels listing, roster/who, raw /input \u2014 not only by hiding channels in the UI",
+      "evidence_type": "integration",
+      "strength": "execution",
+      "strength_basis": "real-browser Playwright click-through (5 browser contexts: admin, 2 members, 2 guests) against a staging lens + relay AgentIRC on irc-lens 0.18.1 / agentfront 0.21.2; 31/31 checks passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T17:31:56+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 28
+    },
+    {
+      "id": "e24",
+      "obligation_ref": "o6",
+      "test_ref": "staging clickthrough.py (session scratchpad), checks for this obligation",
+      "behavior_text": "two concurrent guests never saw each other, members or mesh channels; members had no Guest view control",
+      "contract_text": "Guests stay separate on the sandbox; approved (signed) users reach the real mesh, limited to their granted channels",
+      "evidence_type": "integration",
+      "strength": "execution",
+      "strength_basis": "real-browser Playwright click-through (5 browser contexts: admin, 2 members, 2 guests) against a staging lens + relay AgentIRC on irc-lens 0.18.1 / agentfront 0.21.2; 31/31 checks passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T17:31:56+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 29
+    },
+    {
+      "id": "e25",
+      "obligation_ref": "o7",
+      "test_ref": "staging clickthrough.py (session scratchpad), checks for this obligation",
+      "behavior_text": "after the admin revoked alice's grant, her agent's next send to that channel was refused",
+      "contract_text": "A personal agent can be wherever its owner is, with exactly its owner's permissions",
+      "evidence_type": "integration",
+      "strength": "execution",
+      "strength_basis": "real-browser Playwright click-through (5 browser contexts: admin, 2 members, 2 guests) against a staging lens + relay AgentIRC on irc-lens 0.18.1 / agentfront 0.21.2; 31/31 checks passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T17:31:56+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 30
+    },
+    {
+      "id": "e26",
+      "obligation_ref": "o18",
+      "test_ref": "staging clickthrough.py (session scratchpad), checks for this obligation",
+      "behavior_text": "admin invited two users; each reached the console only after completing password setup and sign-in",
+      "contract_text": "Admins add and invite non-admin approved users, and manage their grants, from within the app",
+      "evidence_type": "integration",
+      "strength": "execution",
+      "strength_basis": "real-browser Playwright click-through (5 browser contexts: admin, 2 members, 2 guests) against a staging lens + relay AgentIRC on irc-lens 0.18.1 / agentfront 0.21.2; 31/31 checks passed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T17:31:56+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 31
+    },
+    {
+      "id": "e27",
+      "obligation_ref": "o8",
+      "test_ref": "curl https://chat.culture.dev/mcp and http://127.0.0.1:8765/mcp, no bearer and a wrong bearer",
+      "behavior_text": "the live endpoint refuses requests without a valid credential",
+      "contract_text": "The single remote MCP endpoint (HTTP, not stdio) authenticates each agent with its own bearer credential: issued through its human's existing approval path (allowlist sign-in for approved users, email code for guests \u2014 per q5), stored hashed, bound to the human, revocable and expiring; the agent gets its own IRC connection and a nick visibly tied to its human",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "measured on the production console after cutover: 401 for no token and for a wrong token, locally and through Cloudflare (cf-cache DYNAMIC)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T20:08:00+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 32
+    },
+    {
+      "id": "e28",
+      "obligation_ref": "o12",
+      "test_ref": "curl https://chat.culture.dev/admin unauthenticated; /nickname, /agent-credential",
+      "behavior_text": "admin-only and signed-in routes refuse anonymous requests in production",
+      "contract_text": "Admin-only surfaces: the sandbox 'guest view' toggle (which joins every guest's private room), the owner metrics page and the residents page are available to admins only \u2014 never to non-admin approved users or any agent",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "measured on production after cutover: /admin 403, /nickname and /agent-credential 401, not cached by Cloudflare",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T20:08:00+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 33
+    },
+    {
+      "id": "e29",
+      "obligation_ref": "o20",
+      "test_ref": "sqlite3 -readonly guests.db: users table after first enforced start; owner sign-in",
+      "behavior_text": "after migration the previously approved user is an admin and can sign in",
+      "contract_text": "The migration marks currently approved users as admins (today only the operator); the feature refuses to enable while zero admins exist",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "production store after the 20:07 first enforced start: exactly 1 user, role admin, state approved (the config allowlist imported once); owner signed in and chose a nickname",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T20:15:00+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 34
+    },
+    {
+      "id": "e30",
+      "obligation_ref": "o10",
+      "test_ref": "verify_mesh_ircd.py from spark against all 17 non-loopback addresses of spark; ss -ltn",
+      "behavior_text": "spark's mesh IRCd refuses direct connections on every non-loopback address",
+      "contract_text": "The mesh IRCd accepts connections only from the lens, the mesh's own agents and its federation links \u2014 restricting it is part of this feature, because the IRCd has no access control and lens-side grants are otherwise bypassable",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "measured after the loopback drop-in: spark's IRCd listens on 127.0.0.1:6667 only; every one of its 17 LAN/tailscale/bridge addresses refused (script exit 0); lens, agents and the thor link still connect",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-10-31T19:53:30+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 35
+    },
+    {
+      "id": "e31",
+      "obligation_ref": "o10",
+      "test_ref": "verify_mesh_ircd.py from spark against thor's LAN address, orin's LAN address, spark2's direct-link address and their tailscale addresses; ss -ltn on each",
+      "behavior_text": "linked mesh servers refuse direct IRC from sources that are not the lens, agents or links",
+      "contract_text": "The mesh IRCd accepts connections only from the lens, the mesh's own agents and its federation links \u2014 restricting it is part of this feature, because the IRCd has no access control and lens-side grants are otherwise bypassable",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "measured on the linked servers: thor listens on 0.0.0.0 and accepted a direct connect on its LAN address (exit 1); orin and spark2 bind their tailscale address and refused LAN connects, but have no source firewall, so any tailnet device can connect. No non-peer host was available (nano offline) to measure a tailnet-side refusal",
+      "outcome": "fail",
+      "run": {
+        "timestamp": "2026-10-31T22:05:00+02:00",
+        "commit": "6e69503821cdb3946947d7574012bcc0050e8585"
+      },
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false,
+      "seq": 36
+    }
+  ],
+  "deltas": [
+    {
+      "id": "b1",
+      "kind": "added",
+      "behavior_text": "Approved users choose their own nickname on first sign-in (never derived from the email); a nickname stays reserved after removal or rename, users cannot rename themselves, and the choice is checked against nicks online on the mesh (owner decisions q13-q15; irc-lens 0.18.0 #86). Backed by tests/test_approved_nicknames.py, test_nickname_store.py, test_nickname_rename.py, test_nickname_cli.py and test_e2e_permissions.py::test_members_see_chosen_nicknames_and_no_email: 89 passed on main 6e69503 (2026-10-31); no obligation covers it, so no evidence record",
+      "caused_by": [
+        "c6"
+      ],
+      "evidence_refs": [],
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false
+    },
+    {
+      "id": "b2",
+      "kind": "amended",
+      "behavior_text": "Members (approved non-admins) may DM only their own agent: a console DM to any other nick, human or agent, is refused before it reaches IRC (review finding, irc-lens 0.17.1 #85), stricter than c3's agent-only rule. Also backed by test_session_access.py member_may_* tests, test_registry_access.py::test_member_session_from_registry_may_dm_own_agent_only and test_agent_sessions.py::test_member_console_dm_to_anyone_else_never_reaches_irc: 9 passed on 6e69503",
+      "caused_by": [
+        "c3"
+      ],
+      "evidence_refs": [
+        "e2",
+        "e22"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false
+    },
+    {
+      "id": "b3",
+      "kind": "amended",
+      "behavior_text": "Beyond the 403 on the admin-only routes, members are no longer shown the Guest view control or sandbox palette command, and /sandbox is gated too (found in the staging browser pass; irc-lens 0.18.1 #87)",
+      "caused_by": [
+        "c32"
+      ],
+      "evidence_refs": [
+        "e6",
+        "e24"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false
+    },
+    {
+      "id": "b4",
+      "kind": "added",
+      "behavior_text": "MCP run-tool errors (unknown tool, validation errors, raised exceptions) return isError: true per the MCP spec, over stdio and streamable HTTP (found in staging; agentfront 0.21.2 #58). Backed by agentfront's own suite; no irc-lens obligation covers it, so no evidence record",
+      "caused_by": [
+        "c22"
+      ],
+      "evidence_refs": [],
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false
+    },
+    {
+      "id": "b5",
+      "kind": "amended",
+      "behavior_text": "The listener restriction holds for spark's IRCd only (loopback). The mesh grew to four servers on 2026-10-31: thor still listens on all interfaces and accepts direct IRC on its LAN address; orin and spark2 bind their tailscale address (LAN refused) with no source firewall, so any tailnet device can connect to them. c31's guarantee is therefore not yet met mesh-wide",
+      "caused_by": [
+        "c31"
+      ],
+      "evidence_refs": [
+        "e30",
+        "e31"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "superseded": false
+    }
+  ],
   "supersessions": []
 }
