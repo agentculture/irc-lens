@@ -47,10 +47,34 @@ def _warn_if_unapproved(args: argparse.Namespace, email: str) -> None:
             file=sys.stderr,
         )
         return
+    if getattr(cfg, "access_enabled", False):
+        _warn_if_not_in_store(args, email)
+        return
     if email not in {e.lower() for e in cfg.allowed_emails}:
         print(
             f"warning: {email} is not in allowed_emails; sign-in also "
             "requires the allowlist",
+            file=sys.stderr,
+        )
+
+
+def _warn_if_not_in_store(args: argparse.Namespace, email: str) -> None:
+    """Email permissions on: approval lives in the access store, not the config."""
+    try:
+        from irc_lens.access_store import AccessStore
+
+        path = _resolve_store_path(args)
+        user = AccessStore(path).get_user(email) if path.exists() else None
+    except Exception:  # noqa: BLE001 -- the warning is best effort
+        print(
+            "warning: could not read the access store to check the approved list",
+            file=sys.stderr,
+        )
+        return
+    if not user or user["state"] not in ("approved", "invited"):
+        print(
+            f"warning: {email} is not an approved user in the access store; "
+            "sign-in also requires approval (irc-lens users add)",
             file=sys.stderr,
         )
 
@@ -126,6 +150,29 @@ def _flag_records(store, flag_log: Path) -> list[dict]:
     return records
 
 
+def _agent_human_email(args: argparse.Namespace, nick: str) -> str | None:
+    """A flag raised against a guest's personal agent bans its human.
+
+    The agent's nick is mapped to its human through the lens's own credential
+    rows (the access store shares the guest store's file), never by parsing
+    the nick. Approved humans' agents are not guests: no email is returned.
+    """
+    if not nick:
+        return None
+    try:
+        from irc_lens.access_store import AccessStore
+        from irc_lens.web.agent_sessions import human_for_agent_nick
+        from irc_lens.web.sessions import GUEST_PRINCIPAL_PREFIX
+
+        path = _resolve_store_path(args)
+        key = human_for_agent_nick(AccessStore(path), nick) if path.exists() else None
+    except Exception:  # noqa: BLE001 -- unreadable store: no mapping
+        return None
+    if not key or not key.startswith(GUEST_PRINCIPAL_PREFIX):
+        return None
+    return key[len(GUEST_PRINCIPAL_PREFIX) :]
+
+
 def _flag_log_path(args: argparse.Namespace) -> Path:
     return Path(args.flag_log or DEFAULT_FLAG_LOG).expanduser()
 
@@ -158,7 +205,7 @@ def cmd_guests_ban(args: argparse.Namespace) -> int:
             nick = (rec.get("nick") or "").lower()
             email = next(
                 (e for e, n, _ip in store.list_guests() if n.lower() == nick), None
-            )
+            ) or _agent_human_email(args, nick)
         if not email:
             raise AfiError(
                 code=EXIT_USER_ERROR,

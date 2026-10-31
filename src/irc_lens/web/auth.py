@@ -34,6 +34,7 @@ from jwt.algorithms import RSAAlgorithm
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
+from irc_lens.guest_store import email_hash
 from irc_lens.web import app_session
 from irc_lens.web.identity import (
     ANONYMOUS_IDENTITY,
@@ -42,6 +43,7 @@ from irc_lens.web.identity import (
     Identity,
     derive_nick,
 )
+from irc_lens.web.mcp_http import is_mcp_request
 
 logger = logging.getLogger(__name__)
 
@@ -296,6 +298,7 @@ def _authorize_principal(
     allowed_emails: set[str],
     allowed_tokens: set[str],
     server_name: str,
+    approved_user: Callable[[str], dict[str, str] | None] | None = None,
 ) -> Identity:
     """Extract the principal, enforce the allowlist, derive the nick.
 
@@ -303,6 +306,10 @@ def _authorize_principal(
     prevents a service-token JWT from accidentally matching an entry
     in ``allowed_emails`` (or vice versa) just because the strings
     happen to match. Raises :class:`_AuthDenied` on every deny path.
+
+    With *approved_user* (email permissions on) the access store decides an
+    email's approval and role instead of *allowed_emails*; service tokens
+    still use *allowed_tokens*.
     """
     principal, is_email = _principal_from_claims(claims)
     if not principal:
@@ -311,7 +318,17 @@ def _authorize_principal(
             "JWT carried neither email nor common_name",
             "verify the Access policy issues an email or service-token JWT",
         ))
-    if is_email and principal not in allowed_emails:
+    role = ""
+    if is_email and approved_user is not None:
+        user = approved_user(principal)
+        if user is None:
+            raise _AuthDenied(_http_error(
+                403,
+                f"{principal} not approved",
+                "ask an admin to approve this email",
+            ))
+        role = user["role"]
+    elif is_email and principal not in allowed_emails:
         raise _AuthDenied(_http_error(
             403,
             f"{principal} not on allowlist",
@@ -337,6 +354,7 @@ def _authorize_principal(
         nick=nick,
         raw_jwt_subject=str(claims.get("sub", "")),
         tier=TIER_APPROVED,
+        role=role,
     )
 
 
@@ -383,13 +401,18 @@ def _adopt_app_session(request: web.Request) -> bool:
         return False
     request["identity"] = app_identity
     logger.info(
-        "auth=ok via=app-session principal=%s nick=%s method=%s path=%s",
-        app_identity.principal,
+        "auth=ok via=app-session who=%s nick=%s method=%s path=%s",
+        _who(app_identity.principal),
         app_identity.nick,
         request.method,
         request.path,
     )
     return True
+
+
+def _who(principal: str) -> str:
+    """Short, address-free handle for an audit line: a hash prefix."""
+    return email_hash(principal)[:12]
 
 
 @dataclass(frozen=True)
@@ -404,6 +427,7 @@ class _AccessContext:
     allowed_tokens: set[str]
     server_name: str
     guest_enabled: bool
+    access_enabled: bool = False
 
 
 async def _as_anonymous(request: web.Request, handler, reason: str):
@@ -429,6 +453,13 @@ async def _fallback(
     return deny()
 
 
+def _store_decider(request: web.Request, ctx: _AccessContext):
+    """Per-request approval lookup when email permissions are on, else None."""
+    if not ctx.access_enabled:
+        return None
+    return lambda email: app_session.approved_user(request.app, email)
+
+
 async def _via_access_jwt(
     ctx: _AccessContext, request: web.Request, handler, token: str
 ):
@@ -442,7 +473,11 @@ async def _via_access_jwt(
             ctx.cache, token, ctx.aud, ctx.issuer, ctx.team_domain
         )
         identity = _authorize_principal(
-            claims, ctx.allowed_emails, ctx.allowed_tokens, ctx.server_name
+            claims,
+            ctx.allowed_emails,
+            ctx.allowed_tokens,
+            ctx.server_name,
+            _store_decider(request, ctx),
         )
     except _AuthDenied as denied:
         refusal = denied.response
@@ -453,8 +488,8 @@ async def _via_access_jwt(
         )
     request["identity"] = identity
     logger.info(
-        "auth=ok principal=%s nick=%s method=%s path=%s",
-        identity.principal,
+        "auth=ok who=%s nick=%s method=%s path=%s",
+        _who(identity.principal),
         identity.nick,
         request.method,
         request.path,
@@ -487,6 +522,7 @@ def build_cloudflare_middleware(config: LensConfig):
         allowed_tokens=set(config.allowed_service_tokens),
         server_name=config.server_name,
         guest_enabled=config.guest_enabled,
+        access_enabled=config.access_enabled,
     )
 
     @web.middleware
@@ -503,6 +539,12 @@ def build_cloudflare_middleware(config: LensConfig):
         # present). See docs/superpowers/specs/
         # 2026-07-02-media-support-design.md ("Upload path").
         if _is_public_path(request):
+            return await handler(request)
+        # The remote MCP mount (web.mcp_path) authenticates its own callers
+        # with agent bearer credentials (web/agent_auth.py), which this
+        # middleware does not understand. Exempt is only a request that
+        # *routed to* that mount; every other path keeps the checks below.
+        if is_mcp_request(request):
             return await handler(request)
         # App-native sign-in: a valid lens_session cookie is checked before
         # the Access JWT. Anything short of a live, still-allowlisted

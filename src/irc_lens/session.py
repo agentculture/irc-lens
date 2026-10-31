@@ -28,11 +28,13 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
+from irc_lens import access
 from irc_lens.commands import (
     CommandType,
     PaletteEntry,
     ParsedCommand,
     help_for,
+    is_admin_only,
     palette_for,
 )
 from irc_lens.irc import IRCTransport, Message, MessageBuffer
@@ -311,6 +313,14 @@ class Session:
         self.view: ViewName = "chat"
         self.roster: list[EntityItem] = []
 
+        # Email-keyed channel permissions (off when ``access_store`` is None,
+        # which keeps every path exactly as it was). Set via ``set_access``
+        # from the VERIFIED identity, never from client input. Every check
+        # reads the store's current rows, so a revoked grant bites at once.
+        self.access_store: Any = None
+        self.access_human: str | None = None
+        self._bg_tasks: set[asyncio.Task[None]] = set()
+
         # Guest-mode UI context, set by the session registry / routes from
         # the VERIFIED tier (never from client input): ``approved`` (real
         # mesh), ``guest`` (sandbox) or ``sandbox_preview`` (an approved
@@ -533,6 +543,8 @@ class Session:
             raise LensConnectionLost(str(exc)) from exc
 
     async def send_privmsg(self, target: str, text: str) -> None:
+        if not self.may("write", target):
+            raise PermissionError(f"not permitted: {target}")
         try:
             await self._transport.send_privmsg(target, text)
         except OSError as exc:
@@ -542,9 +554,82 @@ class Session:
             self._healthy = False
             raise LensConnectionLost(str(exc)) from exc
 
+    # ------------------------------------------------------------------
+    # Channel access (email-keyed grants; no-ops while access is off)
+    # ------------------------------------------------------------------
+
+    def set_access(self, store: Any, human: str | None) -> None:
+        """Enforce *human*'s grants from *store* on every channel path.
+        ``store=None`` turns enforcement off (the legacy behaviour)."""
+        self.access_store = store
+        self.access_human = human
+
+    @property
+    def access_enforced(self) -> bool:
+        return self.access_store is not None
+
+    def is_access_admin(self) -> bool:
+        """True when enforcement is off, or the human is an approved admin."""
+        if not self.access_enforced:
+            return True
+        return access.is_admin(self.access_human, store=self.access_store)
+
+    def may(self, op: str, channel: str, *, audit: bool = True) -> bool:
+        """Whether the viewer may ``list``/``read``/``write`` *channel*.
+
+        *audit=False* is for filtering listings and live lines, where a
+        hidden row is not an event worth an audit entry."""
+        if not self.access_enforced:
+            return True
+        check = {"list": access.can_list, "read": access.can_read}.get(
+            op, access.can_write
+        )
+        return check(self.access_human, channel, store=self.access_store, audit=audit)
+
+    def _refuse(self, channel: str) -> None:
+        # Deliberately generic: never confirm whether the channel exists.
+        self._publish_error(f"not permitted: {channel}")
+
+    def enforce_revocations(self) -> None:
+        """Public entry for page renders (``GET /``): see
+        :meth:`_enforce_revocations`."""
+        self._enforce_revocations()
+
+    def _enforce_revocations(self) -> None:
+        """Drop local state for channels the viewer may no longer see (a
+        grant revoked mid-session), so no view or sidebar names them."""
+        if not self.access_enforced:
+            return
+        gone = [c for c in self.joined_channels if not self.may("list", c, audit=False)]
+        for channel in gone:
+            self.joined_channels.discard(channel)
+            self._thinking_clear(channel)
+            self._schedule_part(channel)
+        if self.current_channel and not self.may("read", self.current_channel, audit=False):
+            self.current_channel = ""
+            self.roster = []
+
+    def _thinking_clear(self, channel: str) -> None:
+        entry = self._thinking.pop(channel, None)
+        if entry is not None:
+            entry[1].cancel()
+
+    def _schedule_part(self, channel: str) -> None:
+        try:
+            task = asyncio.get_running_loop().create_task(
+                self._transport.part_channel(channel)
+            )
+        except RuntimeError:
+            return  # no loop (sync unit tests): local state is already clean
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
+        task.add_done_callback(lambda t: t.cancelled() or t.exception())
+
     async def join(self, channel: str) -> None:
         if not channel.startswith("#"):
             return
+        if not self.may("read", channel):
+            raise PermissionError(f"not permitted: {channel}")
         # Server-confirmed semantics: only mark the channel joined once
         # the JOIN write succeeds. A failed send raises
         # `LensConnectionLost` and `joined_channels` does NOT advance —
@@ -679,6 +764,10 @@ class Session:
         submission order rather than interleaving (issue #22).
         """
         async with self._get_exec_lock():
+            self._enforce_revocations()
+            if self.access_enforced and is_admin_only(parsed) and not self.is_access_admin():
+                self._publish_error(f"/{parsed.type.name.lower()}: admins only")
+                return
             handler = self._exec_dispatch.get(parsed.type, self._exec_unsupported)
             await handler(parsed)
 
@@ -713,6 +802,9 @@ class Session:
         if not self.current_channel:
             self._publish_error("no active channel; /join #x first")
             return
+        if not self.may("write", self.current_channel):
+            self._refuse(self.current_channel)
+            return
         await self.send_privmsg(self.current_channel, text)
         self._publish_chat(self.nick, text)
         self._agent_hops.pop(self.current_channel, None)  # a human spoke
@@ -728,6 +820,9 @@ class Session:
         text = parsed.text or ""
         if not text:
             self._publish_error("/send needs text")
+            return
+        if not self.may("write", target):
+            self._refuse(target)
             return
         await self.send_privmsg(target, text)
         # Echo only when the target is the active channel — that's the
@@ -745,6 +840,9 @@ class Session:
         # would point the UI at a channel that's not in `joined_channels`.
         if not channel.startswith("#"):
             self._publish_error(f"invalid channel: {channel} (must start with #)")
+            return
+        if not self.may("read", channel):
+            self._refuse(channel)
             return
         await self.join(channel)
         self.set_current_channel(channel)
@@ -770,6 +868,9 @@ class Session:
             return
         if channel not in self.joined_channels:
             self._publish_error(f"not joined to {channel} — /join {channel} first")
+            return
+        if not self.may("read", channel):
+            self._refuse(channel)
             return
         # Switch is a pure view-state mutation — no IRC side-effect.
         self.set_current_channel(channel)
@@ -902,6 +1003,9 @@ class Session:
         if not channel:
             self._publish_error("/read: no channel — /join #x first or pass /read #x")
             return
+        if not self.may("read", channel):
+            self._refuse(channel)
+            return
         # /read peeks at history without switching panes — `view_channel`
         # is the *current* channel so the stale guard works correctly
         # when the user reads `#other` while sitting on `#ops`.
@@ -930,6 +1034,9 @@ class Session:
         if not target:
             self._publish_error("/who: no target — /join a channel or pass /who #x")
             return
+        if not self.may("read", target):
+            self._refuse(target)
+            return
         view_at_start = self.view
         try:
             entries = await self.who(target)
@@ -950,6 +1057,8 @@ class Session:
         view_at_start = self.view
         nicks: dict[str, dict] = {}
         for ch in sorted(self.joined_channels):
+            if not self.may("list", ch, audit=False):
+                continue
             try:
                 entries = await self.who(ch)
             except Exception:
@@ -970,6 +1079,9 @@ class Session:
             return
         if not self.current_channel:
             self._publish_error("no active channel; /join #x first")
+            return
+        if not self.may("write", self.current_channel):
+            self._refuse(self.current_channel)
             return
         # CTCP ACTION wire format: PRIVMSG #ch :\x01ACTION text\x01
         # Build via raw transport so we don't double-buffer through
@@ -1062,6 +1174,7 @@ class Session:
         the user-visible reactive update. Per-command branches live in
         helpers so this stays under sonarcloud's S3776 complexity cap.
         """
+        self._enforce_revocations()
         if msg.command == "PRIVMSG":
             self._dispatch_privmsg(msg)
             return
@@ -1101,6 +1214,11 @@ class Session:
         # `system-<server>` PRIVMSGs announce mesh events, not chat —
         # the transport already drops them from the buffer; mirror.
         if sender.startswith("system-"):
+            return
+        # A channel line the viewer may no longer read (grant revoked
+        # mid-session) is dropped before anything else sees it. Not audited:
+        # a busy room would flood the log.
+        if target.startswith("#") and not self.may("read", target, audit=False):
             return
         if self.thinking_agent:
             self._note_thinking(sender, target, text)
@@ -1265,6 +1383,7 @@ class Session:
     def _publish_roster(self) -> None:
         from irc_lens.web.render import render_fragment
 
+        self._enforce_revocations()
         fragment = render_fragment("_sidebar.html.j2", session=self)
         self.event_bus.publish(SessionEvent(name="roster", data=fragment))
 
@@ -1277,6 +1396,7 @@ class Session:
         """
         from irc_lens.web.render import render_fragment
 
+        self._enforce_revocations()
         fragment = render_fragment("_info.html.j2", session=self)
         self.event_bus.publish(SessionEvent(name="info", data=fragment))
 
@@ -1303,6 +1423,7 @@ class Session:
             self.set_view("chat")
             self._publish_view()
 
+        self._enforce_revocations()
         fragment = render_fragment("_info.html.j2", session=self, **extra)
         self.event_bus.publish(SessionEvent(name="info", data=fragment))
 
@@ -1346,6 +1467,8 @@ class Session:
         edges: list[dict] = []
         seen_nicks: set[str] = set()
         for channel in sorted(self.joined_channels):
+            if not self.may("list", channel, audit=False):
+                continue  # never name a channel (or its nicks) the viewer lacks
             nodes.append(
                 {"id": channel, "label": channel, "kind": "room", "server": self.host}
             )
@@ -1476,14 +1599,17 @@ class Session:
     async def list_channels(self) -> list[str]:
         key = "LIST"
         pending_key = _RPL_LISTEND
-        return await self._collect_until(
+        channels = await self._collect_until(
             key=key,
             pending_key=pending_key,
             send=lambda: self.send_raw("LIST"),
             sort=True,
         )
+        return [c for c in channels if self.may("list", c, audit=False)]
 
     async def who(self, target: str) -> list[dict]:
+        if not self.may("read", target):
+            raise PermissionError(f"not permitted: {target}")
         key = f"WHO {target}"
         pending_key = f"{_RPL_ENDOFWHO}:{target}"
         return await self._collect_until(
@@ -1493,6 +1619,8 @@ class Session:
         )
 
     async def history(self, channel: str, limit: int = 50) -> list[dict]:
+        if not self.may("read", channel):
+            raise PermissionError(f"not permitted: {channel}")
         key = f"HISTORY {channel}"
         pending_key = f"{_HISTORYEND}:{channel}"
         return await self._collect_until(

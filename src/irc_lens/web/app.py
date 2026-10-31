@@ -16,8 +16,10 @@ from pathlib import Path
 from aiohttp import web
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
-from irc_lens.config import LensConfig
+from irc_lens.config import LensConfig, resolve_access
 from irc_lens.web import (
+    admin,
+    agent_auth,
     app_session,
     bans,
     csrf,
@@ -30,6 +32,7 @@ from irc_lens.web import (
 from irc_lens.web.auth import build_cloudflare_middleware
 from irc_lens.web.front import mount_agent_front
 from irc_lens.web.identity import TIER_APPROVED, Identity
+from irc_lens.web.mcp_http import is_mcp_request
 from irc_lens.web.render import precompute_static_hashes
 from irc_lens.web.sessions import SessionFactory, SessionRegistry
 from irc_lens.web.store import MediaStore
@@ -153,6 +156,10 @@ def _dev_identity_middleware(config: LensConfig):
             or request.path.startswith("/media/")
         ):
             return await handler(request)
+        if is_mcp_request(request):
+            # The MCP mount authenticates its own callers (agent bearer
+            # credentials, web/agent_auth.py); never stamp the dev identity.
+            return await handler(request)
         request["identity"] = identity
         return await handler(request)
 
@@ -217,6 +224,9 @@ def make_app(
     sandbox_session_factory: SessionFactory | None = None,
     ban_sweep_interval_s: float = bans.DEFAULT_SWEEP_INTERVAL_S,
 ) -> web.Application:
+    # Fail closed: permissions switched off *after* the access store was
+    # initialised means admins-only, not the retired config allowlist.
+    config = resolve_access(config)
     if config.auth_mode == "dev":
         middleware = _dev_identity_middleware(config)
     elif config.auth_mode == "cloudflare-access":
@@ -250,6 +260,8 @@ def make_app(
         sandbox_factory=sandbox_factory,
         room_prefix=config.guest_room_prefix,
         guest_store=lambda: app.get("guest_store"),
+        access_enabled=config.access_enabled,
+        access_store=lambda: app.get(app_session.ACCESS_STORE),
     )
     app["registry"] = registry
     app["config"] = config
@@ -264,6 +276,9 @@ def make_app(
             "codes can't be mailed (approved users use /login); set a provider"
         )
     _install_guest_state(app, config)
+    # Email-keyed permissions: open the access store, run the one-time admin
+    # import and refuse to start with no approved admin (no-op when off).
+    access_store = app_session.install_access(app)
     _install_media_state(app, config)
 
     app.router.add_get("/", routes.get_index)
@@ -275,6 +290,11 @@ def make_app(
     app.router.add_get("/residents", routes.get_residents)
     app.router.add_get("/healthz", routes.get_healthz)
     app.router.add_get("/owner/metrics", routes.get_owner_metrics)
+    if access_store is not None:
+        admin.install(app)
+        # Personal agents: /agent-credential + the MCP endpoint at
+        # web.mcp_path, authenticated by agent bearer credentials only.
+        agent_auth.install(app, sweep_interval_s=ban_sweep_interval_s)
     # Guest-mode entry card (/entry, /entry/*): 404 while guest mode is off.
     entry.install(app, config)
     if config.guest_enabled:

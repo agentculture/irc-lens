@@ -42,10 +42,14 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import sqlite3
+from contextlib import closing
 
 from aiohttp import web
 
 from irc_lens import metrics
+from irc_lens._errors import EXIT_USER_ERROR, AfiError
+from irc_lens.access_store import AccessStore
 from irc_lens.guest_store import session_id_hash
 from irc_lens.web.identity import TIER_APPROVED, Identity, derive_nick
 
@@ -69,6 +73,10 @@ REQUEST_SESSION_HASH = "app_session_hash"
 #: ``{(principal, backend): id_hash}`` for registry sessions opened via an
 #: app session.
 LINKS = web.AppKey("app_session_links", dict)
+
+#: The :class:`~irc_lens.access_store.AccessStore` when
+#: ``auth.email_permissions.enabled``; absent otherwise.
+ACCESS_STORE = "access_store"
 
 # secrets.token_urlsafe output; anything else is not one of our ids.
 _RAW_ID_RE = re.compile(r"[A-Za-z0-9_-]{16,128}")
@@ -172,12 +180,125 @@ def _store(app: web.Application):
     return app.get("guest_store")
 
 
+# -- access store: approval + role (email-keyed permissions) ----------------------
+
+
+def _sql_count(store: AccessStore, sql: str) -> int:
+    with closing(sqlite3.connect(store.path, timeout=30)) as con:
+        return con.execute(sql).fetchone()[0]
+
+
+def _store_path(config) -> str:
+    from irc_lens.config import _default_guest_store_path
+
+    return config.guest_store_path or _default_guest_store_path()
+
+
+def install_access(app: web.Application) -> AccessStore | None:
+    """Open the access store and run the one-time admin import.
+
+    No-op (None) unless ``auth.email_permissions.enabled``. On the first
+    start with the feature on, every ``auth.allowed_emails`` entry is
+    imported as an approved admin; the import never runs again, so the
+    config list is never read for access afterwards (o21). Refuses with a
+    hint when the store ends up with no approved admin (o20): nobody could
+    then manage access.
+    """
+    config = app["config"]
+    if not getattr(config, "access_enabled", False):
+        return None
+    store = AccessStore(_store_path(config))
+    first_start = _sql_count(store, "SELECT COUNT(*) FROM admin_imports") == 0
+    if first_start:
+        store.import_admins(config.allowed_emails)
+    if store.admin_count() == 0:
+        raise AfiError(
+            code=EXIT_USER_ERROR,
+            message=(
+                "auth.email_permissions.enabled is on but the access store "
+                "has no approved admin"
+            ),
+            remediation=(
+                "list at least one email under `auth.allowed_emails` before "
+                "the first start with the feature on (it is imported once as "
+                "admin), or restore an admin in the access store"
+            ),
+        )
+    if first_start:
+        # Initialised from now on, even if the import added nobody (the
+        # admin came from the CLI): no later start re-imports the list, and
+        # switching the feature off is admins-only, never legacy. A refused
+        # start (no admin) above leaves it uninitialised so it can be fixed.
+        store.mark_initialised()
+    app[ACCESS_STORE] = store
+    return store
+
+
+def approved_user(app: web.Application, email: str) -> dict[str, str] | None:
+    """The approved-user decision for *email*, re-checked on every call.
+
+    ``{"email", "role", "state"}`` when approved, else None. With the
+    feature on the access store decides (fail closed if it is missing);
+    otherwise ``auth.allowed_emails`` does and the role is empty.
+    """
+    config = app["config"]
+    if getattr(config, "access_enabled", False):
+        store = app.get(ACCESS_STORE)
+        user = store.get_user(email) if store is not None else None
+        if not user or user["state"] != "approved":
+            return None
+        if getattr(config, "access_admins_only", False) and user["role"] != "admin":
+            return None  # switched off after migration: admins only
+        return user
+    if email.lower() in allowed_lower(config):
+        return {"email": email.lower(), "role": "", "state": "approved"}
+    return None
+
+
+#: States that may complete the password / code sign-in. ``invited`` is an
+#: admin-invited user who has not yet signed in; finishing the code step
+#: promotes them to ``approved`` (:func:`promote_on_signin`).
+SIGNIN_STATES = frozenset({"approved", "invited"})
+
+
+def can_sign_in(app: web.Application, email: str) -> bool:
+    """May *email* take part in the app sign-in / set-password flows?
+
+    With the feature on the access store decides (approved or invited; fail
+    closed without a store); otherwise ``auth.allowed_emails`` does.
+    """
+    config = app["config"]
+    if not getattr(config, "access_enabled", False):
+        return email.lower() in allowed_lower(config)
+    store = app.get(ACCESS_STORE)
+    if store is None:
+        return False
+    try:
+        user = store.get_user(email)
+    except Exception:  # noqa: BLE001 - unreadable store => closed
+        return False
+    if getattr(config, "access_admins_only", False):
+        return bool(user) and user["state"] == "approved" and user["role"] == "admin"
+    return bool(user) and user["state"] in SIGNIN_STATES
+
+
+def promote_on_signin(app: web.Application, email: str) -> None:
+    """After a right sign-in code: an ``invited`` user becomes ``approved``."""
+    store = app.get(ACCESS_STORE)
+    if store is None:
+        return
+    user = store.get_user(email)
+    if user and user["state"] == "invited":
+        store.set_user(email, role=user["role"], state="approved", actor=email)
+
+
 def identity_for(request: web.Request) -> Identity | None:
     """Approved identity from a valid ``lens_session`` cookie, else None.
 
     None (never an error) for: sign-in disabled, no store, no/malformed
     cookie, unknown/expired/deleted session, or an email no longer in
-    ``auth.allowed_emails`` (read from the app's config on every request).
+    approved (access store with ``auth.email_permissions.enabled``, else
+    ``auth.allowed_emails``; re-checked on every request).
     On success stamps ``request[REQUEST_SESSION_HASH]``.
     """
     config = request.app["config"]
@@ -191,7 +312,8 @@ def identity_for(request: web.Request) -> Identity | None:
     if row is None:
         return None
     email, _created, last_seen = row
-    if email not in allowed_lower(config):
+    user = approved_user(request.app, email)
+    if user is None:
         return None
     try:
         nick = derive_nick(config.server_name, email)
@@ -201,7 +323,11 @@ def identity_for(request: web.Request) -> Identity | None:
         store.touch_session(raw)
     request[REQUEST_SESSION_HASH] = session_id_hash(raw)
     return Identity(
-        principal=email, nick=nick, raw_jwt_subject="app-session", tier=TIER_APPROVED
+        principal=email,
+        nick=nick,
+        raw_jwt_subject="app-session",
+        tier=TIER_APPROVED,
+        role=user["role"],
     )
 
 
@@ -252,14 +378,13 @@ async def sweep_once(app: web.Application) -> list[tuple[str, str]]:
     if not links or store is None:
         return []
     registry = app["registry"]
-    allowed = allowed_lower(app["config"])
     ended: list[tuple[str, str]] = []
     for key, id_hash in tuple(links.items()):  # snapshot: links.pop below
         if not registry.has(*key):
             links.pop(key, None)  # closed elsewhere (idle reap, shutdown)
             continue
         email = await asyncio.to_thread(store.session_email_by_hash, id_hash)
-        if email is None or email not in allowed:
+        if email is None or approved_user(app, email) is None:
             ended.append(key)
     await _close_links(app, ended)
     if ended:
@@ -313,7 +438,7 @@ async def post_logout(request: web.Request) -> web.Response:
     raw = read_session_cookie(request)
     if raw is not None:
         await end_session(request.app, raw)
-    logger.info("logout principal=%s", identity.principal)
+    logger.info("logout tier=%s", identity.tier)
     if request.headers.get("HX-Request"):
         response = web.Response(status=204, headers={"HX-Redirect": "/"})
     else:

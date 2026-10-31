@@ -1,6 +1,6 @@
 """Audit log: every authenticated request emits one structured line.
 
-The format is `auth=ok principal=<…> nick=<…> method=<…> path=<…>`
+The format is `auth=ok who=<hash> nick=<…> method=<…> path=<…>`
 on the `irc_lens.web.auth` logger. `/healthz` and `/static/*` are
 bypassed by the middleware and produce no audit line."""
 from __future__ import annotations
@@ -13,6 +13,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from irc_lens.config import LensConfig
+from irc_lens.guest_store import email_hash
 from irc_lens.web import make_app
 
 from _jwks_server import FakeJWKS
@@ -72,7 +73,7 @@ async def test_authenticated_request_logs_principal(
     audit_client: TestClient, jwks: FakeJWKS, caplog
 ) -> None:
     """One `auth=ok …` line per authenticated request, on the
-    `irc_lens.web.auth` logger."""
+    `irc_lens.web.auth` logger. The principal appears only as a short hash."""
     token = jwks.mint(
         aud="aud-test",
         claims={"email": "alice@example.com", "sub": "s-1"},
@@ -91,7 +92,8 @@ async def test_authenticated_request_logs_principal(
     ]
     assert any(
         "auth=ok" in m
-        and "alice@example.com" in m
+        and f"who={email_hash('alice@example.com')[:12]}" in m
+        and "alice@example.com" not in m  # t15: logs never carry an address
         and f"path={_AUTH_CANARY_PATH}" in m
         for m in msgs
     ), f"expected auth=ok line for alice; got: {msgs}"

@@ -1,0 +1,1378 @@
+{
+  "slug": "email-keyed-permissions-one-sponsored-agent",
+  "title": "Email-keyed permissions + one sponsored agent",
+  "schema_version": 6,
+  "status": "exported",
+  "created": "2026-10-30T19:16:30Z",
+  "updated": "2026-10-31T09:14:11Z",
+  "claims": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "The lens console grants each user permissions by email: admins have full access, other approved humans reach only their granted mesh channels, guests stay in their separate sandbox, and each human may bring one personal agent over the lens's single MCP endpoint \u2014 authenticated through the human's email, present wherever its human is with the same permissions, and reachable only by its own human",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h1",
+          "text": "Every behaviour in the announcement is backed by a confirmed requirement below (roles c18, levels c19, separation c20, agent scope c21, single endpoint c22, owner-only reach c3)",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "check each clause of c1 maps to a confirmed requirement in the exported spec",
+      "revisions": [
+        {
+          "text": "chat.culture.dev grants each user permissions by email: approved and guest humans are placed on specific channels to read content and ask agents about it, and each human may bring one personal agent over MCP \u2014 authenticated through the human's email and treated as that human \u2014 that only its own human can talk to",
+          "kind": "announcement",
+          "reason": "owner: the spec must not name a specific host/address"
+        }
+      ]
+    },
+    {
+      "id": "c2",
+      "kind": "requirement",
+      "text": "Every human (approved or guest) may bring exactly one personal agent; the agent connects over MCP, is authenticated through its human's email, and counts as that human (same tier, same permissions, no extra seat)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h2",
+          "text": "A human never has more than one active agent credential (a second issue is refused or replaces the first), and a connected agent never adds to the guest seat count",
+          "status": "rejected",
+          "instruction": ""
+        },
+        {
+          "id": "h19",
+          "text": "A human never has more than one active agent credential: issuing a new one revokes the old one and closes the old agent's connection; a connected agent never adds to the guest seat count",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test: guest + agent connected -> active_guests == 1; second agent credential for the same human -> issued, old one revoked and the old agent's connection closed",
+      "revisions": []
+    },
+    {
+      "id": "c3",
+      "kind": "requirement",
+      "text": "A human can talk with their own agent; no human can talk with another human's agent (user A can't reach user B's agent, user A can reach user A's agent)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h3",
+          "text": "Through every lens path (chat line, DM, @mention in a shared channel, raw input) only the agent's own human can deliver a line to it: other humans' DMs to it are refused, and their lines that address it in a shared channel are withheld from its MCP reads",
+          "status": "rejected",
+          "instruction": ""
+        },
+        {
+          "id": "h20",
+          "text": "Only an agent's own human can drive it: other humans' DMs to it are refused, their lines that @-address it in a shared channel are withheld from its MCP reads, and every line the agent does receive is marked owner / not-owner",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "e2e: humans A and B with agents in one granted channel; B's DM and @mention of A's agent never reach A-agent's MCP read, A's do; symmetric for B",
+      "revisions": []
+    },
+    {
+      "id": "c4",
+      "kind": "requirement",
+      "text": "Permissions keyed by email place an approved (signed) user on specific mesh channels, where they can read the content and ask agents about it; their agent inherits the same channels. Guests get no grants (q7)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h4",
+          "text": "A user granted #x can see #x, read its history and live lines, and (at write/ask) ask the agents there; channels they hold no grant for are neither listed nor joinable nor readable",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test: user with grant on #x only -> /channels shows #x only; /join #y and HISTORY #y refused",
+      "revisions": [
+        {
+          "text": "Permissions keyed by email place a user on specific channels, where they can read the content and ask agents about it; applies to both approved (signed) and guest users and to their agents",
+          "kind": "requirement",
+          "reason": "q7: no guest grants"
+        }
+      ]
+    },
+    {
+      "id": "c5",
+      "kind": "why_it_matters",
+      "text": "Guests (and their one agent) get a real sense of how the app works for signed users",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h5",
+          "text": "A guest and their agent can run the same human-to-own-agent loop a signed user runs, through the same endpoint, inside the guest's sandbox",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "e2e: guest connects one agent via the MCP endpoint and exchanges lines with it in the guest's room",
+      "revisions": []
+    },
+    {
+      "id": "c6",
+      "kind": "non_goal",
+      "text": "Emails and any PII are out of the spec, plan and repo: approved emails and their grants exist only in runtime config/store, never in committed artifacts",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c7",
+      "kind": "success_signal",
+      "text": "After delivery, the owner adds a few approved users, each with limited (channel-scoped) permissions",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h6",
+          "text": "Adding an approved user and their grants needs only CLI commands against the running lens (no config edit, no restart) and is effective on their next action",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h40",
+          "text": "Adding an approved user and their grants needs only the app or CLI against the running lens (no config edit, no restart) and is effective on their next action",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test: grant added via CLI while the user's session is open -> next /channels includes it",
+      "revisions": []
+    },
+    {
+      "id": "c8",
+      "kind": "non_goal",
+      "text": "Library-tagged content permissions are a later follow-up ('soon'), not part of this first cut",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c9",
+      "kind": "requirement",
+      "text": "Per-email approval, admin flags and grants (resource + access level) live in the lens sqlite store and take effect without a restart \u2014 managed by admins from within the app and by an irc-lens CLI subcommand; config.yaml no longer holds the approved list",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h13",
+          "text": "Grants are rows in the lens store (email-keyed, never committed), editable through an irc-lens CLI verb, read on each check so changes need no restart",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h38",
+          "text": "Approval, admin flags and grants are rows in the lens store (email-keyed, never committed); after the one-time import, editing config.yaml changes nobody's access",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test: CLI grant add/list/revoke round-trip on a temp store; config.yaml unchanged",
+      "revisions": [
+        {
+          "text": "Per-email grants (channel + access mode) live in a new table in the lens sqlite store and are managed by an irc-lens CLI subcommand, taking effect without a restart \u2014 not in config.yaml, which is a frozen dataclass loaded once",
+          "kind": "requirement",
+          "reason": "q9 (store-managed approval) + owner: add/invite non-admins from within the app"
+        }
+      ]
+    },
+    {
+      "id": "c10",
+      "kind": "requirement",
+      "text": "Channel permissions are enforced server-side in the lens Session for every path \u2014 join, send, read/history, channels listing, roster/who, raw /input \u2014 not only by hiding channels in the UI",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h14",
+          "text": "Every session path that can reveal or emit channel content (join, send, read/history, channels, who/roster, raw /input, live PRIVMSG dispatch) consults the grant check",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test matrix: each path x (granted, ungranted) for a non-admin approved user",
+      "revisions": []
+    },
+    {
+      "id": "c11",
+      "kind": "requirement",
+      "text": "Guest channel grants extend the two existing choke points: _rooms_for (web/sessions.py:268, today returns exactly the guest's own #g-<id> room) and the SANDBOX_ALLOWED command gate (commands.py:127-135); guest agents never reuse the non-guest _rooms_for branch, which joins every guest room",
+      "origin": "llm",
+      "status": "rejected",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c12",
+      "kind": "requirement",
+      "text": "The single remote MCP endpoint (HTTP, not stdio) authenticates each agent with its own bearer credential: issued through its human's existing approval path (allowlist sign-in for approved users, email code for guests \u2014 per q5), stored hashed, bound to the human, revocable and expiring; the agent gets its own IRC connection and a nick visibly tied to its human",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h15",
+          "text": "The endpoint rejects requests without a valid unexpired unrevoked credential; credentials are stored only as hashes; revocation closes the agent's live connection",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test: revoked credential -> next request 401 and agent IRC connection closed",
+      "revisions": [
+        {
+          "text": "A new remote MCP transport (HTTP, not stdio) with a per-agent bearer token: minted only after the human approves the agent by email, stored hashed, bound to the human's email, scoped to that human's grants, revocable and expiring; the agent gets its own IRC connection and a nick visibly tied to its human",
+          "kind": "requirement",
+          "reason": "q5: agent approval works like human approval today, not a separate per-agent approval mail"
+        }
+      ]
+    },
+    {
+      "id": "c13",
+      "kind": "requirement",
+      "text": "The agent is accounted as its human everywhere the human is: it takes no extra guest seat, is checked against is_banned(email, ip), its flags use the human's key, idle sign-off and deletion (delete_guest_inputs, delete_sessions_for_email) and the retention sweep cover it",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h16",
+          "text": "Banning, deleting or idle-signing-off a human applies to their agent: a banned human's agent cannot connect; deletion removes the agent's credential and records",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test: ban human -> agent request refused; delete human -> agent credential rows gone",
+      "revisions": []
+    },
+    {
+      "id": "c14",
+      "kind": "requirement",
+      "text": "Consent names the agent: the guest's consent record links the agent to its human, and the Terms/Privacy gain clauses for agents acting on a user's behalf and for approved users with channel access \u2014 a material change that bumps the legal version so guests re-consent (katvan hand-off)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h17",
+          "text": "Consent records name the human's agent, and the legal version bump forces guests to re-consent before connecting one",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test: guest with consent at the old version -> re-prompted; consent row carries the agent identity",
+      "revisions": []
+    },
+    {
+      "id": "c15",
+      "kind": "requirement",
+      "text": "Sandbox agents (sbx-ask, sbx-bolt) recognise a visiting personal agent as an agent, not a human, so the hop-limit loop guard holds (culture hand-off)",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h18",
+          "text": "With a visiting personal agent in a room with sbx-ask and sbx-bolt, the agent-to-agent hop cap still bounds every exchange",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "culture test: 3-agent room, visitor addresses sbx-ask -> at most max_agent_hops agent replies",
+      "revisions": []
+    },
+    {
+      "id": "c16",
+      "kind": "assumption",
+      "text": "The lens is the only path by which users and their agents reach the IRCds, so gateway-side enforcement is sufficient for this cut; AgentIRC itself has no access control to lean on",
+      "origin": "llm",
+      "status": "rejected",
+      "honesty_conditions": [],
+      "hard_questions": [
+        {
+          "id": "q1",
+          "text": "The real mesh IRCd listens on 0.0.0.0:6667 (ss -ltn) while sbx is 127.0.0.1:6668 \u2014 anyone who can reach :6667 bypasses every lens grant (join any channel, read any history, DM any agent). Bind it to loopback/firewall it, or accept that and scope the guarantee to 'via chat.culture.dev'?",
+          "resolved": false,
+          "blocking": false,
+          "resolution": ""
+        }
+      ],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c17",
+      "kind": "non_goal",
+      "text": "No library-tag schema or library access integration in this cut; the grant model should still be shaped so a later resource kind (library tag) fits beside channels",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c18",
+      "kind": "requirement",
+      "text": "Roles: admins have full access to every channel; for everyone else no grant means no channels (default-deny)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h7",
+          "text": "A non-admin approved user with zero grants sees zero mesh channels and every join/read/send is refused; an admin sees and can join every channel",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test both roles against the live test IRCd fixture",
+      "revisions": []
+    },
+    {
+      "id": "c19",
+      "kind": "requirement",
+      "text": "Two per-channel access levels: read, and write/ask",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h8",
+          "text": "At 'read' a user can list a channel, read history and see live lines, but every send (chat, /me, topic, raw PRIVMSG) is refused \u2014 asking an agent requires write/ask",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test: read-level user's send to granted #x -> refused; history read -> allowed",
+      "revisions": []
+    },
+    {
+      "id": "c20",
+      "kind": "requirement",
+      "text": "Guests stay separate on the sandbox; approved (signed) users reach the real mesh, limited to their granted channels",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h9",
+          "text": "Guest sessions (and guests' agents) only ever connect to the sandbox IRCd; approved non-admin sessions on the mesh can JOIN only granted channels, enforced in the lens before the line reaches the IRCd",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test: guest session backend is always sandbox; approved JOIN of ungranted channel never emitted to the IRCd",
+      "revisions": []
+    },
+    {
+      "id": "c21",
+      "kind": "requirement",
+      "text": "A personal agent can be wherever its owner is, with exactly its owner's permissions",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h10",
+          "text": "An agent's effective permissions are computed from its human's current grants at every check, never copied at issue, so revoking a human's grant takes effect for their agent immediately",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test: revoke the human's grant on #x while agent is connected -> agent's next read/send on #x refused",
+      "revisions": []
+    },
+    {
+      "id": "c22",
+      "kind": "requirement",
+      "text": "One MCP endpoint for all tiers (admin, approved, guest), reached through the lens's public host; for now an agent is approved the same way a human is today",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h11",
+          "text": "One MCP endpoint serves admin, approved and guest agents; tier and grants derive only from the human the credential is bound to; an agent credential is obtainable only by a human who has passed their normal sign-in",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "test: three credentials (admin/approved/guest humans) on the same endpoint get three different scopes",
+      "revisions": []
+    },
+    {
+      "id": "c23",
+      "kind": "boundary",
+      "text": "The spec and code never name or hardcode a specific host or address; the public endpoint is deployment configuration",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h12",
+          "text": "No host name or address for the public endpoint appears as a literal in src/ or the exported spec; it is read from configuration",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "grep src/ and docs/specs/<slug>.md for host literals -> none",
+      "revisions": []
+    },
+    {
+      "id": "c24",
+      "kind": "audience",
+      "text": "The lens operator (admin), the few approved users they invite, guests trying the app, and each human's one personal agent connecting as an MCP client",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h22",
+          "text": "Each named audience has a path in the spec: the admin manages grants via CLI, approved users and guests sign in as today, and agents connect through the one MCP endpoint",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c25",
+      "kind": "before_state",
+      "text": "Approval is binary: every approved user can reach the whole mesh; guests get one private sandbox room; no agent can connect remotely (MCP is local stdio only); the IRCd itself has no channel or DM access control",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h23",
+          "text": "The before-state matches the surveyed code: binary approval (web/identity.py tier), one guest room (web/sessions.py _rooms_for), stdio-only MCP (tools.py auth.mode dev), no IRCd ACLs (agentirc client.py modes o/v/S)",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c26",
+      "kind": "after_state",
+      "text": "Each human sees exactly their granted channels at their granted level (admins see everything), and can connect one agent over MCP that acts within the same scope and that no other human can reach",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h24",
+          "text": "After delivery, a non-admin approved user's channel list equals their grant rows, and their agent's reachable channels equal the user's",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c27",
+      "kind": "success_signal",
+      "text": "The operator onboards at least 3 approved users with channel-scoped grants from within the app (or CLI) \u2014 0 config edits and 0 lens restarts \u2014 and the e2e suite records 0 cross-human deliveries to a personal agent",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h25",
+          "text": "Both numbers are checked: the onboarding run uses only CLI commands with the lens running throughout, and the e2e cross-human agent test asserts zero deliveries",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h39",
+          "text": "Both numbers are checked: the onboarding run uses only the app or CLI with the lens running throughout, and the e2e cross-human agent test asserts zero deliveries",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "The operator onboards at least 3 approved users with channel-scoped grants through the CLI alone \u2014 0 config edits and 0 lens restarts \u2014 and the e2e suite records 0 cross-human deliveries to a personal agent",
+          "kind": "success_signal",
+          "reason": "owner: non-admins are added/invited from within the app"
+        }
+      ]
+    },
+    {
+      "id": "c28",
+      "kind": "decision",
+      "text": "Guests get no channel grants in this version; the grant store is generic (email, resource kind, level) so guest or library-tag grants can be added later without a schema change",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c29",
+      "kind": "decision",
+      "text": "A second agent credential request from the same human replaces the first: the new credential is issued, the old one revoked, and the old agent's connection closed",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c30",
+      "kind": "decision",
+      "text": "In a shared channel the agent may see what its human may see; other humans' DMs to it are refused and their lines that @-address it are withheld; every line delivered to the agent is marked with whether it came from its owner",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c31",
+      "kind": "requirement",
+      "text": "The mesh IRCd accepts connections only from the lens, the mesh's own agents and its federation links \u2014 restricting it is part of this feature, because the IRCd has no access control and lens-side grants are otherwise bypassable",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h21",
+          "text": "A direct IRC connection to the mesh from anything other than the lens, the mesh's own agents or its federation links is refused, so no channel grant can be bypassed by skipping the lens",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "verify from a non-allowed host: a direct IRC connect to the mesh port fails; lens, mesh agents and links still connect",
+      "revisions": []
+    },
+    {
+      "id": "c32",
+      "kind": "requirement",
+      "text": "Admin-only surfaces: the sandbox 'guest view' toggle (which joins every guest's private room), the owner metrics page and the residents page are available to admins only \u2014 never to non-admin approved users or any agent",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h26",
+          "text": "A non-admin approved user calling the sandbox enter route, the owner metrics route or the residents route gets 403; an admin still gets today's behaviour",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c33",
+      "kind": "requirement",
+      "text": "Every view that enumerates channels or nicks \u2014 /channels, /who, /agents, /overview, /status, the mesh graph, presence \u2014 is filtered to the viewer's grants; commands that change channel state (/topic, /kick, /invite, /icon) are admin-only",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h27",
+          "text": "For a non-admin with one granted channel, no listing or graph view names any other channel or any nick seen only in ungranted channels",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c34",
+      "kind": "assumption",
+      "text": "Resident mesh agents (the agents the mesh runs in a channel) are not personal agents: the owner-only rule (c3) applies only to agents connected through the MCP endpoint, and residents answer any human who holds write/ask on that channel",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h28",
+          "text": "The spec distinguishes personal (MCP, human-bound) agents from resident agents, and the grant check on asking a resident is the channel's write/ask level",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c35",
+      "kind": "requirement",
+      "text": "Personal-agent nicks live in a reserved namespace that cannot collide with resident agents or human nicks, and the owner / not-owner marking comes from the lens's credential-to-human map, never from nick text",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h29",
+          "text": "A human whose derived nick equals a resident's or another agent's nick cannot claim it; a guest who picks a nickname resembling another human's agent nick is never marked as that agent's owner",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c36",
+      "kind": "requirement",
+      "text": "Owner-only filtering runs on the receive side of the agent's lens-held IRC connection, so it covers every sender \u2014 other lens users, federated peers, and any client that reached the IRCd directly",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h30",
+          "text": "A DM to a personal agent sent from a raw IRC client (not through the lens) never appears in that agent's MCP reads",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c37",
+      "kind": "requirement",
+      "text": "The MCP endpoint does not reuse the identity-less tools.py path (fixed dev nick, dev-mode only); every MCP tool call carries its credential's human and passes the same grant check as the web Session",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h31",
+          "text": "No MCP tool call reaches IRC without a resolved human identity; a call for an ungranted channel is refused before any IRC line is sent",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c38",
+      "kind": "requirement",
+      "text": "An agent's sends pass the same gates as its human's: the guest command allowlist, the per-human rate limit, the input log and the flag path; one agent cannot exhaust a shared resident's answer capacity",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h32",
+          "text": "A guest's agent sending faster than the guest rate limit is throttled exactly like the guest; a disallowed command from an agent is refused like the guest's",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c39",
+      "kind": "requirement",
+      "text": "Every agent request re-checks its human's current status (still approved, not banned, not deleted), so removing an approved user or banning a guest cuts off their agent on its next request",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h33",
+          "text": "Removing a human from the approved list while their agent is connected makes the agent's next call fail and closes its IRC connection",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c40",
+      "kind": "requirement",
+      "text": "Rollback fails closed: a single switch disables the MCP endpoint and blocks all agent credentials, and turning the permissions feature off never restores full mesh access to non-admin approved users",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h34",
+          "text": "With the kill switch on, every agent call is refused; with permissions disabled, a non-admin approved user is refused the mesh rather than given all of it",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c41",
+      "kind": "requirement",
+      "text": "Grant changes, credential issue/replace/revoke, and refused accesses (ungranted channel, cross-human agent delivery) are recorded in the lens store keyed like other guest records (no email in log lines), and metrics expose only counts",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h35",
+          "text": "After a refused cross-human delivery and a grant change, the audit records exist and the service log lines carry no email address",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c42",
+      "kind": "decision",
+      "text": "Granted channels host only tool-less question-answering agents; tool-using residents stay out of granted channels (a per-channel trusted flag may come later)",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c43",
+      "kind": "decision",
+      "text": "Approved users and admin flags live in the lens store; the migration imports the existing config allowlist once and the config list is then retired",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c44",
+      "kind": "decision",
+      "text": "The migration marks currently approved users as admins (today only the operator); the feature refuses to enable while zero admins exist",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c45",
+      "kind": "requirement",
+      "text": "Admins add and invite non-admin approved users, and manage their grants, from within the app",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h36",
+          "text": "Only an admin can add or invite a user or change grants in the app; an invited user becomes approved only after completing the existing app sign-in (set password, emailed code), and the change takes effect without a restart",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c46",
+      "kind": "requirement",
+      "text": "A guest's agent is disconnected when its human is signed off for idleness, unless an admin has approved that agent to stay for a set period of n hours (chosen by the admin), after which the normal rule applies again",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h37",
+          "text": "Without an admin extension a guest's agent closes at its human's idle sign-off; an extension is set only by an admin, names the agent and an end time n hours ahead, and expires on its own \u2014 after which the agent closes at the next idle sign-off",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    }
+  ],
+  "open_vagueness": [
+    {
+      "id": "v1",
+      "text": "Logout of one browser closes the shared per-(principal, backend) IRC session for all browsers (irc-lens#70, app_session.py:217-232); an agent session tied to the same human must not be torn down by \u2014 or tear down \u2014 the human's browser session",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v2",
+      "text": "Long-lived MCP streaming (streamable HTTP/SSE) through the public edge and tunnel is untested: idle timeouts and response buffering could drop agent connections",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v3",
+      "text": "Approved users' and their agents' lines persist in mesh history with no deletion path (guest deletion covers only the sandbox, which runs memory-only)",
+      "kind": "follow_up",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v4",
+      "text": "Unexamined in this pass: whether agentfront >=0.20 ships an HTTP MCP transport (the surveyed checkout was 0.14.0); the /upload route's tier gating; the full katvan legal text beyond the clauses cited in s6",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    }
+  ],
+  "scope_entries": [
+    {
+      "id": "s1",
+      "surface": "irc-lens src/irc_lens/guest_store.py + config.py",
+      "finding": "guest_store.py:60-102 is the email-keyed sqlite store with a _migrate pattern (:125) and a CLI editor (cli/_commands/guests.py); config.py:661 load_config builds a frozen LensConfig held in app['config'] with no reload path, so allowed_emails (config.py:30,189-219) changes need a restart. Approved-ness is binary: Identity(principal,nick,raw_jwt_subject,tier) in web/identity.py:33-41 has no per-user attributes.",
+      "seeds": [
+        "c9"
+      ]
+    },
+    {
+      "id": "s2",
+      "surface": "irc-lens src/irc_lens/session.py + web/routes.py (approved path)",
+      "finding": "Approved users route to BACKEND_MESH (routes.py:134-166) with the full palette; _exec_join (session.py:738) only checks the leading '#', _exec_channels (session.py:912) lists everything unfiltered; no read-only/hidden channel concept exists anywhere. Today approved = full mesh access.",
+      "seeds": [
+        "c10"
+      ]
+    },
+    {
+      "id": "s3",
+      "surface": "irc-lens src/irc_lens/web/sessions.py + commands.py (guest path)",
+      "finding": "Guests get one room from store.room_id(email) (guest_store.py:195-208) and may only CHAT/HELP/WHO/ME/READ (commands.py:127-135, verified); the non-guest branch of _rooms_for (sessions.py:276-279, verified) joins all rooms from store.list_rooms() \u2014 the approved Guest view \u2014 so reusing it for an agent would expose every guest's room.",
+      "seeds": [
+        "c11"
+      ]
+    },
+    {
+      "id": "s4",
+      "surface": "irc-lens tools.py + cli/_commands/mcp_cmd.py + web/front.py + agentfront mcp_surface",
+      "finding": "irc-lens mcp is stdio only (mcp_cmd.py -> agentfront serve_stdio); tools open a throwaway Session per call with the fixed cfg.dev_nick and refuse unless auth.mode == dev (tools.py:169-179, verified); tool functions take no caller identity; /agent (web/front.py) is a read-only agentfront docs mount; no bearer-token auth path exists in the middleware. Reusable: guest_store tokens table (email, purpose, hashed, issue/verify/consume at :274-330) and mail.py.",
+      "seeds": [
+        "c12"
+      ]
+    },
+    {
+      "id": "s5",
+      "surface": "irc-lens guest seat/ban/deletion paths",
+      "finding": "Seats count 'guest:<email>' principals on the sandbox backend (web/sessions.py active_guests/_counts_as_guest, max_guests default 1, live 2); bans (email, ip) checked at every entry step (entry.py) and by web/bans.py; deletion guest_store.py:620-644 + sessions :424; retention inactive_guests :646-659 \u2014 none know about a second connection or an agent, so each must be extended.",
+      "seeds": [
+        "c13"
+      ]
+    },
+    {
+      "id": "s6",
+      "surface": "irc-lens consents table + katvan site-astro legal pages",
+      "finding": "consents(email, ip, tos_version, privacy_version, ts, train) (guest_store.py:222-238) has no agent field; katvan site-astro/src/data/legal.ts is at terms/privacy 1.2 (effective 2026-10-30) and terms.md:16 / privacy.md:55 describe only Culture's own sandbox agent \u2014 no user-owned agents and no approved-user class; dist/legal/version.json is stale at 1.1 (rebuild needed). Irc-lens#79 already listed this legal clause.",
+      "seeds": [
+        "c14"
+      ]
+    },
+    {
+      "id": "s7",
+      "surface": "culture culture_core/sandbox/agent.py",
+      "finding": "_should_answer (agent.py:686-712) treats any nick not in the static peer_agents config dict (:150, _peer :669) as human: a visiting agent's line resets agent_hops (:703) and gets unaddressed answers (answer_unaddressed default True, :129), so sbx-ask+sbx-bolt+visitor can loop without bound. The sandbox agent has no owner/sponsor notion; owner_channel (:120) is only the NSFW flag sink. Docs to update: docs/sandbox-agent.md, docs/guest-sandbox.md, docs/reference/cli/index.md.",
+      "seeds": [
+        "c15"
+      ]
+    },
+    {
+      "id": "s8",
+      "surface": "agentirc agentirc/client.py + skills/history.py + skills/rooms.py",
+      "finding": "Channel modes are only o/v/S(+R) (client.py:755, verified) \u2014 no +i/+k/+b/+m/+s, no INVITE handler; any client can JOIN any '#' and DM any nick (_relay_direct_privmsg); HISTORY of a '#' target has no membership check (history.py:441-442, verified) though DM history is pair-keyed; no SASL/ACCOUNT; ROOMINVITE is advisory; bot CAP grants no privilege; extension-api.md:516 'Per-bot ACLs are a future issue'. culture_core has no IRCd of its own (pyproject pins agentirc-cli>=9.13,<10).",
+      "seeds": [
+        "c16"
+      ]
+    },
+    {
+      "id": "s9",
+      "surface": "culture-library core/models.py + server/auth.py",
+      "finding": "culture-library items carry kind/title/author/sha256 and a binary visibility ('private','public', core/models.py:26, default private); no tag field exists (only OpenAPI route tags); access is per-key Principal scopes + private flag (server/auth.py:33-79); agents can already read it over its MCP/RAG endpoints; irc-lens never references the library. 'Library-tagged content' needs a new tag field + per-user principal there.",
+      "seeds": [
+        "c17"
+      ]
+    },
+    {
+      "id": "s10",
+      "surface": "spark listening sockets (ss -ltn)",
+      "finding": "The mesh IRCd listens on all interfaces while the guest sandbox IRCd listens on loopback only, so gateway-only enforcement holds for the sandbox but not for the mesh unless the mesh port is closed to everything except the lens, the mesh's own agents and its links (now requirement c31).",
+      "seeds": [
+        "c16",
+        "q1"
+      ]
+    },
+    {
+      "id": "s11",
+      "surface": "challenge pass / security lens: web/routes.py:315-330 + web/sessions.py:276-279 + routes.py:1036-1050 + routes.py:980",
+      "finding": "_set_sandbox_toggle gates only on identity.is_approved, and the toggled sandbox session joins every guest room via store.list_rooms(); get_owner_metrics is 'Approved tier only'; get_residents renders culture's overview of all residents. With default-deny approved users, each of these would hand a new non-admin every guest's private chat or the whole mesh roster.",
+      "seeds": [
+        "c32"
+      ]
+    },
+    {
+      "id": "s12",
+      "surface": "challenge pass / data-flow lens: session.py dispatch table :690-712 + _exec_mesh :1017 + _exec_agents :944",
+      "finding": "Approved sessions dispatch TOPIC/ICON/MESH/AGENTS/OVERVIEW/STATUS with no tier check; _exec_mesh recomputes the mesh graph with WHO round-trips across joined channels; _exec_agents walks every joined channel. START/STOP/RESTART/KICK/INVITE/SERVER parse (commands.py:70-77) but have no session handler (fall to UNKNOWN) \u2014 no lifecycle exposure found.",
+      "seeds": [
+        "c33"
+      ]
+    },
+    {
+      "id": "s13",
+      "surface": "challenge pass / security lens: resident agent backends (culture_core clients + spark-ask design note)",
+      "finding": "c4 promises users can 'ask agents' in granted channels, but residents on the claude backend run with permission_mode='bypassPermissions' (cultureagent/clients/claude/agent_runner.py:148, verified) and full tools; spark-ask was built tool-less because no backend can disable tools. Inviting outside users to a channel with a tool-using resident turns a channel grant into prompt-driven tool use on the host. Routed to user decision q8.",
+      "seeds": [
+        "c34"
+      ]
+    },
+    {
+      "id": "s14",
+      "surface": "challenge pass / security lens: web/identity.py:52-70 derive_nick + agentirc client.py:453-490 nick prefix",
+      "finding": "Approved nicks are <server>-<email local part> and AgentIRC forces the <server>- prefix and only enforces uniqueness \u2014 an approved human whose local part equals a resident's suffix would collide with it, and a nick says nothing trustworthy about ownership. Ownership must come from lens state.",
+      "seeds": [
+        "c35"
+      ]
+    },
+    {
+      "id": "s15",
+      "surface": "challenge pass / adjacent-systems lens: tools.py:160-215 + agentirc _relay_direct_privmsg",
+      "finding": "tools.py opens a throwaway Session with cfg.dev_nick and refuses outside auth.mode dev, taking no caller identity \u2014 reusing it would drop both identity and grants. AgentIRC relays a DM from any client to any nick, so a send-side check in the lens alone misses senders that never pass through the lens.",
+      "seeds": [
+        "c36",
+        "c37"
+      ]
+    },
+    {
+      "id": "s16",
+      "surface": "challenge pass / failure-mode lens: web/routes.py:~765-800 /input gate + sbx-ask capacity probe (eidetic cortex-spark2-serializes-2026-10-09)",
+      "finding": "The guest allowlist, /delete redirect and per-guest per-IP rate limit live in the web /input handler; an MCP path bypasses /input unless it re-enters the same gate. sbx-ask's model serializes (~7 s/answer, ~8 answers/min), so one unthrottled agent can starve both guest seats.",
+      "seeds": [
+        "c38"
+      ]
+    },
+    {
+      "id": "s17",
+      "surface": "challenge pass / lifecycle lens: web/app_session.py:174-212 identity_for",
+      "finding": "identity_for re-checks allowed_emails on every request for browser sessions; a bearer credential has no such path today, so an agent credential could outlive its human's approval unless the same re-check is built in.",
+      "seeds": [
+        "c39"
+      ]
+    },
+    {
+      "id": "s18",
+      "surface": "challenge pass / observability + reversibility lens: config.py auth flags + web/metrics + guest_store deletion log (email_hash)",
+      "finding": "Today's rollback for app sign-in is a config flag + restart (auth.app_signin.enabled: false). For this feature a naive 'off' would revert to today's full mesh access for every approved user \u2014 fail-open. No audit trail exists for access decisions; the store already logs deletions by sha256(email), a usable pattern.",
+      "seeds": [
+        "c40",
+        "c41"
+      ]
+    },
+    {
+      "id": "s19",
+      "surface": "challenge pass / counter-evidence lens: c27 vs config.py:189-219,661",
+      "finding": "c27's '0 config edits, 0 restarts' contradicts the approval allowlist living in frozen config \u2014 onboarding a new approved user today needs a config edit and a restart. Routed to a user decision (q9).",
+      "seeds": []
+    },
+    {
+      "id": "s20",
+      "surface": "challenge pass / migration lens: guest_store.py _migrate :125 + live store",
+      "finding": "New tables (grants, agent credentials, audit) fit the additive _migrate pattern on the existing live store. The hazard is the default-deny cutover, not the schema: no admin role exists yet, so enabling the feature before an admin is marked locks the owner out. Routed to q10.",
+      "seeds": []
+    },
+    {
+      "id": "s21",
+      "surface": "challenge pass / concurrency lens: credential replace (c29) + grant revoke mid-session",
+      "finding": "Two concurrent credential issues for one human must leave exactly one active (single store transaction, as consume_token already does); a grant revoked while a session is joined must also stop live line dispatch, which h14's 'live PRIVMSG dispatch' covers. No further concurrency hazard found; the replace race is carried as an obligation on c2.",
+      "seeds": []
+    },
+    {
+      "id": "s22",
+      "surface": "challenge pass / operations lens: ss -tn established :6667 (probe 2026-10-31)",
+      "finding": "At probe time all 5 established mesh connections came from loopback and server.yaml showed no link block, so restricting the mesh port to loopback would cut nothing observed today. This is a point-in-time observation; federation peers or remote agents that connect occasionally were not ruled out.",
+      "seeds": []
+    }
+  ],
+  "lapses": [
+    {
+      "id": "l1",
+      "code": "assumption-for-measurement",
+      "what": "s22 states server.yaml has no link block, but the probe only grepped for top-level keys links/peers/link; the file's real federation key name was not checked",
+      "skipped_check": "read the server.yaml schema (culture_core config) for the actual link key before asserting absence",
+      "refs": [
+        "s22"
+      ],
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "l2",
+      "code": "provenance-missing",
+      "what": "s16 cites the guest /input gate (routes.py ~765-800) from a subagent's report; this pass did not re-read those lines",
+      "skipped_check": "read web/routes.py /input handler before citing it",
+      "refs": [
+        "s16"
+      ],
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "l3",
+      "code": "control-absent",
+      "what": "t19 (agentfront): tests were written first but their RED step was only an import error at collection (new modules absent), not failing assertions",
+      "skipped_check": "see each new test fail on its own assertion before implementing",
+      "refs": [
+        "t19"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l4",
+      "code": "control-absent",
+      "what": "t19 (agentfront): pre-commit hooks not run (not installed in the worktree); black/isort/flake8/markdownlint run by hand, pylint warnings left",
+      "skipped_check": "run the repo's pre-commit hooks",
+      "refs": [
+        "t19"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l5",
+      "code": "control-absent",
+      "what": "t15: tests and implementation written together, no strict RED phase before implementing",
+      "skipped_check": "see each new test fail on its own assertion before implementing",
+      "refs": [
+        "t15"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l6",
+      "code": "assumption-for-measurement",
+      "what": "t13: nick-collision (433) and nick case rules were tested against the in-repo test IRCd's relay mode, modelled rather than measured on a real AgentIRC",
+      "skipped_check": "exercise agent connections against a real AgentIRC instance",
+      "refs": [
+        "t13"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l7",
+      "code": "provenance-missing",
+      "what": "t16: docs/permissions.md states /owner/metrics is admin-only and that guests need current consent for an agent credential from docstrings/source reading, not from running a test",
+      "skipped_check": "cite or run the test that proves each admin-only and consent claim",
+      "refs": [
+        "t16"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l8",
+      "code": "control-absent",
+      "what": "t14: the stale-consent test drives the consent gate with a fake legal seam (a flag), not a real version comparison against the fetched legal document",
+      "skipped_check": "exercise re-consent against a real legal/version.json at an older version",
+      "refs": [
+        "t14"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l9",
+      "code": "control-absent",
+      "what": "t17: e2e assertions written with the tests, no RED step and no mutation check that the suite catches a disabled owner filter",
+      "skipped_check": "mutation-check: disable the owner filter and confirm test_e2e_permissions fails",
+      "refs": [
+        "t17"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    }
+  ],
+  "obligations": [
+    {
+      "id": "o1",
+      "claim_id": "c2",
+      "seam": "agent credential issue (store transaction)",
+      "behavior": "issuing a credential for a human revokes any prior one in the same transaction; two concurrent issues leave exactly one active credential, and the replaced agent's IRC connection is closed",
+      "source_text": "Every human (approved or guest) may bring exactly one personal agent; the agent connects over MCP, is authenticated through its human's email, and counts as that human (same tier, same permissions, no extra seat)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o2",
+      "claim_id": "c3",
+      "seam": "agent connection receive path -> MCP read",
+      "behavior": "a line from any sender other than the agent's human that DMs or @-addresses the agent is withheld; every delivered line carries an owner/not-owner mark taken from lens state",
+      "source_text": "A human can talk with their own agent; no human can talk with another human's agent (user A can't reach user B's agent, user A can reach user A's agent)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o3",
+      "claim_id": "c10",
+      "seam": "lens Session command + event dispatch",
+      "behavior": "join, send, read/history, channels, who, mesh, agents and live PRIVMSG dispatch each consult the grant check; an ungranted request emits no IRC line and returns a refusal",
+      "source_text": "Channel permissions are enforced server-side in the lens Session for every path \u2014 join, send, read/history, channels listing, roster/who, raw /input \u2014 not only by hiding channels in the UI",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o4",
+      "claim_id": "c18",
+      "seam": "grant check (role resolution)",
+      "behavior": "an admin passes every channel check; a non-admin with no grant row fails every check (default-deny, never default-allow on a missing or unreadable grant)",
+      "source_text": "Roles: admins have full access to every channel; for everyone else no grant means no channels (default-deny)",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o5",
+      "claim_id": "c19",
+      "seam": "grant check (level)",
+      "behavior": "a read-level grant allows list/history/live lines and refuses every send verb; write/ask allows both",
+      "source_text": "Two per-channel access levels: read, and write/ask",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o6",
+      "claim_id": "c20",
+      "seam": "registry backend selection (_backend_for)",
+      "behavior": "a guest principal always maps to the sandbox backend; an approved non-admin maps to the mesh, with no route to the sandbox guest view",
+      "source_text": "Guests stay separate on the sandbox; approved (signed) users reach the real mesh, limited to their granted channels",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o7",
+      "claim_id": "c21",
+      "seam": "agent permission resolution",
+      "behavior": "an agent's grants are read from its human's current rows on every check; revoking the human's grant refuses the agent's next call",
+      "source_text": "A personal agent can be wherever its owner is, with exactly its owner's permissions",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o8",
+      "claim_id": "c12",
+      "seam": "MCP endpoint authentication",
+      "behavior": "a request without a valid, unexpired, unrevoked credential is refused before any tool runs; credentials are stored only as hashes",
+      "source_text": "The single remote MCP endpoint (HTTP, not stdio) authenticates each agent with its own bearer credential: issued through its human's existing approval path (allowlist sign-in for approved users, email code for guests \u2014 per q5), stored hashed, bound to the human, revocable and expiring; the agent gets its own IRC connection and a nick visibly tied to its human",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o9",
+      "claim_id": "c13",
+      "seam": "ban / deletion / idle paths",
+      "behavior": "banning or deleting a human refuses and disconnects their agent and removes its credential rows",
+      "source_text": "The agent is accounted as its human everywhere the human is: it takes no extra guest seat, is checked against is_banned(email, ip), its flags use the human's key, idle sign-off and deletion (delete_guest_inputs, delete_sessions_for_email) and the retention sweep cover it",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o10",
+      "claim_id": "c31",
+      "seam": "mesh IRCd listener",
+      "behavior": "a TCP connect to the mesh IRC port from a non-allowed source is refused; the lens, mesh agents and links still connect",
+      "source_text": "The mesh IRCd accepts connections only from the lens, the mesh's own agents and its federation links \u2014 restricting it is part of this feature, because the IRCd has no access control and lens-side grants are otherwise bypassable",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o11",
+      "claim_id": "c22",
+      "seam": "MCP endpoint tier derivation",
+      "behavior": "one endpoint serves all tiers; the scope comes only from the credential's bound human, never from request parameters",
+      "source_text": "One MCP endpoint for all tiers (admin, approved, guest), reached through the lens's public host; for now an agent is approved the same way a human is today",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o12",
+      "claim_id": "c32",
+      "seam": "admin-only routes (sandbox enter, owner metrics, residents)",
+      "behavior": "a non-admin approved user or any agent gets 403",
+      "source_text": "Admin-only surfaces: the sandbox 'guest view' toggle (which joins every guest's private room), the owner metrics page and the residents page are available to admins only \u2014 never to non-admin approved users or any agent",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o13",
+      "claim_id": "c36",
+      "seam": "agent IRC connection (lens-held)",
+      "behavior": "a DM to the agent from a raw IRC client that bypasses the lens is withheld from MCP reads",
+      "source_text": "Owner-only filtering runs on the receive side of the agent's lens-held IRC connection, so it covers every sender \u2014 other lens users, federated peers, and any client that reached the IRCd directly",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o14",
+      "claim_id": "c37",
+      "seam": "MCP tool dispatch",
+      "behavior": "no tool call runs without a resolved human identity; the dev-only identity-less tools path is never reachable from the endpoint",
+      "source_text": "The MCP endpoint does not reuse the identity-less tools.py path (fixed dev nick, dev-mode only); every MCP tool call carries its credential's human and passes the same grant check as the web Session",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o15",
+      "claim_id": "c38",
+      "seam": "agent send path",
+      "behavior": "agent sends go through the same allowlist, rate limit, input log and flag path as the human's web input",
+      "source_text": "An agent's sends pass the same gates as its human's: the guest command allowlist, the per-human rate limit, the input log and the flag path; one agent cannot exhaust a shared resident's answer capacity",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o16",
+      "claim_id": "c39",
+      "seam": "agent request authentication",
+      "behavior": "each request re-checks the human is still approved / not banned / not deleted",
+      "source_text": "Every agent request re-checks its human's current status (still approved, not banned, not deleted), so removing an approved user or banning a guest cuts off their agent on its next request",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o17",
+      "claim_id": "c40",
+      "seam": "feature switches",
+      "behavior": "the kill switch refuses every agent call; disabling permissions refuses non-admins the mesh instead of granting all of it",
+      "source_text": "Rollback fails closed: a single switch disables the MCP endpoint and blocks all agent credentials, and turning the permissions feature off never restores full mesh access to non-admin approved users",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o18",
+      "claim_id": "c45",
+      "seam": "in-app admin routes (add / invite / grant)",
+      "behavior": "a non-admin approved user, a guest or any agent calling these routes gets 403; an invite never grants access before the invited user completes sign-in",
+      "source_text": "Admins add and invite non-admin approved users, and manage their grants, from within the app",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o19",
+      "claim_id": "c46",
+      "seam": "guest idle reaper + agent extension",
+      "behavior": "with no live admin extension the agent's connection closes in the same reap as its human; with one it stays until the extension's end time, then follows the normal rule",
+      "source_text": "A guest's agent is disconnected when its human is signed off for idleness, unless an admin has approved that agent to stay for a set period of n hours (chosen by the admin), after which the normal rule applies again",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o20",
+      "claim_id": "c44",
+      "seam": "feature enable path",
+      "behavior": "enabling permissions with zero admins in the store is refused with a hint; after migration the previously approved users are admins",
+      "source_text": "The migration marks currently approved users as admins (today only the operator); the feature refuses to enable while zero admins exist",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o21",
+      "claim_id": "c43",
+      "seam": "store migration (one-time allowlist import)",
+      "behavior": "the migration imports the config allowlist exactly once (re-running it imports nothing new) and afterwards the config list is never read for access",
+      "source_text": "Approved users and admin flags live in the lens store; the migration imports the existing config allowlist once and the config list is then retired",
+      "origin": "llm",
+      "status": "approved"
+    }
+  ]
+}

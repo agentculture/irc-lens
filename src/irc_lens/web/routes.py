@@ -38,16 +38,14 @@ from aiohttp import web
 
 from irc_lens import metrics
 from irc_lens.commands import (
-    DELETE_COMMAND,
     DELETE_PAGE,
     SANDBOX_COMMAND,
     CommandType,
     ParsedCommand,
-    allowed_in_sandbox,
     parse_command,
 )
-from irc_lens.session import LensConnectionLost
-from irc_lens.web import app_session
+from irc_lens.session import LensConnectionLost, Session
+from irc_lens.web import app_session, input_gate
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import client_ip
 from irc_lens.web.events import format_sse
@@ -131,6 +129,39 @@ def sandbox_nick_for(config, identity: Identity) -> str:
     return f"{SANDBOX_NICK_PREFIX}{APPROVED_SANDBOX_INFIX}{suffix}"
 
 
+_ERR_ADMIN_REQUIRED = "admin sign-in required"
+
+
+def admin_only_denial(
+    identity: Identity | None, *, access_enabled: bool
+) -> web.Response | None:
+    """The single admin-only gate; ``None`` means allowed.
+
+    With email permissions on, only ``identity.is_admin`` passes: a non-admin
+    approved user (and, later, any agent identity) gets 403, guests and
+    anonymous get the standard 401. With them off, the legacy rule stands
+    (any approved identity), so existing deployments are unchanged.
+    """
+    if identity is None or not identity.is_approved:
+        return _json_error(
+            401, _ERR_APPROVED_REQUIRED, "sign in through /login to reach the real mesh"
+        )
+    if access_enabled and not identity.is_admin:
+        return _json_error(
+            403, _ERR_ADMIN_REQUIRED, "this action is limited to administrators"
+        )
+    return None
+
+
+def _admin_only(request: web.Request) -> web.Response | None:
+    app = getattr(request, "app", None)
+    config = app["config"] if app is not None else None
+    return admin_only_denial(
+        request.get("identity"),
+        access_enabled=bool(getattr(config, "access_enabled", False)),
+    )
+
+
 def _backend_for(request: web.Request) -> tuple[Identity, str]:
     """Pick (identity-for-registry, backend) from the VERIFIED tier only.
 
@@ -142,7 +173,10 @@ def _backend_for(request: web.Request) -> tuple[Identity, str]:
     config = request.app["config"]
     if identity.is_approved:
         toggled = request.app.get("sandbox_toggle", ())
-        if config.guest_enabled and identity.principal in toggled:
+        # With email permissions on, only admins may sit in the sandbox view;
+        # a member always gets the mesh, whatever a stale toggle says.
+        may_toggle = identity.is_admin if config.access_enabled else True
+        if may_toggle and config.guest_enabled and identity.principal in toggled:
             sandbox_identity = identity._replace(
                 nick=sandbox_nick_for(config, identity)
             )
@@ -314,10 +348,9 @@ async def post_sandbox_leave(request: web.Request) -> web.Response:  # NOSONAR S
 
 def _set_sandbox_toggle(request: web.Request, *, on: bool) -> web.Response:  # NOSONAR
     identity: Identity = request["identity"]
-    if not identity.is_approved:
-        return _json_error(
-            401, _ERR_APPROVED_REQUIRED, "sandbox toggle is for approved users"
-        )
+    denied = _admin_only(request)
+    if denied is not None:
+        return denied
     toggled: set[str] = request.app["sandbox_toggle"]
     if on:
         toggled.add(identity.principal)
@@ -497,6 +530,53 @@ async def _iter_field_chunks(field: aiohttp.BodyPartReader) -> AsyncIterator[byt
         yield chunk
 
 
+async def _initial_chat_log(session: Session) -> str | None:
+    """The chat-log HTML for a page render, or None to use the buffer.
+
+    `None` lets `render_index` fall back to the `MessageBuffer` — which is
+    the seed-loader path. We only return a string when the live IRCd query
+    actually ran, so `--seed` preloaded fixtures still render on the
+    initial page render.
+    """
+    channel = session.current_channel
+    # Both `connected` (post-welcome) and `healthy` (no broken pipe) must
+    # hold — a pre-welcome session would block for QUERY_TIMEOUT (10s) on
+    # the HISTORY query because AgentIRC ignores custom verbs from
+    # unregistered clients.
+    if not (channel and session.healthy and session.connected):
+        return None
+    try:
+        entries = await session.history(channel, limit=50)
+    except PermissionError:
+        # Never fall back to the buffer for a channel the viewer may
+        # not read: render an empty log instead.
+        return ""
+    except LensConnectionLost:
+        # Page render shouldn't break on transport loss; the
+        # connection-status indicator + 503 on next /input will
+        # surface the problem to the user. Fall back to the buffer
+        # rather than forcing a blank pane.
+        return None
+    except Exception:
+        logger.exception("history fetch for %s during GET / failed", channel)
+        return None
+    # Thread the session's media-embed state through exactly as
+    # `session.py`'s `_publish_chat`/`_fetch_and_publish_history`
+    # and `render_index`'s own buffer-fallback branch do — a
+    # gap flagged by t2: this explicit history-fetch branch
+    # previously called `render_chat_log(entries)` with no
+    # kwargs, so a page reload after a live HISTORY query would
+    # silently drop `.lens-media` embeds that a reload hitting
+    # the buffer-fallback branch would have rendered.
+    return render_chat_log(
+        entries,
+        media_embed_prefixes=session.media_embed_prefixes,
+        media_remote_embeds=session.media_remote_embeds,
+        hide_system=getattr(session, "ui_tier", None) in ("guest", "sandbox_preview"),
+        agent_nicks=agent_nicks_for(session),
+    )
+
+
 @allows_anonymous
 async def get_index(request: web.Request) -> web.Response:
     """Render the three-pane page (or, for anonymous visitors, the entry card).
@@ -522,44 +602,11 @@ async def get_index(request: web.Request) -> web.Response:
         from irc_lens.web import entry
 
         return entry.busy_page(request.app[entry.ENTRY_STATE])
-    # `chat_log_html=None` lets `render_index` fall back to the
-    # `MessageBuffer` — which is the seed-loader path. We only override
-    # to a string when the live IRCd query actually ran, so `--seed`
-    # preloaded fixtures still render on the initial page render.
-    chat_log_html: str | None = None
-    channel = session.current_channel
-    # Both `connected` (post-welcome) and `healthy` (no broken pipe) must
-    # hold — a pre-welcome session would block for QUERY_TIMEOUT (10s) on
-    # the HISTORY query because AgentIRC ignores custom verbs from
-    # unregistered clients.
-    if channel and session.healthy and session.connected:
-        try:
-            entries = await session.history(channel, limit=50)
-        except LensConnectionLost:
-            # Page render shouldn't break on transport loss; the
-            # connection-status indicator + 503 on next /input will
-            # surface the problem to the user. Fall back to the buffer
-            # rather than forcing a blank pane.
-            entries = None
-        except Exception:
-            logger.exception("history fetch for %s during GET / failed", channel)
-            entries = None
-        if entries is not None:
-            # Thread the session's media-embed state through exactly as
-            # `session.py`'s `_publish_chat`/`_fetch_and_publish_history`
-            # and `render_index`'s own buffer-fallback branch do — a
-            # gap flagged by t2: this explicit history-fetch branch
-            # previously called `render_chat_log(entries)` with no
-            # kwargs, so a page reload after a live HISTORY query would
-            # silently drop `.lens-media` embeds that a reload hitting
-            # the buffer-fallback branch would have rendered.
-            chat_log_html = render_chat_log(
-                entries,
-                media_embed_prefixes=session.media_embed_prefixes,
-                media_remote_embeds=session.media_remote_embeds,
-                hide_system=getattr(session, "ui_tier", None) in ("guest", "sandbox_preview"),
-                agent_nicks=agent_nicks_for(session),
-            )
+    # Apply revoked grants before anything renders: prune channels the
+    # viewer may no longer list and clear an unreadable current channel,
+    # so neither the sidebar nor the chat log can name or show them.
+    session.enforce_revocations()
+    chat_log_html = await _initial_chat_log(session)
     _, backend = _backend_for(request)
     presence = _sandbox_state(session) if backend == BACKEND_SANDBOX else None
     body = render_index(
@@ -572,6 +619,8 @@ async def get_index(request: web.Request) -> web.Response:
             request["identity"].is_approved and app_session.via_app_session(request)
         )
         or request["identity"].tier == TIER_GUEST,
+        # Every signed-in human may bring one agent (web/agent_auth.py).
+        show_agent_link=app_session.ACCESS_STORE in request.app,
     )
     return web.Response(text=body, content_type=_HTML)
 
@@ -700,12 +749,8 @@ async def post_input(request: web.Request) -> web.Response:
         await session.execute(parsed)
     except LensConnectionLost as exc:
         return _connection_lost(str(exc))
-    identity: Identity = request["identity"]
-    if identity.tier == TIER_GUEST and parsed.type == CommandType.CHAT:
-        # The export task reads these back for the guest's data export.
-        request.app["guest_store"].record_input(
-            identity.principal, kind="message", payload=text
-        )
+    # The input log (shared gate): the export task reads these back.
+    input_gate.record(request.app, _input_actor(request), parsed, text)
     return web.Response(status=204)
 
 
@@ -718,10 +763,16 @@ def _touch(request: web.Request) -> None:
         request.app["registry"].touch(identity.principal, backend)
 
 
-#: Rate-limit bucket / window for guest chat input (config:
-#: ``guest_mode.rate_limits.messages_per_min``).
-_MESSAGE_RATE_KIND = "message"
-_MESSAGE_RATE_WINDOW_S = 60
+def _input_actor(request: web.Request) -> input_gate.InputActor:
+    """The verified sender of this ``POST /input``, for the shared gate."""
+    identity: Identity = request["identity"]
+    _, backend = _backend_for(request)
+    return input_gate.InputActor(
+        tier=identity.tier,
+        email=identity.principal,
+        backend=backend,
+        ip=client_ip(request),
+    )
 
 
 def _is_sandbox_enter(request: web.Request, parsed: ParsedCommand, text: str) -> bool:
@@ -739,55 +790,30 @@ def _is_sandbox_enter(request: web.Request, parsed: ParsedCommand, text: str) ->
 def _sandbox_policy(
     request: web.Request, text: str, parsed: ParsedCommand
 ) -> web.Response | None:
-    """Server-side guest policy for ``POST /input`` (approved deviation d4).
+    """Server-side input policy for ``POST /input`` (approved deviation d4).
 
-    Applies to sessions the VERIFIED tier routed to the sandbox:
-
-    * (b) guests only: per-guest message rate limit
-      (``guest_rate_messages_per_min``) -> 429. Counted per guest email and
-      per IP over a 60 s window; every non-empty input counts, refused
-      commands included, so probing cannot be free.
-    * (a) allowlist: only commands that work in the sandbox
-      (:data:`irc_lens.commands.SANDBOX_ALLOWED`) are run; anything else is
-      refused with 403 before it can reach IRC.
+    The policy itself is :func:`irc_lens.web.input_gate.check` -- the one
+    gate the personal agent's sends go through too (o15): the ``/delete``
+    redirect, the per-guest rate limit (429) and the sandbox allowlist
+    (403). This adapter only renders its refusal as the web console's
+    ``{error, hint}`` responses.
     """
-    identity: Identity = request["identity"]
     if _is_sandbox_enter(request, parsed, text):
         return None
-    _, backend = _backend_for(request)
-    if backend != BACKEND_SANDBOX:
+    refusal = input_gate.check(request.app, _input_actor(request), parsed, text)
+    if refusal is None:
         return None
-    if identity.tier == TIER_GUEST and text.strip().lower() == DELETE_COMMAND:
+    if refusal.reason == input_gate.REASON_DELETE:
         # Deletion is a page (confirmed by an emailed code), not an IRC
         # command: send the guest there instead of "Not in guest view".
         return web.Response(status=204, headers={"HX-Redirect": DELETE_PAGE})
-    if identity.tier == TIER_GUEST and _message_rate_limited(request, identity):
-        metrics.get_metrics().rate_limited()
+    if refusal.reason == input_gate.REASON_RATE:
         return web.json_response(
-            {"error": "Slow down", "hint": "Too many messages"},
-            status=429,
-            headers={"Retry-After": str(_MESSAGE_RATE_WINDOW_S)},
+            {"error": refusal.error, "hint": refusal.hint},
+            status=refusal.status,
+            headers=refusal.headers,
         )
-    if not allowed_in_sandbox(parsed, preview=identity.tier != TIER_GUEST):
-        return _json_error(403, "Not in guest view", "Try /help")
-    return None
-
-
-def _message_rate_limited(request: web.Request, identity: Identity) -> bool:
-    """Check per-email and per-IP buckets, then count this message."""
-    store = request.app["guest_store"]
-    limit = request.app["config"].guest_rate_messages_per_min
-    keys = (f"e:{identity.principal}", f"i:{client_ip(request)}")
-    limited = any(
-        store.rate_limited(
-            _MESSAGE_RATE_KIND, k, limit=limit, window=_MESSAGE_RATE_WINDOW_S
-        )
-        for k in keys
-    )
-    if not limited:
-        for k in keys:
-            store.record_attempt(_MESSAGE_RATE_KIND, k)
-    return limited
+    return _json_error(refusal.status, refusal.error, refusal.hint)
 
 
 async def post_upload(request: web.Request) -> web.Response:
@@ -998,6 +1024,10 @@ async def get_residents(request: web.Request) -> web.Response:
     Touches no ``Session`` — this page reads culture's HTTP surface,
     not the AgentIRC connection.
     """
+    if request.app["config"].access_enabled:
+        denied = _admin_only(request)
+        if denied is not None:
+            return denied
     config = request.app["config"]
     # The resolver reads the overview port file — a blocking read that
     # stays off the event loop like every other file read in this app
@@ -1040,18 +1070,18 @@ async def get_owner_metrics(request: web.Request) -> web.Response:  # NOSONAR S7
     middleware already 401s anonymous requests; the tier check here also
     refuses a ``guest`` identity with the same standard denial.
     """
-    identity = request.get("identity")
-    if identity is None or not identity.is_approved:
-        return web.json_response(
-            {
-                "error": _ERR_APPROVED_REQUIRED,
-                "hint": "sign in through /login to reach the real mesh",
-            },
-            status=401,
-        )
+    denied = _admin_only(request)
+    if denied is not None:
+        return denied
+    from irc_lens.web.agent_auth import suppressed_refusals
+
     return web.json_response(
         {
             "counters": metrics.get_metrics().snapshot(),
+            "access": metrics.access_counts(
+                request.app.get(app_session.ACCESS_STORE),
+                suppressed_refusals=suppressed_refusals(request.app),
+            ),
             "agent": _owner_agent_state(request.app["registry"]),
         }
     )

@@ -9,8 +9,10 @@ the dispatcher renders without leaking a traceback.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import sqlite3
+from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlsplit
 
 import yaml
@@ -18,6 +20,24 @@ import yaml
 from irc_lens._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
 
 _AUTH_MODES = ("dev", "cloudflare-access")
+
+#: Lifetime of a personal agent's MCP bearer credential when
+#: ``auth.email_permissions.agent_credential_ttl_days`` is unset: 30 days.
+#: Issuing a new credential (or revoking it) ends it sooner.
+DEFAULT_AGENT_CREDENTIAL_TTL_DAYS = 30
+DEFAULT_AGENT_CREDENTIAL_TTL_S = DEFAULT_AGENT_CREDENTIAL_TTL_DAYS * 86400
+
+
+#: The three states of ``auth.email_permissions.enabled`` (see
+#: :func:`resolve_access`). ``enforced``: the access store decides approval,
+#: roles and grants. ``legacy``: switched off and the access store was never
+#: initialised, so ``auth.allowed_emails`` is still the allowlist. ``admins-only``:
+#: switched off *after* the store was initialised -- fail closed, only
+#: approved admins pass, nobody falls back to the retired config allowlist,
+#: and no agent runs.
+ACCESS_ENFORCED = "enforced"
+ACCESS_LEGACY = "legacy"
+ACCESS_ADMINS_ONLY = "admins-only"
 
 
 @dataclass(frozen=True)
@@ -73,9 +93,33 @@ class LensConfig:
     # auth.app_signin.base_url: public base of set-password links (https;
     # http only for loopback). None falls back to media_public_base_url.
     app_signin_base_url: str | None = None
+    # auth.email_permissions.enabled: approval + roles live in the access
+    # store (irc_lens.access_store); auth.allowed_emails is then only the
+    # one-time admin import. Off: allowed_emails stays the allowlist -- but
+    # only until the access store has been initialised; see ACCESS_* and
+    # :func:`resolve_access` for the three switch states.
+    access_enabled: bool = False
+    # auth.email_permissions.agents_enabled (default True): the agent kill
+    # switch. False refuses every MCP call and blocks all credentials.
+    agents_enabled: bool = True
+    # Set by :func:`resolve_access` (never by the YAML): the switch is off
+    # but the access store was initialised, so only approved admins pass.
+    access_admins_only: bool = False
+    # auth.email_permissions.agent_credential_ttl_days, in seconds: how long
+    # an issued agent credential (web/agent_auth.py) stays valid.
+    agent_credential_ttl_s: int = DEFAULT_AGENT_CREDENTIAL_TTL_S
     guest_rate_entry_per_min: int = 10
     guest_rate_messages_per_min: int = 20
     guest_rate_password_attempts_per_15min: int = 5
+    # web.mcp_path: where the remote MCP endpoint is mounted (web/mcp_http.py).
+    mcp_path: str = "/mcp"
+
+    @property
+    def access_mode(self) -> str:
+        """Which switch state this config is in (one of the ``ACCESS_*``)."""
+        if not self.access_enabled:
+            return ACCESS_LEGACY
+        return ACCESS_ADMINS_ONLY if self.access_admins_only else ACCESS_ENFORCED
 
 
 def default_config_path() -> Path:
@@ -265,6 +309,29 @@ def _validate_web_section(raw: dict) -> tuple[str, int]:
     web_bind = str(web.get("bind", "127.0.0.1"))
     web_port = _coerce_port(web.get("port", 8765), "web.port")
     return web_bind, web_port
+
+
+def _validate_mcp_path(raw: dict) -> str:
+    """Return ``web.mcp_path`` (default ``/mcp``): an absolute URL path.
+
+    Braces are refused: aiohttp reads ``{...}`` in a route as a dynamic
+    segment, which would mount the endpoint on more paths than configured.
+    """
+    web = raw.get("web")
+    value = web.get("mcp_path", "/mcp") if isinstance(web, dict) else "/mcp"
+    if (
+        not isinstance(value, str)
+        or not value.startswith("/")
+        or any(ch.isspace() for ch in value)
+        or "{" in value
+        or "}" in value
+    ):
+        raise _err(
+            f"web.mcp_path must be a static URL path starting with '/' "
+            f"(no spaces or braces), got {value!r}",
+            "set `web.mcp_path:` to a path like /mcp",
+        )
+    return value
 
 
 def _default_media_dir() -> str:
@@ -467,6 +534,96 @@ def _validate_app_signin(auth: dict) -> bool:
         auth.get("app_signin"), "auth.app_signin", _APP_SIGNIN_KEYS
     )
     return _coerce_bool(sect.get("enabled", True), "auth.app_signin.enabled")
+
+
+_EMAIL_PERMISSIONS_KEYS = frozenset(
+    {"enabled", "agent_credential_ttl_days", "agents_enabled"}
+)
+
+
+def _email_permissions_section(auth: dict) -> dict:
+    return _optional_mapping(
+        auth.get("email_permissions"),
+        "auth.email_permissions",
+        _EMAIL_PERMISSIONS_KEYS,
+    )
+
+
+def _validate_email_permissions(auth: dict) -> bool:
+    """auth.email_permissions.enabled (default False)."""
+    sect = _email_permissions_section(auth)
+    return _coerce_bool(sect.get("enabled", False), "auth.email_permissions.enabled")
+
+
+def _validate_agents_enabled(auth: dict) -> bool:
+    """auth.email_permissions.agents_enabled (default True): the kill switch."""
+    sect = _email_permissions_section(auth)
+    return _coerce_bool(
+        sect.get("agents_enabled", True), "auth.email_permissions.agents_enabled"
+    )
+
+
+def _access_store_initialised(path: str) -> bool:
+    """Has the access store ever been initialised at *path*?
+
+    True when the one-time admin import ledger holds a row. A file that
+    exists but cannot be read counts as initialised (fail closed); a missing
+    file, or a database with no access tables or an empty ledger, does not.
+    Opens read-only: it never creates or alters anything.
+    """
+    p = Path(path)
+    if not p.exists():
+        return False
+    try:
+        con = sqlite3.connect(f"{p.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
+        try:
+            tables = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='admin_imports'"
+            ).fetchone()
+            if tables is None:
+                return False
+            return con.execute("SELECT COUNT(*) FROM admin_imports").fetchone()[0] > 0
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return True
+
+
+def resolve_access(config: LensConfig) -> LensConfig:
+    """Apply the fail-closed switch rules; call once, at app start.
+
+    * ``enabled: true`` -- enforced, unchanged.
+    * ``enabled: false`` and the access store never initialised -- legacy:
+      ``auth.allowed_emails`` stays the allowlist, unchanged.
+    * ``enabled: false`` but the store *was* initialised -- admins-only:
+      the store keeps deciding, but only approved admins pass (a non-admin
+      approved user is refused the mesh, not given all of it), the retired
+      config allowlist is never consulted, and agents are off.
+    """
+    if config.access_enabled:
+        return config
+    # load_config always fills guest_store_path; a hand-built config without
+    # one never touches the operator's default store.
+    path = config.guest_store_path
+    if not path or not _access_store_initialised(path):
+        return config
+    # cast: replace() returns the same dataclass type; say so for checkers.
+    return cast(
+        LensConfig,
+        replace(
+            config, access_enabled=True, access_admins_only=True, agents_enabled=False
+        ),
+    )
+
+
+def _agent_credential_ttl_s(auth: dict) -> int:
+    """auth.email_permissions.agent_credential_ttl_days (> 0), in seconds."""
+    sect = _email_permissions_section(auth)
+    days = _positive_int(
+        sect.get("agent_credential_ttl_days", DEFAULT_AGENT_CREDENTIAL_TTL_DAYS),
+        "auth.email_permissions.agent_credential_ttl_days",
+    )
+    return days * 86400
 
 
 def _app_signin_base_url(auth: dict) -> str | None:
@@ -718,6 +875,7 @@ def load_config(path: Path) -> LensConfig:
         # a code screen whose code never arrives. make_app logs why.
         app_signin_enabled = False
     app_signin_base_url = _app_signin_base_url(auth)
+    access_enabled = _validate_email_permissions(auth)
 
     return LensConfig(
         auth_mode=mode,
@@ -743,6 +901,10 @@ def load_config(path: Path) -> LensConfig:
         culture_overview_name=culture_overview_name,
         app_signin_enabled=app_signin_enabled,
         app_signin_base_url=app_signin_base_url,
+        access_enabled=access_enabled,
+        agents_enabled=_validate_agents_enabled(auth),
+        agent_credential_ttl_s=_agent_credential_ttl_s(auth),
+        mcp_path=_validate_mcp_path(raw),
         **guest_fields,
     )
 

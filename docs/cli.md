@@ -393,6 +393,32 @@ nothing to export.
   `~/.culture/sandbox/flags.jsonl`). `guests ban --flag <id>` bans the
   flagged guest, resolving a log nick to the guest's email via the store.
 
+## Email-keyed permissions (`users`, `grants`, `agents`, `extend`)
+
+These verbs edit the access store while the lens keeps running. Each opens the
+store, makes one change and exits, and the lens sees the change on its next
+check with no restart. Every verb takes `--store PATH` (otherwise the
+configured store) and `--config PATH`. Output echoes only the email you typed.
+Full reference: [permissions.md](permissions.md).
+
+- `users add <email> [--role member|admin]` approves a user (default role
+  `member`). `users role <email> <member|admin>` changes only the role and
+  keeps the user's state. `users remove <email>` marks the user removed and
+  revokes their agent credential. None of these may leave the store without
+  an approved admin.
+- `grants add <email> <channel> [--level read|write|ask]` grants one channel.
+  Channel names match exactly, as AgentIRC treats them: `#ops` and `#OPS` are
+  different rooms. `grants list <email>` shows a user's grants.
+  `grants revoke <email> <channel>` removes one, and exits 1 with
+  "no such grant" if there was none.
+- `agents list <email>` shows the user's active agent-credential count and any
+  extension. `agents revoke <email>` revokes the agent credential for both
+  the approved user and the guest of that email (`guest:<email>`). The
+  running lens closes the agent's connection on its next sweep.
+- `extend <email> --days N` lets a guest's agent stay connected for N days
+  after its human signs off; `extend <email> --clear` removes the extension.
+  The admin page sets the same extension in hours.
+
 ## App sign-in, set-password, guest limit and delivery alerts
 
 `irc-lens serve` with guest mode on also serves the app's own sign-in for

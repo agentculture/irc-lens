@@ -42,6 +42,9 @@
       {% if session.sandbox_available %}
         <button type="button" class="lens-btn" data-testid="sandbox-enter" hx-post="/sandbox/enter" hx-swap="none">Guest view</button>
       {% endif %}
+      {% if show_agent_link %}
+        <a class="lens-btn" data-testid="agent-link" href="/agent-credential">Your agent</a>
+      {% endif %}
       {% if show_logout %}
         {% set logout_url = "/guest/logout" if tier == "guest" else "/logout" %}
         <form class="lens-logout" method="post" action="{{ logout_url }}" hx-post="{{ logout_url }}" hx-swap="none">
