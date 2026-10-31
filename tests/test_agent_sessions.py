@@ -458,6 +458,21 @@ async def test_ungranted_channel_refused_before_any_irc_line(env: Env) -> None:
     assert not any(ln.startswith("PRIVMSG") for ln in sent)
 
 
+async def test_case_variant_of_a_granted_channel_is_refused(env: Env) -> None:
+    """AgentIRC channel names are case-sensitive: a grant on ``#ops`` does
+    not reach ``#OPS`` or ``#Ops``, which are other, ungranted rooms."""
+    token = await env.issue(env.jwt(MEMBER))
+    await env.ok(token, "whoami")
+    before = env.sent_by(env.mesh, MEMBER_AGENT)
+    for variant in ("#OPS", "#Ops"):
+        assert "not permitted" in await env.refused(token, "join", channel=variant)
+        assert "not permitted" in await env.refused(
+            token, "send", target=variant, text="hi"
+        )
+    sent = env.sent_by(env.mesh, MEMBER_AGENT)[len(before) :]
+    assert not any("#OPS" in ln or "#Ops" in ln for ln in sent)
+
+
 async def test_revoked_grant_bites_on_the_next_send(env: Env) -> None:
     token = await env.issue(env.jwt(MEMBER))
     await env.ok(token, "join", channel="#ops")

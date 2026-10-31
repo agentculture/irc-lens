@@ -8,7 +8,8 @@ every answer is derived from the store's *current* rows, on every call
 Rules:
 
 * An *approved* admin passes every check.
-* Any other human needs an explicit ``channel`` grant. ``read`` allows
+* Any other human needs an explicit ``channel`` grant whose resource equals
+  the channel name *exactly* (AgentIRC channel names are case-sensitive). ``read`` allows
   list/read; ``write`` and ``ask`` allow list/read/write. An unknown level
   grants nothing.
 * An agent has no rows of its own: :func:`agent_can_list` & co. resolve the
@@ -42,9 +43,11 @@ def _allowed(store: Any, human: str | None, channel: str, op: str) -> bool:
         return False
     if user.get("role") == "admin":
         return True
-    wanted = channel.casefold()
+    # Exact match: AgentIRC keys channels by their exact name, so ``#ops``
+    # and ``#OPS`` are two different rooms. Folding case here would let a
+    # grant on one open the other.
     for _kind, resource, level in store.grants_for(human, CHANNEL_KIND):
-        if resource.casefold() == wanted:
+        if resource == channel:
             return level in _LEVELS[op]
     return False
 

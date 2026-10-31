@@ -58,9 +58,15 @@ def test_grant_is_per_channel(store):
     assert access.can_list(USER, OTHER, store=store) is False
 
 
-def test_channel_and_email_case_insensitive(store):
+def test_channel_exact_email_case_insensitive(store):
+    """AgentIRC keys channels by their exact name: ``#Room`` and ``#ROOM``
+    are different rooms, so a grant on one never opens the other. The
+    email half of the key stays case-insensitive (it is normalised)."""
     store.set_grant(USER, "channel", "#Room", "read", actor=None)
-    assert access.can_read(USER.upper(), "#ROOM", store=store) is True
+    assert access.can_read(USER.upper(), "#Room", store=store) is True
+    for other in ("#ROOM", "#room", "#rOOM"):
+        for fn in ACTIONS.values():
+            assert fn(USER, other, store=store) is False
 
 
 def test_non_channel_grant_kind_ignored(store):

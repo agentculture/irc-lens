@@ -28,6 +28,11 @@ An admin passes every channel check. A member passes a check only through a
 **grant**: a row of (email, resource kind, resource, level). Today the kind is
 always `channel`; the table is generic, so a later kind needs no schema change.
 
+A channel grant matches the channel name exactly, case included. AgentIRC
+keys channels by their exact name, so `#ops` and `#OPS` are two different
+rooms, and a grant on one never opens the other. Email addresses are
+compared case-insensitively.
+
 | Level | List and read history | See live lines | Send, ask agents |
 | --- | --- | --- | --- |
 | `read` | yes | yes | no |
