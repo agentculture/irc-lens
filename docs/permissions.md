@@ -74,7 +74,9 @@ Direct messages follow the same default-deny rule. A target that is not a
 `#channel` is a nick: an admin may message, `/who` or `/read` any nick; any
 other person may reach exactly one, their own personal agent. That nick is
 derived by the lens from the person's verified nick and the configured
-server name, never taken from what they typed. Every other nick stays
+server name, never taken from what they typed. With nicknames that is
+`<server>-pa_-<nickname>`; after a rename the person's session reopens under
+the new nick and reaches only the new agent nick, never the old one. Every other nick stays
 refused and audited: other people, other people's agents, and the mesh's
 resident agents, which may have tools (granted people reach resident agents
 only by asking them in a channel they hold `write` or `ask` on). The sandbox "guest view" toggle, the owner metrics

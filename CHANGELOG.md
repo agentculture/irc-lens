@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the user's IRC sessions and agent connection so they reconnect under the new
   nick; the agent credential must be re-issued. Setting and renaming are audited
   with the nickname as target, never the email.
+- The own-agent DM rule (0.17.1) follows the chosen nickname: a member reaches
+  `<server>-pa_-<nickname>` on the configured server name, and after a rename
+  only the new agent nick. The nickname sweep reads the store under one pinned
+  change stamp with the short hot-path busy timeout; a locked store closes
+  nothing that round. An agent call that finds the store locked is refused as
+  busy without dropping the agent's connection.
 
 ### Changed
 

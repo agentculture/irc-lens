@@ -10,21 +10,29 @@ rename is audited with the nickname as target, never the email.
 
 from __future__ import annotations
 
+import logging
+import sqlite3
+from contextlib import closing
+from types import SimpleNamespace
+
 import pytest
 
+from irc_lens._errors import AfiError
 from irc_lens.access_store import AccessStore
 from irc_lens.agent_nick import agent_nick_for
 from irc_lens.guest_store import email_hash
-from irc_lens.web import agent_auth
+from irc_lens.web import agent_auth, agent_sessions
 from irc_lens.web.sessions import BACKEND_MESH
-from test_agent_sessions import ADMIN, MEMBER, MEMBER_AGENT, MEMBER_NICK, Env
+from test_agent_sessions import ADMIN, MEMBER, MEMBER_AGENT, MEMBER_NICK, Env, settle
 from test_agent_sessions import env as agent_env  # noqa: F401 - a fixture
 from test_session_routing import consent  # noqa: F401 - fixture
 
 pytestmark = pytest.mark.usefixtures("chosen_nicknames")
 
 RENAME_PATH = "/admin/users/nickname"
-NEW_NICK = "testsrv-nova"
+SERVER = "testsrv"
+NEW_NICK = f"{SERVER}-nova"
+NEW_AGENT = agent_nick_for(NEW_NICK, SERVER)
 
 
 @pytest.fixture
@@ -107,7 +115,7 @@ async def test_rename_closes_sessions_and_agent_then_reconnects(env: Env) -> Non
     await env.human_online(env.jwt(MEMBER))
     assert env.human_session(MEMBER).nick == NEW_NICK
     token = await env.issue(env.jwt(MEMBER))
-    assert (await env.ok(token, "whoami"))["nick"] == agent_nick_for(NEW_NICK)
+    assert (await env.ok(token, "whoami"))["nick"] == NEW_AGENT
 
 
 async def test_out_of_process_rename_is_swept(env: Env) -> None:
@@ -128,3 +136,78 @@ async def test_sweep_leaves_current_nicks_alone(env: Env) -> None:
     await agent_auth.sweep_once(env.app)
     assert env.registry.has(MEMBER, BACKEND_MESH)
     assert env.registry.has(*_agent_key())
+
+
+async def test_renamed_member_dms_their_agent_under_the_new_nick_only(
+    env: Env,
+) -> None:
+    """The own-agent DM rule follows a rename: the reopened session's
+    own_agent_nick is <server>-pa_-<new nickname>; the old one is refused."""
+    await env.human_online(env.jwt(MEMBER))
+    assert env.human_session(MEMBER).own_agent_nick == MEMBER_AGENT
+    assert (await _rename(env, MEMBER, "nova")).status == 303
+
+    await env.human_online(env.jwt(MEMBER))
+    assert env.human_session(MEMBER).own_agent_nick == NEW_AGENT
+    token = await env.issue(env.jwt(MEMBER))
+    await env.ok(token, "whoami")
+    for target in (MEMBER_AGENT, NEW_AGENT):
+        r = await env.human_input(env.jwt(MEMBER), f"/send {target} hello {target}")
+        assert r.status == 204, await r.text()
+    await settle()
+
+    got = (await env.ok(token, "read"))["lines"]
+    assert [(ln["target"], ln["text"], ln["owner"]) for ln in got] == [
+        ("DM", f"hello {NEW_AGENT}", True)
+    ]
+    # The old agent nick is refused before IRC: no connection sent it a line.
+    to_old = [
+        ln.raw
+        for ln in env.mesh.received
+        if ln.raw.startswith(f"PRIVMSG {MEMBER_AGENT} ")
+    ]
+    assert to_old == []
+
+
+# -- the 0.17.1 hot-path read rules (busy store -> fail closed, close nothing) --
+
+
+def _held_write_lock(path):
+    con = sqlite3.connect(path, isolation_level=None)
+    con.execute("BEGIN EXCLUSIVE")
+    return closing(con)
+
+
+async def test_sweep_under_a_held_write_lock_closes_nothing_then_catches_up(
+    env: Env, caplog
+) -> None:
+    await env.human_online(env.jwt(MEMBER))
+    AccessStore(env.access.path).set_nickname(MEMBER, "nova", actor=None)
+    caplog.set_level(logging.WARNING, logger="irc_lens.web.nickname")
+    with _held_write_lock(env.access.path) as con:
+        swept = await agent_auth.sweep_once(env.app)
+        con.execute("ROLLBACK")
+    assert swept == []
+    assert env.registry.has(MEMBER, BACKEND_MESH)
+    assert "nickname_sweep skipped" in caplog.text
+    await agent_auth.sweep_once(env.app)
+    assert not env.registry.has(MEMBER, BACKEND_MESH)
+
+
+async def test_busy_store_refuses_the_agent_call_but_keeps_its_connection(
+    monkeypatch,
+) -> None:
+    closed: list[str] = []
+
+    def busy(_app, _principal):
+        raise sqlite3.OperationalError("database is locked")
+
+    async def spy(_app, key: str) -> None:
+        closed.append(key)
+
+    monkeypatch.setattr(agent_sessions, "human_state", busy)
+    monkeypatch.setattr(agent_sessions, "_close_agent", spy)
+    principal = SimpleNamespace(credential_key=MEMBER, nick=MEMBER_AGENT)
+    with pytest.raises(AfiError, match="busy"):
+        await agent_sessions.agent_session_for({}, principal)
+    assert closed == []

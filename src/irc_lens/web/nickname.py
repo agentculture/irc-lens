@@ -28,13 +28,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 from typing import Any
 
 from aiohttp import web
 
 from irc_lens import nickname as rules
 from irc_lens.access_store import AccessStore, NicknameError
-from irc_lens.agent_nick import agent_nick_for
+from irc_lens.agent_nick import agent_nick_for, server_name_for
 from irc_lens.web import app_session
 from irc_lens.web.identity import TIER_APPROVED, Identity, nick_for_user
 from irc_lens.web.render import render_fragment, static_url
@@ -251,11 +252,8 @@ async def close_user_connections(app: web.Application, email: str) -> int:
     return closed + await close_agent_connections(app, email)
 
 
-def _human_nick(app: web.Application, email: str) -> str:
-    """*email*'s current mesh nick from the store; ``""`` if none or unknown."""
-    user = app_session.approved_user(app, email)
-    if user is None:
-        return ""
+def _human_nick(app: web.Application, email: str, user: Any) -> str:
+    """*email*'s current mesh nick from its store row; ``""`` if none."""
     try:
         return nick_for_user(app["config"].server_name, email, user)
     except ValueError:
@@ -268,6 +266,8 @@ def _expected_nick(app: web.Application, principal: str, backend: str) -> str | 
     None for entries this check does not govern (guests and their agents,
     whose nicknames never change, and people no longer approved, whom the
     other sweeps close); ``""`` when the person has no nickname any more.
+    An agent's nick is derived on the configured mesh server name
+    (``agent_nick.server_name_for``), never read off the human's nick.
     """
     from irc_lens.web.routes import sandbox_nick_for
 
@@ -275,17 +275,22 @@ def _expected_nick(app: web.Application, principal: str, backend: str) -> str | 
     email = principal[len(AGENT_PRINCIPAL_PREFIX) :] if agent else principal
     if email.startswith(GUEST_PRINCIPAL_PREFIX):
         return None
-    if app_session.approved_user(app, email) is None:
+    user = app_session.approved_user(app, email)
+    if user is None:
         return None
-    nick = _human_nick(app, email)
+    nick = _human_nick(app, email, user)
     if not nick:
         return ""
+    config = app["config"]
     if agent:
-        return agent_nick_for(nick)
+        try:
+            return agent_nick_for(nick, server_name_for(config, guest=False))
+        except ValueError:
+            return ""
     if backend == BACKEND_MESH:
         return nick
     human = Identity(email, nick, "", tier=TIER_APPROVED)
-    return sandbox_nick_for(app["config"], human)
+    return sandbox_nick_for(config, human)
 
 
 def _stale(app: web.Application, principal: str, backend: str, session: Any) -> bool:
@@ -296,6 +301,26 @@ def _stale(app: web.Application, principal: str, backend: str, session: Any) -> 
     if expected is None:
         return False
     return current.casefold() != expected.casefold()
+
+
+def _stale_keys(
+    app: web.Application, entries: list[tuple[tuple[str, str], Any]]
+) -> list[tuple[str, str]]:
+    """Blocking: the registry keys held under a retired nick.
+
+    One pass under one pinned change stamp (one counter read for every
+    entry). The store reads use the short hot-path busy timeout; a locked
+    store closes nothing this round (logged) and the next sweep retries. No
+    permission rides on this sweep: every line is still checked, fail
+    closed, by ``Session.may``.
+    """
+    store: AccessStore = app[app_session.ACCESS_STORE]
+    try:
+        with store.pinned_stamp():
+            return [key for key, session in entries if _stale(app, *key, session)]
+    except sqlite3.Error:
+        logger.warning("nickname_sweep skipped: access store unreadable")
+        return []
 
 
 async def sweep_once(app: web.Application) -> list[tuple[str, str]]:
@@ -309,11 +334,8 @@ async def sweep_once(app: web.Application) -> list[tuple[str, str]]:
     if app.get(app_session.ACCESS_STORE) is None:
         return []
     registry = app["registry"]
-    stale = [
-        key
-        for key, session in zip(registry.keys(), registry.values())
-        if await asyncio.to_thread(_stale, app, *key, session)
-    ]
+    entries = list(zip(registry.keys(), registry.values()))
+    stale = await asyncio.to_thread(_stale_keys, app, entries)
     links = app.get(app_session.LINKS)
     for key in stale:
         await registry.close(*key)

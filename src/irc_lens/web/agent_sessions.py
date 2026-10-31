@@ -59,6 +59,7 @@ import asyncio
 import json
 import logging
 import re
+import sqlite3
 import time
 import unicodedata
 from collections import deque
@@ -104,6 +105,8 @@ _NICK_RE = re.compile(rf"[{_NICK_CHARS}]{{1,64}}")
 #: Refusal texts shared by several tools.
 _LOST_ERROR = "connection to IRC lost"
 _LOST_HINT = "call the tool again"
+_BUSY_ERROR = "the access store is busy"
+_BUSY_HINT = "call the tool again shortly"
 _CHANNEL_HINT = "a #channel name"
 
 #: The ``target`` of a delivered direct message.
@@ -605,7 +608,14 @@ async def agent_session_for(app: web.Application, principal: Any) -> AgentSessio
     :class:`~irc_lens.web.agent_auth.AgentPrincipal` -- built from the
     credential row and the human's current state only (o11).
     """
-    human = await asyncio.to_thread(human_state, app, principal)
+    try:
+        human = await asyncio.to_thread(human_state, app, principal)
+    except sqlite3.Error as exc:
+        # The store stayed locked past the hot-path busy timeout: refuse
+        # this call (fail closed) but keep the agent's connection, since
+        # nothing says its nick is stale.
+        logger.warning("agent_session=refused reason=store-busy")
+        raise _refused(_BUSY_ERROR, _BUSY_HINT) from exc
     if human is None or not _nick_matches(app, principal.nick, human):
         logger.info("agent_session=refused reason=nick-mismatch")
         # Issued under an old nick (a rename) or for a human with no
