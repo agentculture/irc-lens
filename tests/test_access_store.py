@@ -285,3 +285,19 @@ def test_mutations_audited_by_hash_only(store: AccessStore, db: Path) -> None:
         con.close()
     for e in (ALICE, BOB, "carol@example.com"):
         assert e not in text
+
+
+def test_record_audit_is_public_and_keeps_the_read_cache(store: AccessStore) -> None:
+    store.set_user(ALICE, role="member", state="approved", actor=None)
+    assert store.get_user(ALICE) is not None  # primes the read cache
+    cached = dict(store._read_cache)
+    store.record_audit("test.action", "t:1", actor=ALICE)
+    rows = [r for r in store.audit_rows() if r[2] == "test.action"]
+    assert len(rows) == 1 and ALICE not in rows[0][1] and rows[0][3] == "t:1"
+    assert store._read_cache == cached  # an audit row never changes access
+
+
+def test_set_user_refuses_an_email_with_a_colon(store: AccessStore) -> None:
+    # 'guest:<email>' is the guest credential key; no approved user may look like one.
+    with pytest.raises(ValueError):
+        store.set_user("guest:" + ALICE, role="member", state="approved", actor=None)

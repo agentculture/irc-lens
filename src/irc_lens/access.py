@@ -59,10 +59,7 @@ def _record_denial(store: Any, human: str | None, channel: str, op: str) -> None
     """Best-effort audit row for a refusal; the actor is hashed by the store."""
     try:
         actor = human if human and human.strip() else None
-        with store._tx() as con:  # pylint: disable=protected-access
-            store._audit(  # pylint: disable=protected-access
-                con, actor, DENY_ACTION, f"{op}:{CHANNEL_KIND}:{channel}"
-            )
+        store.record_audit(DENY_ACTION, f"{op}:{CHANNEL_KIND}:{channel}", actor=actor)
     except Exception:  # noqa: BLE001 - audit must never flip a deny to allow
         pass
 

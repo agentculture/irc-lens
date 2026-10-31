@@ -294,7 +294,9 @@ def _norm_email(raw: object) -> str:
 
 def _plausible_email(email: str) -> bool:
     local, sep, domain = email.partition("@")
-    return bool(sep and local and "." in domain and " " not in email)
+    # ':' never appears in a real unquoted address, and 'guest:<email>' is the
+    # guest credential key, so a lookalike is refused outright.
+    return bool(sep and local and "." in domain and " " not in email and ":" not in email)
 
 
 def client_ip(request: web.Request) -> str:

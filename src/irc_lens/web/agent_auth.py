@@ -351,10 +351,7 @@ def _write_refusal(app: web.Application, reason: str, actor: str | None) -> None
     store = app.get(app_session.ACCESS_STORE)
     if store is None:
         return
-    with store._tx() as con:  # pylint: disable=protected-access
-        store._audit(  # pylint: disable=protected-access
-            con, actor, REFUSE_ACTION, reason
-        )
+    store.record_audit(REFUSE_ACTION, reason, actor=actor)
 
 
 async def audit_refusal(

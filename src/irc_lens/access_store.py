@@ -160,9 +160,27 @@ class AccessStore:
             (self._now(), actor_hash, action, target),
         )
 
+    def record_audit(self, action: str, target: str, *, actor: str | None = None) -> None:
+        """Append one audit row (the actor is hashed; *target* carries no email).
+
+        Its own write transaction: an audit row never changes access, so unlike
+        the mutating methods it leaves the hot-path read cache intact.
+        """
+        with closing(self._connect()) as con:
+            con.execute("BEGIN IMMEDIATE")
+            try:
+                self._audit(con, actor, action, target)
+            except BaseException:
+                con.execute("ROLLBACK")
+                raise
+            con.execute("COMMIT")
+
     # -- users & roles ---------------------------------------------------
     def set_user(self, email: str, *, role: str, state: str, actor: str | None) -> None:
         email = _norm(email)
+        if ":" in email:
+            # 'guest:<email>' is the guest credential key; refuse lookalikes.
+            raise ValueError("an email address may not contain ':'")
         with self._tx() as con:
             con.execute(
                 "INSERT INTO users (email, role, state) VALUES (?,?,?) "

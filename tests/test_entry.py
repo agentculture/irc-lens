@@ -754,3 +754,9 @@ def test_guest_nicknames_cannot_contain_a_dash() -> None:
 
     assert sanitize_nickname("op-ori") == "opori"
     assert sanitize_nickname("a_b") == "a_b"
+
+
+def test_plausible_email_refuses_a_colon() -> None:
+    # 'guest:<email>' is the guest credential key; no sign-in may look like one.
+    assert entry._plausible_email("bob@example.com")
+    assert not entry._plausible_email("guest:bob@example.com")

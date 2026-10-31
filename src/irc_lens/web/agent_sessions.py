@@ -357,10 +357,9 @@ class AgentSession:
             return
 
         def write() -> None:
-            with store._tx() as con:  # pylint: disable=protected-access
-                store._audit(  # pylint: disable=protected-access
-                    con, self.credential_key, WITHHELD_ACTION, f"{reason}:{target}"
-                )
+            store.record_audit(
+                WITHHELD_ACTION, f"{reason}:{target}", actor=self.credential_key
+            )
 
         try:
             await asyncio.to_thread(write)
