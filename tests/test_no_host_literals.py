@@ -75,9 +75,17 @@ def _is_allowed_host(host: str) -> bool:
     return any(host == r or host.endswith("." + r) for r in _RESERVED)
 
 
+#: The product's trademark. The brand rules keep it uppercase everywhere it is
+#: rendered as a mark and keep the domain lowercase in URLs, hostnames and
+#: emails, so only this exact case-sensitive spelling is the mark, not a host.
+_BRAND_MARK = "CULTURE.DEV"
+
+
 def _offences(text: str) -> list[str]:
     found = [
-        m.group(1) for m in _HOST_RE.finditer(text) if not _is_allowed_host(m.group(1))
+        m.group(1)
+        for m in _HOST_RE.finditer(text)
+        if m.group(1) != _BRAND_MARK and not _is_allowed_host(m.group(1))
     ]
     found += [
         m.group(1)
