@@ -15,3 +15,4 @@
 }
 .admin-inline .btn { flex: 0 0 auto; }
 .admin-muted { color: var(--entry-muted); }
+.agent-token { word-break: break-all; user-select: all; }

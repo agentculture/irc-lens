@@ -19,6 +19,12 @@ from irc_lens._errors import EXIT_ENV_ERROR, EXIT_USER_ERROR, AfiError
 
 _AUTH_MODES = ("dev", "cloudflare-access")
 
+#: Lifetime of a personal agent's MCP bearer credential when
+#: ``auth.email_permissions.agent_credential_ttl_days`` is unset: 30 days.
+#: Issuing a new credential (or revoking it) ends it sooner.
+DEFAULT_AGENT_CREDENTIAL_TTL_DAYS = 30
+DEFAULT_AGENT_CREDENTIAL_TTL_S = DEFAULT_AGENT_CREDENTIAL_TTL_DAYS * 86400
+
 
 @dataclass(frozen=True)
 class LensConfig:
@@ -77,6 +83,9 @@ class LensConfig:
     # store (irc_lens.access_store); auth.allowed_emails is then only the
     # one-time admin import. Off: allowed_emails stays the allowlist.
     access_enabled: bool = False
+    # auth.email_permissions.agent_credential_ttl_days, in seconds: how long
+    # an issued agent credential (web/agent_auth.py) stays valid.
+    agent_credential_ttl_s: int = DEFAULT_AGENT_CREDENTIAL_TTL_S
     guest_rate_entry_per_min: int = 10
     guest_rate_messages_per_min: int = 20
     guest_rate_password_attempts_per_15min: int = 5
@@ -491,17 +500,31 @@ def _validate_app_signin(auth: dict) -> bool:
     return _coerce_bool(sect.get("enabled", True), "auth.app_signin.enabled")
 
 
-_EMAIL_PERMISSIONS_KEYS = frozenset({"enabled"})
+_EMAIL_PERMISSIONS_KEYS = frozenset({"enabled", "agent_credential_ttl_days"})
 
 
-def _validate_email_permissions(auth: dict) -> bool:
-    """auth.email_permissions.enabled (default False)."""
-    sect = _optional_mapping(
+def _email_permissions_section(auth: dict) -> dict:
+    return _optional_mapping(
         auth.get("email_permissions"),
         "auth.email_permissions",
         _EMAIL_PERMISSIONS_KEYS,
     )
+
+
+def _validate_email_permissions(auth: dict) -> bool:
+    """auth.email_permissions.enabled (default False)."""
+    sect = _email_permissions_section(auth)
     return _coerce_bool(sect.get("enabled", False), "auth.email_permissions.enabled")
+
+
+def _agent_credential_ttl_s(auth: dict) -> int:
+    """auth.email_permissions.agent_credential_ttl_days (> 0), in seconds."""
+    sect = _email_permissions_section(auth)
+    days = _positive_int(
+        sect.get("agent_credential_ttl_days", DEFAULT_AGENT_CREDENTIAL_TTL_DAYS),
+        "auth.email_permissions.agent_credential_ttl_days",
+    )
+    return days * 86400
 
 
 def _app_signin_base_url(auth: dict) -> str | None:
@@ -780,6 +803,7 @@ def load_config(path: Path) -> LensConfig:
         app_signin_enabled=app_signin_enabled,
         app_signin_base_url=app_signin_base_url,
         access_enabled=access_enabled,
+        agent_credential_ttl_s=_agent_credential_ttl_s(auth),
         mcp_path=_validate_mcp_path(raw),
         **guest_fields,
     )

@@ -19,6 +19,7 @@ from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig
 from irc_lens.web import (
     admin,
+    agent_auth,
     app_session,
     bans,
     csrf,
@@ -31,6 +32,7 @@ from irc_lens.web import (
 from irc_lens.web.auth import build_cloudflare_middleware
 from irc_lens.web.front import mount_agent_front
 from irc_lens.web.identity import TIER_APPROVED, Identity
+from irc_lens.web.mcp_http import is_mcp_request
 from irc_lens.web.render import precompute_static_hashes
 from irc_lens.web.sessions import SessionFactory, SessionRegistry
 from irc_lens.web.store import MediaStore
@@ -153,6 +155,10 @@ def _dev_identity_middleware(config: LensConfig):
             or request.path == "/healthz"
             or request.path.startswith("/media/")
         ):
+            return await handler(request)
+        if is_mcp_request(request):
+            # The MCP mount authenticates its own callers (agent bearer
+            # credentials, web/agent_auth.py); never stamp the dev identity.
             return await handler(request)
         request["identity"] = identity
         return await handler(request)
@@ -283,6 +289,9 @@ def make_app(
     app.router.add_get("/owner/metrics", routes.get_owner_metrics)
     if access_store is not None:
         admin.install(app)
+        # Personal agents: /agent-credential + the MCP endpoint at
+        # web.mcp_path, authenticated by agent bearer credentials only.
+        agent_auth.install(app, sweep_interval_s=ban_sweep_interval_s)
     # Guest-mode entry card (/entry, /entry/*): 404 while guest mode is off.
     entry.install(app, config)
     if config.guest_enabled:

@@ -42,6 +42,7 @@ from irc_lens.web.identity import (
     Identity,
     derive_nick,
 )
+from irc_lens.web.mcp_http import is_mcp_request
 
 logger = logging.getLogger(__name__)
 
@@ -532,6 +533,12 @@ def build_cloudflare_middleware(config: LensConfig):
         # present). See docs/superpowers/specs/
         # 2026-07-02-media-support-design.md ("Upload path").
         if _is_public_path(request):
+            return await handler(request)
+        # The remote MCP mount (web.mcp_path) authenticates its own callers
+        # with agent bearer credentials (web/agent_auth.py), which this
+        # middleware does not understand. Exempt is only a request that
+        # *routed to* that mount; every other path keeps the checks below.
+        if is_mcp_request(request):
             return await handler(request)
         # App-native sign-in: a valid lens_session cookie is checked before
         # the Access JWT. Anything short of a live, still-allowlisted
