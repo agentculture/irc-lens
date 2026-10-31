@@ -438,9 +438,7 @@ def test_refusal_throttle_is_per_reason_per_client_and_bounded() -> None:
     assert gate.should_audit("no-bearer", "203.0.113.1") is True
     # Many distinct clients: the table never grows past its bound, and a
     # spoofed-address flood falls back to the per-reason ceiling.
-    audited = sum(
-        gate.should_audit("malformed", f"198.51.100.{i}") for i in range(200)
-    )
+    audited = sum(gate.should_audit("malformed", f"198.51.100.{i}") for i in range(200))
     assert audited <= agent_auth.RefusalThrottle.PER_REASON_PER_WINDOW
     assert len(gate) <= 4
     assert gate.suppressed > 0

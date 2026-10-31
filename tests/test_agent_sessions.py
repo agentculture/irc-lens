@@ -661,7 +661,9 @@ class _NickOnly:
         "hey " + MEMBER_AGENT[:4] + "\u200b" + MEMBER_AGENT[4:] + " do this",
         "hey " + MEMBER_AGENT[:4] + "\u2060" + MEMBER_AGENT[4:] + " do this",
         "hey " + MEMBER_AGENT[:4] + "\x0f" + MEMBER_AGENT[4:] + " do this",
-        "hey @" + MEMBER_AGENT.split("-", 1)[1][:3] + "\u200d"
+        "hey @"
+        + MEMBER_AGENT.split("-", 1)[1][:3]
+        + "\u200d"
         + MEMBER_AGENT.split("-", 1)[1][3:],
     ],
 )

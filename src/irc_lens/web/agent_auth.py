@@ -311,9 +311,7 @@ class RefusalThrottle:
         return len(self._last)
 
     def _prune(self, now: float) -> None:
-        self._last = {
-            k: ts for k, ts in self._last.items() if now - ts < self.WINDOW_S
-        }
+        self._last = {k: ts for k, ts in self._last.items() if now - ts < self.WINDOW_S}
 
     def should_audit(self, reason: str, client: str) -> bool:
         """True if this refusal gets an audit row; False counts it suppressed."""

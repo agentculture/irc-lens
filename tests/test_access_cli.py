@@ -113,7 +113,9 @@ def test_agents_revoke_reaches_a_guests_agent(db, capsys):
     guest_token = store.issue_agent_credential(
         "guest:" + EMAIL, "sbx-pa_-pat", ttl=3600, actor=None
     )
-    member_token = store.issue_agent_credential(EMAIL, "x-pa_-pat", ttl=3600, actor=None)
+    member_token = store.issue_agent_credential(
+        EMAIL, "x-pa_-pat", ttl=3600, actor=None
+    )
     capsys.readouterr()
     assert run(db, "agents", "revoke", EMAIL) == 0
     assert store.verify_agent_credential(guest_token) is None
