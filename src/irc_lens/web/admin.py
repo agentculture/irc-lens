@@ -54,6 +54,7 @@ SECONDS_PER_HOUR = 3600
 #: only -- the admin's hours have no policy maximum.
 _MAX_UNTIL = 2**62
 MAX_CHANNEL_LEN = 200
+_NO_SUCH_USER = "No such user."
 
 _DONE = {
     "user": "User saved.",
@@ -141,8 +142,12 @@ async def get_admin(request: web.Request) -> web.Response:
     return await asyncio.to_thread(_page, request, done=done)
 
 
-async def _invite_mail(request: web.Request, email: str) -> bool:
-    """Mail the set-password link in the background; False if mail is unavailable."""
+def _invite_mail(request: web.Request, email: str) -> bool:
+    """Mail the set-password link in the background; False if mail is unavailable.
+
+    Synchronous: it only schedules the send on the running loop (it is called
+    from a handler, so one exists) and never waits for it.
+    """
     state = request.app.get(ENTRY_STATE)
     tasks = request.app.get(setpw.MAIL_TASKS)
     if state is None or tasks is None:
@@ -153,6 +158,18 @@ async def _invite_mail(request: web.Request, email: str) -> bool:
     tasks.add(task)
     task.add_done_callback(tasks.discard)
     return True
+
+
+def _target_state(mode: str, existing: dict[str, str] | None) -> str | None:
+    """The state *mode* gives a user (None: a role change for no such user)."""
+    if mode == "role":
+        # A role change keeps the user's state: changing a removed or
+        # invited user's role must never approve them (only "Add now" does).
+        return None if existing is None else existing["state"]
+    if mode == "add":
+        return "approved"
+    # Never downgrade someone who is already approved.
+    return "approved" if existing and existing["state"] == "approved" else "invited"
 
 
 @allows_anonymous
@@ -169,25 +186,14 @@ async def post_user(request: web.Request) -> web.Response:
         return _refuse(request, "Unknown role.")
     if mode not in ("add", "invite", "role"):
         return _refuse(request, "Unknown action.")
-    existing = store.get_user(email)
-    if mode == "role":
-        # A role change keeps the user's state: changing a removed or
-        # invited user's role must never approve them (only "Add now" does).
-        if existing is None:
-            return _refuse(request, "No such user.")
-        state = existing["state"]
-    elif mode == "add":
-        state = "approved"
-    else:
-        # Never downgrade someone who is already approved.
-        state = (
-            "approved" if existing and existing["state"] == "approved" else "invited"
-        )
+    state = _target_state(mode, store.get_user(email))
+    if state is None:
+        return _refuse(request, _NO_SUCH_USER)
     if _would_orphan_admins(store, email, role, state):
         return _refuse(request, "At least one approved admin must remain.")
     store.set_user(email, role=role, state=state, actor=admin.principal)
     if mode == "invite":
-        if not await _invite_mail(request, email):
+        if not _invite_mail(request, email):
             return _refuse(request, "Mail is not available; the user was saved.")
         logger.info("admin invited a user")
         return _see_other("invite")
@@ -203,7 +209,7 @@ async def post_remove(request: web.Request) -> web.Response:
     email = _norm_email(form.get("email"))
     user = store.get_user(email)
     if user is None:
-        return _refuse(request, "No such user.")
+        return _refuse(request, _NO_SUCH_USER)
     if _would_orphan_admins(store, email, user["role"], "removed"):
         return _refuse(request, "At least one approved admin must remain.")
     store.set_user(email, role=user["role"], state="removed", actor=admin.principal)
@@ -221,7 +227,7 @@ async def post_grant(request: web.Request) -> web.Response:
     channel = str(form.get("channel") or "").strip()
     level = str(form.get("level") or "")
     if store.get_user(email) is None:
-        return _refuse(request, "No such user.")
+        return _refuse(request, _NO_SUCH_USER)
     if (
         not channel.startswith("#")
         or len(channel) < 2
@@ -249,7 +255,7 @@ async def post_extension(request: web.Request) -> web.Response:
     email = _norm_email(form.get("email"))
     raw = str(form.get("hours") or "").strip().lower()
     if store.get_user(email) is None:
-        return _refuse(request, "No such user.")
+        return _refuse(request, _NO_SUCH_USER)
     if raw == "clear":
         store.clear_extension(email, actor=admin.principal)
         return _see_other("clear")

@@ -95,8 +95,16 @@ TEXT_MAX = 4000
 AUDIT_EVERY_S = 60.0
 
 _NICK_CHARS = r"A-Za-z0-9_\-\[\]\\`^{}|"
-_CHANNEL_RE = re.compile(r"#[^\s,:\x00-\x1f\x7f]{1,63}")
+# A channel name refuses whitespace (``\s``: Unicode, so it already covers
+# \t-\r and \x1c-\x1f), ',', ':' and the remaining C0 controls + DEL. The
+# control ranges skip what ``\s`` matches so the class has no duplicates.
+_CHANNEL_RE = re.compile(r"#[^\s,:\x00-\x08\x0e-\x1b\x7f]{1,63}")
 _NICK_RE = re.compile(rf"[{_NICK_CHARS}]{{1,64}}")
+
+#: Refusal texts shared by several tools.
+_LOST_ERROR = "connection to IRC lost"
+_LOST_HINT = "call the tool again"
+_CHANNEL_HINT = "a #channel name"
 
 #: The ``target`` of a delivered direct message.
 DM_TARGET = "DM"
@@ -412,7 +420,7 @@ class AgentSession:
             events = sub.drain_nowait()
         except LensConnectionLost as exc:
             await self._drop()
-            raise _refused("connection to IRC lost", "call the tool again") from exc
+            raise _refused(_LOST_ERROR, _LOST_HINT) from exc
         finally:
             sub.close()
         for event in events:
@@ -427,7 +435,7 @@ class AgentSession:
 
     async def join(self, channel: str, *, ip: str) -> dict[str, Any]:
         if not valid_channel(channel):
-            raise _refused(f"invalid channel: {channel!r}", "a #channel name")
+            raise _refused(f"invalid channel: {channel!r}", _CHANNEL_HINT)
         parsed = ParsedCommand(type=CommandType.JOIN, args=[channel])
         self._gate(self._actor(ip), parsed, f"/join {channel}")
         await self._execute(parsed)
@@ -435,7 +443,7 @@ class AgentSession:
 
     async def part(self, channel: str, *, ip: str) -> dict[str, Any]:
         if not valid_channel(channel):
-            raise _refused(f"invalid channel: {channel!r}", "a #channel name")
+            raise _refused(f"invalid channel: {channel!r}", _CHANNEL_HINT)
         parsed = ParsedCommand(type=CommandType.PART, args=[channel])
         self._gate(self._actor(ip), parsed, f"/part {channel}")
         await self._execute(parsed)
@@ -450,7 +458,7 @@ class AgentSession:
         target = (target or self.session.current_channel or "").strip()
         if target.startswith("#"):
             if not valid_channel(target):
-                raise _refused(f"invalid channel: {target!r}", "a #channel name")
+                raise _refused(f"invalid channel: {target!r}", _CHANNEL_HINT)
             # The sandbox allowlist admits only chat in the current room (a
             # guest's own); on the mesh every channel send is a /send, which
             # Session checks against the human's write grant.
@@ -482,7 +490,7 @@ class AgentSession:
             await self.session.send_raw(f"PRIVMSG {self.human.nick} :{text}")
         except LensConnectionLost as exc:
             await self._drop()
-            raise _refused("connection to IRC lost", "call the tool again") from exc
+            raise _refused(_LOST_ERROR, _LOST_HINT) from exc
 
     async def channels(self) -> dict[str, Any]:
         session = self.session
@@ -495,7 +503,7 @@ class AgentSession:
                 out["listed"] = await session.list_channels()
             except LensConnectionLost as exc:
                 await self._drop()
-                raise _refused("connection to IRC lost", "call the tool again") from exc
+                raise _refused(_LOST_ERROR, _LOST_HINT) from exc
         return out
 
 
@@ -604,7 +612,7 @@ async def agent_session_for(app: web.Application, principal: Any) -> AgentSessio
             init=init,
             prepare=prepare,
         )
-    except (LensConnectionLost, OSError) as exc:
+    except OSError as exc:  # LensConnectionLost is a ConnectionError
         raise _refused(
             "could not connect the agent to IRC",
             "retry shortly; if it persists the nick may be in use",

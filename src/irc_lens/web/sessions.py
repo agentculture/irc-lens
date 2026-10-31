@@ -362,13 +362,20 @@ class SessionRegistry:
         users' agents are not governed by this rule.
         """
         prefix = AGENT_PRINCIPAL_PREFIX + GUEST_PRINCIPAL_PREFIX
-        for principal, backend in list(self._sessions):
-            if backend != BACKEND_SANDBOX or not principal.startswith(prefix):
+        # Snapshot first: ``close`` removes entries from ``_sessions`` (and
+        # other tasks may open/close sessions across the await), so the
+        # dict must not be iterated live.
+        guest_agents = [
+            principal
+            for principal, backend in self._sessions
+            if backend == BACKEND_SANDBOX and principal.startswith(prefix)
+        ]
+        for principal in guest_agents:
+            # Re-checked per agent, just before closing: an earlier close
+            # awaited, and the human may have come back meanwhile.
+            if self.guest_agent_may_run(principal[len(prefix) :]):
                 continue
-            email = principal[len(prefix) :]
-            if self.guest_agent_may_run(email):
-                continue
-            await self.close(principal, backend)
+            await self.close(principal, BACKEND_SANDBOX)
 
     async def _init_sandbox(self, session: Any, identity: Identity) -> None:
         """UI tier, presence + answer listeners, and the private room(s)."""

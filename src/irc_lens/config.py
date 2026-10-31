@@ -12,6 +12,7 @@ import os
 import sqlite3
 from dataclasses import dataclass, replace
 from pathlib import Path
+from typing import cast
 from urllib.parse import urlsplit
 
 import yaml
@@ -606,8 +607,12 @@ def resolve_access(config: LensConfig) -> LensConfig:
     path = config.guest_store_path
     if not path or not _access_store_initialised(path):
         return config
-    return replace(
-        config, access_enabled=True, access_admins_only=True, agents_enabled=False
+    # cast: replace() returns the same dataclass type; say so for checkers.
+    return cast(
+        LensConfig,
+        replace(
+            config, access_enabled=True, access_admins_only=True, agents_enabled=False
+        ),
     )
 
 

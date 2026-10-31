@@ -699,3 +699,32 @@ def test_ambiguous_agent_nick_maps_to_nobody(tmp_path: Path, caplog) -> None:
     assert "ambiguous" in caplog.text
     assert MEMBER not in caplog.text and NAMESAKE not in caplog.text
     assert "example" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "#a b",
+        "#a,b",
+        "#a:b",
+        "#a\tb",
+        "#a\x07b",
+        "#a\x1cb",
+        "#a\x1fb",
+        "#a\x7fb",
+        "#a\u00a0b",
+        "#a\u2028b",
+        "#",
+        "general",
+        "#" + "x" * 64,
+    ],
+)
+def test_valid_channel_refuses_separators_controls_and_whitespace(name: str) -> None:
+    assert not agent_sessions.valid_channel(name)
+
+
+@pytest.mark.parametrize(
+    "name", ["#general", "#a-b_c.d", "#g-guest", "#" + "x" * 63, "#ünï"]
+)
+def test_valid_channel_accepts_ordinary_names(name: str) -> None:
+    assert agent_sessions.valid_channel(name)

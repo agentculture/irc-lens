@@ -648,3 +648,25 @@ def test_production_front_exposes_no_identityless_tools() -> None:
     assert module.describe_principal(principal) == {"nick": "n", "tier": "approved"}
     assert module.describe_principal({"email": ADMIN}) == {}
     assert "token" not in repr(principal)
+
+
+def test_agent_principal_admin_flags_are_constants_not_fields() -> None:
+    """``is_admin`` / ``is_approved`` are ClassVars: never constructor
+    arguments, so no caller can build an admin (or approved) agent."""
+    principal_cls = agent_auth.AgentPrincipal
+    names = {f.name for f in dataclasses.fields(principal_cls)}
+    assert "is_admin" not in names
+    assert "is_approved" not in names
+    with pytest.raises(TypeError):
+        principal_cls(  # pylint: disable=unexpected-keyword-arg
+            credential_key=MEMBER,
+            email=MEMBER,
+            tier="approved",
+            nick="n",
+            is_admin=True,
+        )
+    principal = principal_cls(
+        credential_key=MEMBER, email=MEMBER, tier="approved", nick="n"
+    )
+    assert principal.is_admin is False
+    assert principal.is_approved is False

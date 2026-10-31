@@ -32,9 +32,11 @@ import sqlite3
 import time
 from contextlib import closing, contextmanager
 from pathlib import Path
-from typing import Callable, Iterable, Iterator
+from typing import Callable, Iterable, Iterator, TypeVar
 
 from irc_lens.guest_store import email_hash
+
+_T = TypeVar("_T")
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +112,7 @@ class AccessStore:
             return None
         return header[24:28] if len(header) == 28 else None
 
-    def _cached(self, key: tuple, load: Callable[[], object]) -> object:
+    def _cached(self, key: tuple, load: Callable[[], _T]) -> _T:
         stamp = self._stamp()
         now = time.monotonic()
         hit = self._read_cache.get(key)

@@ -461,3 +461,35 @@ async def test_guest_and_agent_exchange_lines_in_the_guests_room(env: Env) -> No
     other = env.app["config"].guest_room_prefix + env.guests.room_id(OTHER_GUEST)
     assert other not in " ".join(env.sent_by(env.sandbox, GUEST_AGENT))
     assert env.sent_by(env.mesh, GUEST_AGENT) == []
+
+
+async def test_reap_closes_every_signed_off_guest_agent_in_one_sweep() -> None:
+    """``close`` mutates the registry mid-sweep, so the reaper must walk a
+    snapshot: two signed-off guests' agents both close, nothing raises."""
+    from irc_lens.web.sessions import (
+        AGENT_PRINCIPAL_PREFIX,
+        GUEST_PRINCIPAL_PREFIX,
+        SessionRegistry,
+    )
+
+    class _Closable:
+        disconnected = False
+
+        async def disconnect(self) -> None:
+            self.disconnected = True
+
+    async def _never(*_args, **_kwargs):  # pragma: no cover - never opened
+        raise AssertionError("the reaper must not open sessions")
+
+    registry = SessionRegistry(_never, sandbox_factory=_never)
+    agents = {}
+    for email in ("one@example.com", "two@example.com"):
+        principal = AGENT_PRINCIPAL_PREFIX + GUEST_PRINCIPAL_PREFIX + email
+        agents[principal] = _Closable()
+        registry._sessions[(principal, BACKEND_SANDBOX)] = agents[principal]
+
+    await registry._reap_guest_agents()
+
+    for principal, session in agents.items():
+        assert not registry.has(principal, BACKEND_SANDBOX)
+        assert session.disconnected

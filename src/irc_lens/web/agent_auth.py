@@ -68,7 +68,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable
+from typing import Any, Callable, ClassVar
 
 from aiohttp import web
 
@@ -147,8 +147,10 @@ class AgentPrincipal:
     ip: str = field(repr=False, compare=False, default="")
 
     #: Agents are never browser identities: the admin-only gate refuses them.
-    is_admin = False
-    is_approved = False
+    #: Class-level constants (``ClassVar``), not fields: they are not
+    #: constructor arguments, so no caller can build an admin agent.
+    is_admin: ClassVar[bool] = False
+    is_approved: ClassVar[bool] = False
 
     @property
     def registry_principal(self) -> str:

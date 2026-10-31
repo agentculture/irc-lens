@@ -44,7 +44,7 @@ from irc_lens.commands import (
     ParsedCommand,
     parse_command,
 )
-from irc_lens.session import LensConnectionLost
+from irc_lens.session import LensConnectionLost, Session
 from irc_lens.web import app_session, input_gate
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import client_ip
@@ -530,6 +530,53 @@ async def _iter_field_chunks(field: aiohttp.BodyPartReader) -> AsyncIterator[byt
         yield chunk
 
 
+async def _initial_chat_log(session: Session) -> str | None:
+    """The chat-log HTML for a page render, or None to use the buffer.
+
+    `None` lets `render_index` fall back to the `MessageBuffer` — which is
+    the seed-loader path. We only return a string when the live IRCd query
+    actually ran, so `--seed` preloaded fixtures still render on the
+    initial page render.
+    """
+    channel = session.current_channel
+    # Both `connected` (post-welcome) and `healthy` (no broken pipe) must
+    # hold — a pre-welcome session would block for QUERY_TIMEOUT (10s) on
+    # the HISTORY query because AgentIRC ignores custom verbs from
+    # unregistered clients.
+    if not (channel and session.healthy and session.connected):
+        return None
+    try:
+        entries = await session.history(channel, limit=50)
+    except PermissionError:
+        # Never fall back to the buffer for a channel the viewer may
+        # not read: render an empty log instead.
+        return ""
+    except LensConnectionLost:
+        # Page render shouldn't break on transport loss; the
+        # connection-status indicator + 503 on next /input will
+        # surface the problem to the user. Fall back to the buffer
+        # rather than forcing a blank pane.
+        return None
+    except Exception:
+        logger.exception("history fetch for %s during GET / failed", channel)
+        return None
+    # Thread the session's media-embed state through exactly as
+    # `session.py`'s `_publish_chat`/`_fetch_and_publish_history`
+    # and `render_index`'s own buffer-fallback branch do — a
+    # gap flagged by t2: this explicit history-fetch branch
+    # previously called `render_chat_log(entries)` with no
+    # kwargs, so a page reload after a live HISTORY query would
+    # silently drop `.lens-media` embeds that a reload hitting
+    # the buffer-fallback branch would have rendered.
+    return render_chat_log(
+        entries,
+        media_embed_prefixes=session.media_embed_prefixes,
+        media_remote_embeds=session.media_remote_embeds,
+        hide_system=getattr(session, "ui_tier", None) in ("guest", "sandbox_preview"),
+        agent_nicks=agent_nicks_for(session),
+    )
+
+
 @allows_anonymous
 async def get_index(request: web.Request) -> web.Response:
     """Render the three-pane page (or, for anonymous visitors, the entry card).
@@ -555,53 +602,11 @@ async def get_index(request: web.Request) -> web.Response:
         from irc_lens.web import entry
 
         return entry.busy_page(request.app[entry.ENTRY_STATE])
-    # `chat_log_html=None` lets `render_index` fall back to the
-    # `MessageBuffer` — which is the seed-loader path. We only override
-    # to a string when the live IRCd query actually ran, so `--seed`
-    # preloaded fixtures still render on the initial page render.
-    chat_log_html: str | None = None
     # Apply revoked grants before anything renders: prune channels the
     # viewer may no longer list and clear an unreadable current channel,
     # so neither the sidebar nor the chat log can name or show them.
     session.enforce_revocations()
-    channel = session.current_channel
-    # Both `connected` (post-welcome) and `healthy` (no broken pipe) must
-    # hold — a pre-welcome session would block for QUERY_TIMEOUT (10s) on
-    # the HISTORY query because AgentIRC ignores custom verbs from
-    # unregistered clients.
-    if channel and session.healthy and session.connected:
-        try:
-            entries = await session.history(channel, limit=50)
-        except PermissionError:
-            # Never fall back to the buffer for a channel the viewer may
-            # not read: render an empty log instead.
-            entries = None
-            chat_log_html = ""
-        except LensConnectionLost:
-            # Page render shouldn't break on transport loss; the
-            # connection-status indicator + 503 on next /input will
-            # surface the problem to the user. Fall back to the buffer
-            # rather than forcing a blank pane.
-            entries = None
-        except Exception:
-            logger.exception("history fetch for %s during GET / failed", channel)
-            entries = None
-        if entries is not None:
-            # Thread the session's media-embed state through exactly as
-            # `session.py`'s `_publish_chat`/`_fetch_and_publish_history`
-            # and `render_index`'s own buffer-fallback branch do — a
-            # gap flagged by t2: this explicit history-fetch branch
-            # previously called `render_chat_log(entries)` with no
-            # kwargs, so a page reload after a live HISTORY query would
-            # silently drop `.lens-media` embeds that a reload hitting
-            # the buffer-fallback branch would have rendered.
-            chat_log_html = render_chat_log(
-                entries,
-                media_embed_prefixes=session.media_embed_prefixes,
-                media_remote_embeds=session.media_remote_embeds,
-                hide_system=getattr(session, "ui_tier", None) in ("guest", "sandbox_preview"),
-                agent_nicks=agent_nicks_for(session),
-            )
+    chat_log_html = await _initial_chat_log(session)
     _, backend = _backend_for(request)
     presence = _sandbox_state(session) if backend == BACKEND_SANDBOX else None
     body = render_index(
