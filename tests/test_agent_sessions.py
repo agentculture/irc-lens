@@ -444,8 +444,9 @@ async def test_owner_is_lens_state_not_nick_text(env: Env) -> None:
     # The namesake signs in through the lens under their own nickname.
     await env.human_online(env.jwt(NAMESAKE))
     assert env.human_session(NAMESAKE).nick != MEMBER_NICK
+    taken = nickname_of(MEMBER)
     with pytest.raises(NicknameError):
-        env.access.set_nickname(NAMESAKE, nickname_of(MEMBER), actor=None)
+        env.access.set_nickname(NAMESAKE, taken, actor=None)
     await env.human_session(NAMESAKE).send_raw(f"PRIVMSG {MEMBER_AGENT} :me too")
     await settle()
     assert (await env.ok(token, "read"))["lines"] == []

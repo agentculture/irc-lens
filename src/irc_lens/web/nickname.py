@@ -151,7 +151,7 @@ def _done() -> web.Response:
     )
 
 
-async def get_nickname(request: web.Request) -> web.Response:
+async def get_nickname(request: web.Request) -> web.Response:  # NOSONAR S7503 - aiohttp handler
     """The nickname form (a person who already has one goes to the console)."""
     if not needs_nickname(request):
         _requester(request)
