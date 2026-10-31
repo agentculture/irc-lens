@@ -23,7 +23,7 @@ from aiohttp.test_utils import TestServer
 from _jwks_server import FakeJWKS
 from irc_lens.web import app_session
 from irc_lens.web import nickname as nickname_web
-from irc_lens.web.agent_sessions import human_state
+from irc_lens.web.agent_sessions import HUMAN_NO_NICKNAME, HumanRefusal, human_state
 from irc_lens.web.identity import TIER_APPROVED, Identity, derive_nick
 from irc_lens.web.sessions import BACKEND_MESH
 from test_admin import ADMIN, MEMBER, SAME_ORIGIN, Env, _build
@@ -215,7 +215,8 @@ async def test_app_session_identity_uses_the_nickname(env: Env) -> None:
 
 async def test_agent_human_nick_is_the_nickname(env: Env) -> None:
     principal = types.SimpleNamespace(tier=TIER_APPROVED, email=MEMBER)
-    assert human_state(env.app, principal) is None  # no nickname: no human nick
+    # no nickname: no human nick, and the reason says so
+    assert human_state(env.app, principal) == HumanRefusal(HUMAN_NO_NICKNAME)
     env.access.set_nickname(MEMBER, "comet", actor=None)
     assert human_state(env.app, principal).nick == "testsrv-comet"
 

@@ -10,6 +10,7 @@ rename is audited with the nickname as target, never the email.
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 import sqlite3
 from contextlib import closing
@@ -212,3 +213,54 @@ async def test_busy_store_refuses_the_agent_call_but_keeps_its_connection(
     with pytest.raises(AfiError, match="busy"):
         await agent_sessions.agent_session_for({}, principal)
     assert closed == []
+
+
+# -- review #6: a removed human is not a nick mismatch ---------------------------
+
+
+def _principal() -> agent_auth.AgentPrincipal:
+    return agent_auth.AgentPrincipal(
+        credential_key=MEMBER, email=MEMBER, tier="approved", nick=MEMBER_AGENT
+    )
+
+
+async def _refusal(env: Env, app=None) -> str:
+    with pytest.raises(AfiError) as info:
+        await agent_sessions.agent_session_for(app or env.app, _principal())
+    return f"{info.value.message} {info.value.remediation}"
+
+
+async def test_finding6_removed_human_gets_access_ended_not_reissue(
+    env: Env, caplog
+) -> None:
+    env.access.set_user(MEMBER, role="member", state="removed", actor=None)
+    with caplog.at_level(logging.INFO):
+        msg = await _refusal(env)
+    assert "access" in msg
+    assert "ended" in msg
+    assert "re-issue" not in msg
+    assert "reason=human-not-approved" in caplog.text
+    assert "reason=nick-mismatch" not in caplog.text
+
+
+async def test_finding6_admins_only_mode_gets_access_ended(env: Env) -> None:
+    app = dict(env.app.items())  # the started app's state is read-only
+    app["config"] = dataclasses.replace(app["config"], access_admins_only=True)
+    msg = await _refusal(env, app)
+    assert "ended" in msg
+    assert "re-issue" not in msg
+
+
+async def test_finding6_real_nick_mismatch_still_says_reissue(env: Env) -> None:
+    env.access.set_nickname(MEMBER, "nova", actor=None)
+    assert "re-issue" in await _refusal(env)
+
+
+def test_finding6_human_state_names_its_reason(env: Env) -> None:
+    principal = SimpleNamespace(tier="approved", email=MEMBER)
+    assert isinstance(
+        agent_sessions.human_state(env.app, principal), agent_sessions.HumanState
+    )
+    env.access.set_user(MEMBER, role="member", state="removed", actor=None)
+    refusal = agent_sessions.human_state(env.app, principal)
+    assert refusal == agent_sessions.HumanRefusal(agent_sessions.HUMAN_NOT_APPROVED)

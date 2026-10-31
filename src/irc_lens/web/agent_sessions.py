@@ -208,24 +208,40 @@ class HumanState:
     room: str = ""  # a guest's private sandbox room
 
 
-def human_state(app: web.Application, principal: Any) -> HumanState | None:
-    """Blocking: the human behind *principal*, or None if unknown."""
+#: The human is no longer approved (removed, not approved, an admins-only
+#: switch) or, for a guest, no longer present: the agent's access ended.
+HUMAN_NOT_APPROVED = "human-not-approved"
+#: The approved human has no nickname (yet): no agent nick to match.
+HUMAN_NO_NICKNAME = "no-nickname"
+
+
+@dataclass(frozen=True)
+class HumanRefusal:
+    """Why :func:`human_state` found no human to act for (a log reason)."""
+
+    reason: str
+
+
+def human_state(app: web.Application, principal: Any) -> HumanState | HumanRefusal:
+    """Blocking: the human behind *principal*, or why there is none."""
     config = app["config"]
     if principal.tier == TIER_APPROVED:
         user = app_session.approved_user(app, principal.email)
+        if user is None:
+            return HumanRefusal(HUMAN_NOT_APPROVED)
         try:
             nick = nick_for_user(config.server_name, principal.email, user)
         except ValueError:
-            return None
-        if user is None or not nick:
-            return None  # no longer approved, or no nickname chosen yet
+            nick = ""
+        if not nick:
+            return HumanRefusal(HUMAN_NO_NICKNAME)
         return HumanState(principal.email, BACKEND_MESH, nick)
     store = app.get("guest_store")
     if store is None or not config.guest_enabled:
-        return None
+        return HumanRefusal(HUMAN_NOT_APPROVED)
     rows = store.get_guest(principal.email)
     if not rows:
-        return None
+        return HumanRefusal(HUMAN_NOT_APPROVED)
     room = config.guest_room_prefix + store.room_id(principal.email)
     return HumanState(
         GUEST_PRINCIPAL_PREFIX + principal.email, BACKEND_SANDBOX, rows[-1][1], room
@@ -591,6 +607,19 @@ async def _close_agent(app: web.Application, credential_key: str) -> None:
     await close_agent_connections(app, credential_key)
 
 
+def _human_refusal(reason: str) -> AfiError:
+    """The refusal for a :class:`HumanRefusal` (never the re-issue advice)."""
+    if reason == HUMAN_NO_NICKNAME:
+        return _refused(
+            "your human has not chosen a nickname yet",
+            "your human picks one in the app (/nickname), then call again",
+        )
+    return _refused(
+        "your human's access has ended, so this agent's access ended too",
+        "an admin must approve your human again",
+    )
+
+
 def _nick_matches(app: web.Application, nick: str, human: HumanState) -> bool:
     """Is *nick* the agent nick of *human*, on the configured server name?"""
     server = server_name_for(app["config"], guest=human.backend == BACKEND_SANDBOX)
@@ -616,10 +645,14 @@ async def agent_session_for(app: web.Application, principal: Any) -> AgentSessio
         # nothing says its nick is stale.
         logger.warning("agent_session=refused reason=store-busy")
         raise _refused(_BUSY_ERROR, _BUSY_HINT) from exc
-    if human is None or not _nick_matches(app, principal.nick, human):
+    if isinstance(human, HumanRefusal):
+        logger.info("agent_session=refused reason=%s", human.reason)
+        await _close_agent(app, principal.credential_key)
+        raise _human_refusal(human.reason)
+    if not _nick_matches(app, principal.nick, human):
         logger.info("agent_session=refused reason=nick-mismatch")
-        # Issued under an old nick (a rename) or for a human with no
-        # nickname now: drop any connection still held under it.
+        # Issued under an old nick (a rename): drop any connection still
+        # held under it.
         await _close_agent(app, principal.credential_key)
         raise _refused(
             "this credential was issued under an old nick and no longer "
@@ -673,6 +706,9 @@ __all__ = [
     "WITHHELD_ACTION",
     "AgentLine",
     "AgentSession",
+    "HUMAN_NOT_APPROVED",
+    "HUMAN_NO_NICKNAME",
+    "HumanRefusal",
     "HumanState",
     "agent_session_for",
     "human_for_agent_nick",
