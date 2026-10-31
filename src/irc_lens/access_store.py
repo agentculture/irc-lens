@@ -249,6 +249,29 @@ class AccessStore:
         )
         return rows[0][0] if rows else None
 
+    def guest_credential_emails(self) -> list[str]:
+        """Emails of every guest holding any credential row (any state)."""
+        rows = self._all(
+            "SELECT DISTINCT email FROM agent_credentials WHERE email LIKE 'guest:%'"
+        )
+        return [r[0][len("guest:") :] for r in rows]
+
+    def purge_agent_credentials(self, key: str, *, actor: str | None) -> int:
+        """Delete every credential row of *key* (a ban or a deletion, o9).
+
+        Unlike :meth:`revoke_agent_credential` the rows are removed, not
+        flagged. The key's own extension goes with them. Returns the rows
+        removed; the audit row carries only the hashed key.
+        """
+        key = _norm(key)
+        with self._tx() as con:
+            n = con.execute(
+                "DELETE FROM agent_credentials WHERE email=?", (key,)
+            ).rowcount
+            con.execute("DELETE FROM agent_extensions WHERE email=?", (key,))
+            self._audit(con, actor, "credential.purge", email_hash(key))
+        return n
+
     def active_credential_count(self, email: str) -> int:
         return self._all(
             "SELECT COUNT(*) FROM agent_credentials "
@@ -273,6 +296,18 @@ class AccessStore:
         with self._tx() as con:
             con.execute("DELETE FROM agent_extensions WHERE email=?", (email,))
             self._audit(con, actor, "extension.clear", email_hash(email))
+
+    def now(self) -> int:
+        """The store's clock (unix seconds), injectable for tests."""
+        return self._now()
+
+    def extension_live(self, *emails: str) -> bool:
+        """True iff any of *emails* has an admin extension ending in the future."""
+        for email in emails:
+            until = self.extension_until(email)
+            if until is not None and until > self._now():
+                return True
+        return False
 
     def extension_until(self, email: str) -> int | None:
         rows = self._all(

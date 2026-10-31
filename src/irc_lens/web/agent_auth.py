@@ -580,6 +580,11 @@ async def post_issue(request: web.Request) -> web.Response:
     )
     # The replaced credential is already revoked; drop its agent now (o1).
     await close_agent_connections(request.app, key)
+    if _split_key(key)[1] == TIER_GUEST:
+        # The guest's consent record names the agent they sponsor.
+        guests = request.app.get("guest_store")
+        if guests is not None:
+            await asyncio.to_thread(guests.set_consent_agent, actor, nick)
     logger.info("agent credential issued tier=%s", _split_key(key)[1])
     return await asyncio.to_thread(
         _page, request, credential_key=key, human_nick=human_nick, token=token

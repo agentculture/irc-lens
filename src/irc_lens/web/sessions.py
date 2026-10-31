@@ -307,9 +307,10 @@ class SessionRegistry:
         sandbox = [(k, s) for k, s in self._sessions.items() if k[1] == BACKEND_SANDBOX]
         for key, session in sandbox:
             if key[0].startswith(AGENT_PRINCIPAL_PREFIX):
-                # A personal agent has no tab; its lifetime follows its
-                # credential and its human (agent_auth.sweep_once), not
-                # the event-stream rule below.
+                # A personal agent has no tab and no idle clock of its own
+                # (only its human's actions count); its lifetime follows its
+                # credential and its human (agent_auth.sweep_once), plus
+                # the guest rule below.
                 continue
             if self._counts_as_guest(*key):
                 idle = now - self._last_action.setdefault(key, now) >= idle_s
@@ -321,7 +322,44 @@ class SessionRegistry:
             if idle:
                 await self.close(*key)
                 closed.append(key)
+        await self._reap_guest_agents()
         return closed
+
+    def _agent_extended(self, email: str) -> bool:
+        """Does an admin extension still cover the guest *email*'s agent?
+
+        Checks the bare address (what ``irc-lens extend`` and the admin
+        page key on) and the guest credential key. Fails closed: with no
+        readable access store there is no extension.
+        """
+        store = self._access_store()
+        if store is None:
+            return False
+        try:
+            return store.extension_live(email, GUEST_PRINCIPAL_PREFIX + email)
+        except Exception:  # noqa: BLE001 -- an unreadable store grants nothing
+            return False
+
+    async def _reap_guest_agents(self) -> None:
+        """Close a guest's agent once its human is signed off (o19).
+
+        A guest's agent lives only while the guest's own sandbox session
+        does: the human's idle sign-off (above) takes the agent with it in
+        the same sweep, unless a live admin extension covers it. Under an
+        extension the agent stays; once it ends (or is cleared) the next
+        sweep finds the human still absent and closes the agent. Approved
+        users' agents are not governed by this rule.
+        """
+        prefix = AGENT_PRINCIPAL_PREFIX + GUEST_PRINCIPAL_PREFIX
+        for principal, backend in list(self._sessions):
+            if backend != BACKEND_SANDBOX or not principal.startswith(prefix):
+                continue
+            email = principal[len(prefix) :]
+            if (GUEST_PRINCIPAL_PREFIX + email, BACKEND_SANDBOX) in self._sessions:
+                continue
+            if self._agent_extended(email):
+                continue
+            await self.close(principal, backend)
 
     async def _init_sandbox(self, session: Any, identity: Identity) -> None:
         """UI tier, presence + answer listeners, and the private room(s)."""

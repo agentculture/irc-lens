@@ -19,7 +19,9 @@ from aiohttp import web
 
 from irc_lens.web import app_session
 from irc_lens.web.sessions import (
+    AGENT_PRINCIPAL_PREFIX,
     BACKEND_SANDBOX,
+    BACKENDS,
     GUEST_PRINCIPAL_PREFIX,
     SessionRegistry,
 )
@@ -30,8 +32,49 @@ DEFAULT_SWEEP_INTERVAL_S = 30.0
 SWEEP_TASK = web.AppKey("ban_sweep_task", asyncio.Task)
 
 
-async def sweep_once(registry: SessionRegistry, store) -> list[str]:
-    """Close every active guest session whose guest is banned; return emails."""
+def _guest_banned(store, email: str) -> bool:
+    rows = store.get_guest(email)
+    ip = rows[-1][2] if rows else None
+    return store.is_banned(email, ip)
+
+
+async def _drop_agent(registry: SessionRegistry, access, email: str) -> None:
+    """Disconnect a banned guest's agent and delete its credential rows (o9)."""
+    key = GUEST_PRINCIPAL_PREFIX + email
+    principal = AGENT_PRINCIPAL_PREFIX + key
+    for backend in sorted(BACKENDS):
+        if registry.has(principal, backend):
+            await registry.close(principal, backend)
+    if access is not None:
+        await asyncio.to_thread(access.purge_agent_credentials, key, actor=None)
+
+
+async def _sweep_agents(
+    registry: SessionRegistry, store, access, dropped: list[str]
+) -> None:
+    """Ban sweep for guests' agents, which hold no guest session of their own."""
+    emails: set[str] = set()
+    for principal, _backend in registry.keys():
+        if principal.startswith(AGENT_PRINCIPAL_PREFIX + GUEST_PRINCIPAL_PREFIX):
+            emails.add(
+                principal[len(AGENT_PRINCIPAL_PREFIX + GUEST_PRINCIPAL_PREFIX) :]
+            )
+    if access is not None:
+        emails.update(await asyncio.to_thread(access.guest_credential_emails))
+    for email in sorted(emails):
+        if await asyncio.to_thread(_guest_banned, store, email):
+            await _drop_agent(registry, access, email)
+            if email not in dropped:
+                dropped.append(email)
+
+
+async def sweep_once(registry: SessionRegistry, store, access=None) -> list[str]:
+    """Close every active guest session whose guest is banned; return emails.
+
+    With the *access* store, a banned guest's agent is disconnected too and
+    its credential rows are removed (o9) -- also when the guest has no open
+    session of their own.
+    """
     dropped: list[str] = []
     for principal, backend in registry.keys():
         if backend != BACKEND_SANDBOX or not principal.startswith(
@@ -44,6 +87,7 @@ async def sweep_once(registry: SessionRegistry, store) -> list[str]:
         if await asyncio.to_thread(store.is_banned, email, ip):
             await registry.close(principal, backend)
             dropped.append(email)
+    await _sweep_agents(registry, store, access, dropped)
     return dropped
 
 
@@ -51,7 +95,11 @@ async def _loop(app: web.Application, interval: float) -> None:
     while True:
         await asyncio.sleep(interval)
         try:
-            await sweep_once(app["registry"], app["guest_store"])
+            await sweep_once(
+                app["registry"],
+                app["guest_store"],
+                access=app.get(app_session.ACCESS_STORE),
+            )
         except Exception:  # noqa: BLE001 -- the sweeper must never die
             logger.exception("ban sweep failed")
         try:
