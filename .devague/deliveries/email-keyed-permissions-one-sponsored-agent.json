@@ -2,7 +2,7 @@
   "plan_slug": "email-keyed-permissions-one-sponsored-agent",
   "schema_version": 2,
   "created": "2026-10-31T06:39:10Z",
-  "updated": "2026-10-31T07:08:53Z",
+  "updated": "2026-10-31T09:00:39Z",
   "deviations": [
     {
       "id": "d1",
@@ -41,6 +41,30 @@
       "status": "approved",
       "classification": "acceptable",
       "seq": 3
+    },
+    {
+      "id": "d4",
+      "what": "t15 also edited app.py, app_session.py, auth.py, setpw.py and routes.py (beyond its named files), changed the operator auth log line from principal=<email> to who=<hash>, and defined a three-state off switch (enabled / legacy before migration / admins-only after)",
+      "task_ref": "t15",
+      "reason": "its 'no email in any log line' and fail-closed-off criteria could not be met inside the three named files; the plan's web/metrics.py does not exist (module is src/irc_lens/metrics.py)",
+      "affects": [],
+      "origin": "llm",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 4
+    },
+    {
+      "id": "d5",
+      "what": "Boundary c23 ('no host/address literal in src/') is met by a ratchet: 9 pre-existing files keep their 26 legacy literals (cannot grow), no other file may hold any; full removal is a follow-up issue",
+      "task_ref": "t16",
+      "reason": "t16's scan found the production host hardcoded in pre-existing mail, config, sign-in and static files that predate this feature",
+      "affects": [
+        "t18"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "classification": "needs-follow-up",
+      "seq": 5
     }
   ],
   "evidence": [],

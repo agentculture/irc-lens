@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-10-30T19:16:30Z",
-  "updated": "2026-10-31T05:21:27Z",
+  "updated": "2026-10-31T09:14:11Z",
   "claims": [
     {
       "id": "c1",
@@ -1124,6 +1124,61 @@
       "skipped_check": "run the repo's pre-commit hooks",
       "refs": [
         "t19"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l5",
+      "code": "control-absent",
+      "what": "t15: tests and implementation written together, no strict RED phase before implementing",
+      "skipped_check": "see each new test fail on its own assertion before implementing",
+      "refs": [
+        "t15"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l6",
+      "code": "assumption-for-measurement",
+      "what": "t13: nick-collision (433) and nick case rules were tested against the in-repo test IRCd's relay mode, modelled rather than measured on a real AgentIRC",
+      "skipped_check": "exercise agent connections against a real AgentIRC instance",
+      "refs": [
+        "t13"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l7",
+      "code": "provenance-missing",
+      "what": "t16: docs/permissions.md states /owner/metrics is admin-only and that guests need current consent for an agent credential from docstrings/source reading, not from running a test",
+      "skipped_check": "cite or run the test that proves each admin-only and consent claim",
+      "refs": [
+        "t16"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l8",
+      "code": "control-absent",
+      "what": "t14: the stale-consent test drives the consent gate with a fake legal seam (a flag), not a real version comparison against the fetched legal document",
+      "skipped_check": "exercise re-consent against a real legal/version.json at an older version",
+      "refs": [
+        "t14"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l9",
+      "code": "control-absent",
+      "what": "t17: e2e assertions written with the tests, no RED step and no mutation check that the suite catches a disabled owner filter",
+      "skipped_check": "mutation-check: disable the owner filter and confirm test_e2e_permissions fails",
+      "refs": [
+        "t17"
       ],
       "origin": "llm",
       "status": "proposed"
