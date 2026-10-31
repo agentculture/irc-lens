@@ -61,26 +61,48 @@ def _record_denial(store: Any, human: str | None, channel: str, op: str) -> None
         pass
 
 
-def _check(store: Any, human: str | None, channel: str, op: str) -> bool:
+def _check(
+    store: Any, human: str | None, channel: str, op: str, audit: bool = True
+) -> bool:
     try:
         ok = _allowed(store, human, channel, op) is True
     except Exception:  # noqa: BLE001 - unreadable store/grant => deny
         ok = False
-    if not ok:
+    if not ok and audit:
         _record_denial(store, human, channel, op)
     return ok
 
 
-def can_list(human: str | None, channel: str, *, store: Any) -> bool:
-    return _check(store, human, channel, "list")
+def can_list(
+    human: str | None, channel: str, *, store: Any, audit: bool = True
+) -> bool:
+    """*audit=False* is for filtering a listing: hidden rows are not events."""
+    return _check(store, human, channel, "list", audit)
 
 
-def can_read(human: str | None, channel: str, *, store: Any) -> bool:
-    return _check(store, human, channel, "read")
+def can_read(
+    human: str | None, channel: str, *, store: Any, audit: bool = True
+) -> bool:
+    return _check(store, human, channel, "read", audit)
 
 
-def can_write(human: str | None, channel: str, *, store: Any) -> bool:
-    return _check(store, human, channel, "write")
+def can_write(
+    human: str | None, channel: str, *, store: Any, audit: bool = True
+) -> bool:
+    return _check(store, human, channel, "write", audit)
+
+
+def is_admin(human: str | None, *, store: Any) -> bool:
+    """True for an approved admin; fails closed. Never audits (a role probe)."""
+    try:
+        if store is None or not human:
+            return False
+        user = store.get_user(human)
+        return bool(
+            user and user.get("state") == "approved" and user.get("role") == "admin"
+        )
+    except Exception:  # noqa: BLE001
+        return False
 
 
 def _agent_human(store: Any, token: str) -> str | None:
@@ -92,12 +114,13 @@ def _agent_human(store: Any, token: str) -> str | None:
 
 
 def _agent_check(op: str) -> Callable[..., bool]:
-    def check(token: str, channel: str, *, store: Any) -> bool:
+    def check(token: str, channel: str, *, store: Any, audit: bool = True) -> bool:
         human = _agent_human(store, token)
         if human is None:
-            _record_denial(store, None, channel, op)
+            if audit:
+                _record_denial(store, None, channel, op)
             return False
-        return _check(store, human, channel, op)
+        return _check(store, human, channel, op, audit)
 
     check.__name__ = f"agent_can_{op}"
     check.__doc__ = (
@@ -114,6 +137,7 @@ __all__ = [
     "can_list",
     "can_read",
     "can_write",
+    "is_admin",
     "agent_can_list",
     "agent_can_read",
     "agent_can_write",

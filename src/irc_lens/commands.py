@@ -213,3 +213,21 @@ def allowed_in_sandbox(parsed: ParsedCommand, *, preview: bool = False) -> bool:
     if preview and parsed.type == CommandType.SWITCH:
         return True
     return parsed.type in SANDBOX_ALLOWED
+
+
+#: Command types that change channel/room state or the shared identity on the
+#: mesh. With email permissions on, only an approved admin may run them
+#: (a non-admin is refused before any IRC line is sent).
+ADMIN_ONLY = frozenset(
+    {
+        CommandType.TOPIC,
+        CommandType.KICK,
+        CommandType.INVITE,
+        CommandType.ICON,
+    }
+)
+
+
+def is_admin_only(parsed: ParsedCommand) -> bool:
+    """True iff *parsed* is a channel-changing command reserved for admins."""
+    return parsed.type in ADMIN_ONLY
