@@ -133,7 +133,7 @@ def test_finding3_without_a_config_the_cli_says_residents_were_not_checked(
     assert "resident" in capsys.readouterr().err
 
 
-async def test_finding3_resident_check_runs_inside_a_running_loop(
+async def test_finding3_resident_check_runs_inside_a_running_loop(  # NOSONAR S7503 - needs a running loop, awaits nothing
     db: Path, monkeypatch
 ) -> None:
     """A verb dispatched from an async surface (MCP) still checks residents."""
