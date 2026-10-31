@@ -166,6 +166,16 @@ def test_config_mcp_path_default_and_override():
     assert _config("/custom/mcp").mcp_path == "/custom/mcp"
 
 
+@pytest.mark.parametrize("path", ["/mcp/{x}", "/{tail:.*}", "/m{cp", "/mc}p"])
+def test_config_mcp_path_refuses_dynamic_segments(path: str):
+    """Low finding: aiohttp reads ``{...}`` in a route as a dynamic segment,
+    which would widen the MCP mount; web.mcp_path must refuse braces."""
+    from irc_lens._errors import AfiError
+
+    with pytest.raises(AfiError):
+        _config(f"'{path}'")
+
+
 def test_module_has_no_host_or_address_literal():
     import irc_lens.web.mcp_http as mod
 

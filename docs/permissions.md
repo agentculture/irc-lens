@@ -164,8 +164,10 @@ lens's own state.
 
 There is one remote MCP endpoint for all tiers. It is mounted at
 `web.mcp_path` (default `/mcp`; `src/irc_lens/web/mcp_http.py`) on the lens's
-own public host. The host is never written in code: you reach it at your
-deployment's public base URL plus that path, for example
+own public host. The path must be static: one with spaces or braces (`{`,
+`}`, which aiohttp would read as a dynamic segment) is refused at start.
+The host is never written in code: you reach it at your deployment's public
+base URL plus that path, for example
 `https://lens.example.com/mcp`. The credential page shows the endpoint built
 from `auth.app_signin.base_url` and `web.mcp_path`.
 
