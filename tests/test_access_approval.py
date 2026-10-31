@@ -92,7 +92,8 @@ async def env(jwks: FakeJWKS, tmp_path, monkeypatch) -> AsyncIterator[Env]:
 
 def test_identity_carries_role() -> None:
     i = Identity("a@example.com", "n", "s", tier=TIER_APPROVED, role=ROLE_ADMIN)
-    assert i.role == "admin" and i.is_admin
+    assert i.role == "admin"
+    assert i.is_admin
     assert not Identity("a@example.com", "n", "s", tier=TIER_APPROVED).is_admin
     assert Identity("a", "n", "s").role == ""
 
@@ -102,7 +103,8 @@ def test_identity_carries_role() -> None:
 
 async def test_first_start_imports_allowed_emails_as_admins(env: Env) -> None:
     user = env.access.get_user("ALICE@example.com")
-    assert user and (user["role"], user["state"]) == ("admin", "approved")
+    assert user
+    assert (user["role"], user["state"]) == ("admin", "approved")
 
 
 async def test_allowed_emails_never_read_again(jwks, tmp_path, monkeypatch) -> None:
@@ -151,7 +153,8 @@ async def test_disabled_does_not_install_or_refuse(jwks, tmp_path, monkeypatch) 
         jwks, tmp_path, monkeypatch, access_enabled=False, allowed_emails=()
     )
     try:
-        assert e.access is None and "access_store" not in e.app
+        assert e.access is None
+        assert "access_store" not in e.app
     finally:
         await e.client.close()
         await e.mesh.stop()
@@ -162,10 +165,13 @@ async def test_disabled_does_not_install_or_refuse(jwks, tmp_path, monkeypatch) 
 
 async def test_jwt_approval_and_role_from_store(env: Env) -> None:
     status, body = await env.get(env.jwt(ALICE))
-    assert status == 200 and body["tier"] == "approved" and body["role"] == "admin"
+    assert status == 200
+    assert body["tier"] == "approved"
+    assert body["role"] == "admin"
     env.access.set_user(BOB, role="member", state="approved", actor=None)
     status, body = await env.get(env.jwt(BOB))
-    assert status == 200 and body["role"] == "member"
+    assert status == 200
+    assert body["role"] == "member"
 
 
 async def test_jwt_unknown_pending_and_allowlist_not_consulted(env: Env) -> None:
@@ -187,7 +193,9 @@ async def test_app_session_follows_store(env: Env) -> None:
     env.access.set_user(BOB, role="member", state="approved", actor=None)
     raw = env.guests.create_session(BOB)
     status, body = await env.get(env.cookie(raw))
-    assert status == 200 and body["principal"] == BOB and body["role"] == "member"
+    assert status == 200
+    assert body["principal"] == BOB
+    assert body["role"] == "member"
     env.access.set_user(BOB, role="member", state="suspended", actor=None)
     assert not await env.approved(env.cookie(raw))
 
@@ -201,7 +209,8 @@ async def test_preexisting_session_survives_migration(
     e = await _build(jwks, tmp_path, monkeypatch)
     try:
         status, body = await e.get(e.cookie(raw))
-        assert status == 200 and body["tier"] == "approved"
+        assert status == 200
+        assert body["tier"] == "approved"
         assert body["role"] == "admin"
     finally:
         await e.client.close()

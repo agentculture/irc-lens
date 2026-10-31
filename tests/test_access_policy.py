@@ -151,7 +151,8 @@ def test_refusal_appends_audit_without_plain_email(store):
     ts, actor_hash, action, target = rows[0]
     assert actor_hash == email_hash(USER)
     assert action == "access.deny"
-    assert "write" in target and CHAN in target
+    assert "write" in target
+    assert CHAN in target
     assert USER not in " ".join(map(str, rows[0]))
 
 
@@ -166,5 +167,6 @@ def test_refusal_of_unknown_human_audited_by_hash(store):
     before = len(store.audit_rows())
     access.can_read(STRANGER, CHAN, store=store)
     rows = store.audit_rows()[before:]
-    assert rows and rows[0][1] == email_hash(STRANGER)
+    assert rows
+    assert rows[0][1] == email_hash(STRANGER)
     assert STRANGER not in " ".join(map(str, rows[0]))

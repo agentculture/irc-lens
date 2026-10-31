@@ -233,7 +233,8 @@ async def env(
 def test_no_human_nick_is_in_the_agent_namespace(email: str) -> None:
     assert not is_agent_nick(derive_nick("testsrv", email))
     assert not is_agent_nick("sbx-pa_bob")  # a guest nickname keeps only [a-z0-9_]
-    assert is_agent_nick(MEMBER_AGENT) and is_agent_nick(GUEST_AGENT)
+    assert is_agent_nick(MEMBER_AGENT)
+    assert is_agent_nick(GUEST_AGENT)
     assert AGENT_NICK_INFIX in MEMBER_AGENT
 
 
@@ -243,13 +244,15 @@ async def test_agent_gets_its_own_connection_under_the_agent_registry_key(
     await env.human_online(env.jwt(MEMBER))
     token = await env.issue(env.jwt(MEMBER))
     me = await env.ok(token, "whoami")
-    assert me["nick"] == MEMBER_AGENT and me["tier"] == "approved"
+    assert me["nick"] == MEMBER_AGENT
+    assert me["tier"] == "approved"
     keys = env.registry.keys()
     assert (agent_auth.agent_registry_principal(MEMBER), BACKEND_MESH) in keys
     assert (MEMBER, BACKEND_MESH) in keys  # the human's own, separate session
     agent = env.human_session(agent_auth.agent_registry_principal(MEMBER))
     human = env.human_session(MEMBER)
-    assert agent is not human and agent.nick == MEMBER_AGENT
+    assert agent is not human
+    assert agent.nick == MEMBER_AGENT
     # Exactly its human's grants (c21), never the agent key's (empty) rows.
     assert agent.access_human == MEMBER
     assert agent.may("write", "#ops", audit=False)
@@ -296,7 +299,8 @@ async def test_guest_agent_joins_only_its_humans_room(env: Env) -> None:
     await env.human_online(env.guest())  # a guest's agent runs only with its human
     token = await env.issue(env.guest())
     me = await env.ok(token, "whoami")
-    assert me["nick"] == GUEST_AGENT and me["tier"] == "guest"
+    assert me["nick"] == GUEST_AGENT
+    assert me["tier"] == "guest"
     own = env.app["config"].guest_room_prefix + env.guests.room_id(GUEST)
     other = env.app["config"].guest_room_prefix + env.guests.room_id(OTHER_GUEST)
     chans = await env.ok(token, "channels")
@@ -419,7 +423,8 @@ async def test_withheld_delivery_is_audited_without_email(env: Env, caplog) -> N
     await env.ok(token, "read")
     actions = [row[2] for row in env.access.audit_rows()]
     assert agent_sessions.WITHHELD_ACTION in actions
-    assert MEMBER not in caplog.text and GUEST not in caplog.text
+    assert MEMBER not in caplog.text
+    assert GUEST not in caplog.text
 
 
 # -- identity + access checks; no dev path (o14) ----------------------------------------
@@ -697,7 +702,8 @@ def test_ambiguous_agent_nick_maps_to_nobody(tmp_path: Path, caplog) -> None:
     with caplog.at_level("WARNING"):
         assert agent_sessions.human_for_agent_nick(store, MEMBER_AGENT) is None
     assert "ambiguous" in caplog.text
-    assert MEMBER not in caplog.text and NAMESAKE not in caplog.text
+    assert MEMBER not in caplog.text
+    assert NAMESAKE not in caplog.text
     assert "example" not in caplog.text
 
 

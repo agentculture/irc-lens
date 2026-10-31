@@ -52,7 +52,8 @@ async def test_admin_is_allowed(env: Env, method, path) -> None:
 async def test_denial_names_a_hint(env: Env) -> None:
     r = await _call(env, "GET", "/owner/metrics", env.jwt(BOB))
     body = await r.json()
-    assert body["error"] and body["hint"]
+    assert body["error"]
+    assert body["hint"]
 
 
 async def test_admin_toggle_selects_sandbox(env: Env) -> None:

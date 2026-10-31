@@ -251,13 +251,11 @@ def test_ttl_default_is_named_and_overridable(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("bad", ["0", "-3", "soon"])
 def test_ttl_must_be_positive(tmp_path: Path, bad: str) -> None:
+    path = _cfg_file(
+        tmp_path, f"  email_permissions:\n    agent_credential_ttl_days: {bad}\n"
+    )
     with pytest.raises(AfiError):
-        load_config(
-            _cfg_file(
-                tmp_path,
-                f"  email_permissions:\n    agent_credential_ttl_days: {bad}\n",
-            )
-        )
+        load_config(path)
 
 
 # -- issue from the app (o1) ------------------------------------------------------------
@@ -303,12 +301,14 @@ async def test_token_shown_once_and_stored_only_as_hash(env: Env) -> None:
     assert token.encode() not in raw
     with closing(sqlite3.connect(env.access.path)) as con:
         rows = con.execute("SELECT token_hash, nick FROM agent_credentials").fetchall()
-    assert len(rows) == 1 and rows[0][0] != token
+    assert len(rows) == 1
+    assert rows[0][0] != token
     assert rows[0][1] == agent_auth.agent_nick_for(derive_nick("testsrv", MEMBER))
     # Not shown again: a later page view carries no token.
     page = await env.client.get("/agent-credential", headers=env.jwt(MEMBER))
     text = await page.text()
-    assert token not in text and 'data-testid="agent-token"' not in text
+    assert token not in text
+    assert 'data-testid="agent-token"' not in text
     r = await env.client.post("/agent-credential", headers=env.jwt(MEMBER))
     assert r.headers.get("Cache-Control") == "no-store"
 
@@ -475,7 +475,8 @@ async def test_sweep_closes_agent_after_out_of_band_revoke(env: Env) -> None:
     env.access.revoke_agent_credential(MEMBER, actor=None)
     closed = await agent_auth.sweep_once(env.app)
     assert closed == [agent_auth.agent_registry_principal(MEMBER)]
-    assert revoked.disconnected and not live.disconnected
+    assert revoked.disconnected
+    assert not live.disconnected
 
 
 async def test_sweep_closes_agent_of_banned_guest(env: Env) -> None:
@@ -533,7 +534,8 @@ async def test_guest_key_never_resolves_to_approved_grants(env: Env) -> None:
     env.guests.record_guest(MEMBER, "sbx-bobby", "127.0.0.1")
     token = await env.issue(env.guest(MEMBER))
     principal = await agent_auth.authenticate_token(env.app, token, ip="127.0.0.1")
-    assert principal is not None and principal.tier == "guest"
+    assert principal is not None
+    assert principal.tier == "guest"
     assert principal.credential_key == agent_auth.GUEST_KEY_PREFIX + MEMBER
     # The approved user's own (absent) credential is untouched by the guest's.
     assert env.access.active_credential_count(MEMBER) == 0

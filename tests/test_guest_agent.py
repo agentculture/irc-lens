@@ -63,7 +63,8 @@ async def _guest_with_agent(env: Env) -> str:
     await env.human_online(env.guest())
     token = await env.issue(env.guest())
     await env.ok(token, "whoami")
-    assert _human_open(env) and _agent_open(env)
+    assert _human_open(env)
+    assert _agent_open(env)
     return token
 
 
@@ -116,7 +117,8 @@ async def test_agent_is_not_reopened_after_its_human_signs_off(env: Env) -> None
     call must not lazily reopen it (and chat on until the next reap)."""
     token = await _guest_with_agent(env)
     await _reap(env)
-    assert not _human_open(env) and not _agent_open(env)
+    assert not _human_open(env)
+    assert not _agent_open(env)
     for verb in ("whoami", "read", "channels"):
         assert "signed in" in await env.refused(token, verb)
     assert "signed in" in await env.refused(token, "send", text="still here?")
@@ -146,7 +148,8 @@ async def test_ban_refuses_and_disconnects_agent_and_removes_rows(env: Env) -> N
     env.guests.ban(email=GUEST, reason="test")
     dropped = await bans.sweep_once(env.registry, env.guests, access=env.access)
     assert GUEST in dropped
-    assert not _agent_open(env) and not _human_open(env)
+    assert not _agent_open(env)
+    assert not _human_open(env)
     assert _credential_rows(env) == 0
     assert env.access.verify_agent_credential(token) is None
     r = await env.client.post(
@@ -203,7 +206,8 @@ async def test_self_service_deletion_closes_agent_and_removes_rows(env: Env) -> 
         allow_redirects=False,
     )
     assert r.status == 200, await r.text()
-    assert not _agent_open(env) and not _human_open(env)
+    assert not _agent_open(env)
+    assert not _human_open(env)
     assert _credential_rows(env) == 0
     assert env.access.verify_agent_credential(token) is None
 
@@ -325,7 +329,8 @@ async def test_an_active_human_keeps_the_agent(env: Env) -> None:
     await _guest_with_agent(env)
     closed = await _reap(env, ahead=1.0)  # not idle yet
     assert closed == []
-    assert _human_open(env) and _agent_open(env)
+    assert _human_open(env)
+    assert _agent_open(env)
 
 
 async def test_agent_sends_do_not_touch_the_humans_idle_clock(env: Env) -> None:

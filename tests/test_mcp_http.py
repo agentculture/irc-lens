@@ -109,7 +109,8 @@ async def test_authenticator_receives_request_and_principal_reaches_tool():
         assert json.loads(result.content[0].text) == {
             "result": {"caller": {"email": "agent@example.com"}}
         }
-        assert seen and all(p == MCP_PATH and a == "Bearer t" for _, p, a in seen)
+        assert seen
+        assert all(p == MCP_PATH and a == "Bearer t" for _, p, a in seen)
     finally:
         await server.close()
 

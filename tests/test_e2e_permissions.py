@@ -377,7 +377,8 @@ async def test_zero_cross_human_deliveries(env: Env) -> None:
     dm_or_aimed = sum(
         1 for att, vic, _dm in sent.values() if vic is not None and att != vic
     )
-    assert len(sent) > 30 and withheld >= 20, (withheld, dm_or_aimed, len(sent))
+    assert len(sent) > 30, (withheld, dm_or_aimed, len(sent))
+    assert withheld >= 20, (withheld, dm_or_aimed, len(sent))
 
 
 async def test_owner_lines_arrive_marked_owner_symmetrically(env: Env) -> None:
@@ -435,7 +436,8 @@ async def test_three_credentials_get_three_scopes(env: Env) -> None:
 
     # Member A: exactly the grants -- listed, joinable, sendable per level.
     me = await env.ok(member_t, "whoami")
-    assert me["tier"] == "approved" and me["nick"] == AGENT[A]
+    assert me["tier"] == "approved"
+    assert me["nick"] == AGENT[A]
     member_chans = await env.ok(member_t, "channels")
     assert secret not in json.dumps(member_chans)
     assert "#b-only" not in json.dumps(member_chans)
@@ -457,17 +459,20 @@ async def test_three_credentials_get_three_scopes(env: Env) -> None:
     # that sits in the ungranted channels).
     members = env.mesh.channel_members
     assert AGENT[A] in members["#a-only"]
-    assert AGENT[A] not in members[secret] and AGENT[A] not in members["#b-only"]
+    assert AGENT[A] not in members[secret]
+    assert AGENT[A] not in members["#b-only"]
     assert AGENT[ADMIN] in members[secret]
 
     # Guest: only the own sandbox room; nothing of the mesh.
     gme = await env.ok(guest_t, "whoami")
-    assert gme["tier"] == "guest" and gme["nick"] == G_AGENT
+    assert gme["tier"] == "guest"
+    assert gme["nick"] == G_AGENT
     own = env.app["config"].guest_room_prefix + env.guests.room_id(G)
     other = env.app["config"].guest_room_prefix + env.guests.room_id(G2)
     gchans = await env.ok(guest_t, "channels")
     assert gchans["joined"] == [own]
-    assert other not in json.dumps(gchans) and SHARED not in json.dumps(gchans)
+    assert other not in json.dumps(gchans)
+    assert SHARED not in json.dumps(gchans)
     for msg in (
         await env.refused(guest_t, "join", channel=SHARED),
         await env.refused(guest_t, "join", channel=other),
@@ -557,8 +562,10 @@ async def test_kill_switch_flipped_mid_test_refuses_the_next_agent_call(
     object.__setattr__(cfg, "agents_enabled", False)  # the operator's switch
     try:
         assert await env.status(token) == 401
-        with pytest.raises(Exception):  # the stock MCP client is refused
+        # The stock MCP client is refused: its task group surfaces the 401.
+        with pytest.raises(ExceptionGroup) as refused:
             await env.call(token, "read")
+        assert refused.group_contains(httpx.HTTPStatusError, match="401 Unauthorized")
         # issuing is refused as well while the switch is thrown
         r = await env.client.post(
             "/agent-credential", headers=env.jwt(B), allow_redirects=False

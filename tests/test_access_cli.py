@@ -68,7 +68,8 @@ def test_grants_add_list_revoke_applies_live(db, capsys):
     capsys.readouterr()
     assert run(db, "grants", "list", EMAIL) == 0
     out = capsys.readouterr().out
-    assert "#room" in out and "write" in out
+    assert "#room" in out
+    assert "write" in out
     assert run(db, "grants", "revoke", EMAIL, "#room") == 0
     assert not access.can_read(EMAIL, "#room", store=live)
 

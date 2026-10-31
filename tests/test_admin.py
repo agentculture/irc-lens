@@ -144,7 +144,8 @@ async def test_admin_gets_page(env: Env) -> None:
     r = await env.client.get("/admin", headers=env.jwt(ADMIN))
     assert r.status == 200
     body = await r.text()
-    assert ADMIN in body and MEMBER in body
+    assert ADMIN in body
+    assert MEMBER in body
 
 
 async def test_non_admins_get_403(env: Env) -> None:
@@ -184,7 +185,8 @@ async def test_real_agent_token_gets_403(env: Env) -> None:
 async def test_admin_page_is_csp_clean(env: Env) -> None:
     r = await env.client.get("/admin", headers=env.jwt(ADMIN))
     csp = r.headers["Content-Security-Policy"]
-    assert "script-src 'self'" in csp and "unsafe-inline" not in csp
+    assert "script-src 'self'" in csp
+    assert "unsafe-inline" not in csp
     body = (await r.text()).lower()
     assert "<script" not in body
     assert "<style" not in body

@@ -180,7 +180,8 @@ def test_issue_credential_revokes_prior(store: AccessStore, db: Path) -> None:
     assert store.verify_agent_credential(t2) == (ALICE, "alice-agent")
     assert store.active_credential_count(ALICE) == 1
     raw = db.read_bytes()
-    assert t1.encode() not in raw and t2.encode() not in raw
+    assert t1.encode() not in raw
+    assert t2.encode() not in raw
 
 
 def test_credential_expiry_and_revoke(db: Path) -> None:
@@ -293,7 +294,9 @@ def test_record_audit_is_public_and_keeps_the_read_cache(store: AccessStore) -> 
     cached = dict(store._read_cache)
     store.record_audit("test.action", "t:1", actor=ALICE)
     rows = [r for r in store.audit_rows() if r[2] == "test.action"]
-    assert len(rows) == 1 and ALICE not in rows[0][1] and rows[0][3] == "t:1"
+    assert len(rows) == 1
+    assert ALICE not in rows[0][1]
+    assert rows[0][3] == "t:1"
     assert store._read_cache == cached  # an audit row never changes access
 
 

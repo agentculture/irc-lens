@@ -74,10 +74,9 @@ def test_agents_switch_defaults_on_and_parses(tmp_path: Path) -> None:
 def test_agents_switch_must_be_a_bool(tmp_path: Path) -> None:
     from irc_lens._errors import AfiError
 
+    path = _cfg_file(tmp_path, "  email_permissions:\n    agents_enabled: maybe\n")
     with pytest.raises(AfiError):
-        load_config(
-            _cfg_file(tmp_path, "  email_permissions:\n    agents_enabled: maybe\n")
-        )
+        load_config(path)
 
 
 def _base(tmp_path: Path, **kw) -> cfgmod.LensConfig:
@@ -162,8 +161,9 @@ def test_a_refused_first_start_does_not_initialise(tmp_path: Path) -> None:
     uninitialised, so fixing allowed_emails and restarting still imports."""
     from irc_lens._errors import AfiError
 
+    no_admin = _base(tmp_path, access_enabled=True, allowed_emails=())
     with pytest.raises(AfiError):
-        _install(_base(tmp_path, access_enabled=True, allowed_emails=()))
+        _install(no_admin)
     store = _install(_base(tmp_path, access_enabled=True, allowed_emails=(ADMIN,)))
     assert store.get_user(ADMIN)["role"] == "admin"
 
@@ -504,7 +504,8 @@ async def test_owner_metrics_expose_access_counts_only(live: Env) -> None:
     assert counts["grant_changes"] >= 1
     assert all(type(v) is int for v in counts.values())
     assert not _EMAIL.search(await r.text())
-    assert MEMBER not in str(body) and ADMIN not in str(body)
+    assert MEMBER not in str(body)
+    assert ADMIN not in str(body)
 
 
 # -- logs never carry an email address ---------------------------------------------------------

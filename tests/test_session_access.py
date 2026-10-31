@@ -211,7 +211,8 @@ def test_agents_only_queries_granted_joined(store):
     assert "WHO #y" not in srv.lines
     assert "WHO #x" in srv.lines
     blob = _blob(events)
-    assert "xnick" in blob and "ynick-only" not in blob
+    assert "xnick" in blob
+    assert "ynick-only" not in blob
     assert _denials(store) == before
 
 
@@ -224,9 +225,12 @@ def test_mesh_names_only_granted_channels_and_their_nicks(store):
     mesh = [e for e in events if e.name == "mesh"]
     graph = json.loads(mesh[-1].data)
     ids = {n["id"] for n in graph["nodes"]}
-    assert "#x" in ids and "xnick" in ids
-    assert "#y" not in ids and "ynick-only" not in ids
-    assert "#y" not in _blob(events) and "ynick-only" not in _blob(events)
+    assert "#x" in ids
+    assert "xnick" in ids
+    assert "#y" not in ids
+    assert "ynick-only" not in ids
+    assert "#y" not in _blob(events)
+    assert "ynick-only" not in _blob(events)
     assert _denials(store) == before
 
 
@@ -311,7 +315,8 @@ def test_admin_passes_every_channel_check(store):
     _run(session, CommandType.JOIN, "#y")
     assert "JOIN #y" in srv.lines
     events = _run(session, CommandType.CHANNELS)
-    assert "#x" in _blob(events) and "#y" in _blob(events)
+    assert "#x" in _blob(events)
+    assert "#y" in _blob(events)
 
 
 def test_unapproved_or_missing_human_fails_closed(store):
@@ -326,4 +331,5 @@ def test_access_off_is_unrestricted():
     srv = FakeServer(session)
     _run(session, CommandType.JOIN, "#y")
     _run(session, CommandType.TOPIC, "#y", text="t")
-    assert "JOIN #y" in srv.lines and "TOPIC #y :t" in srv.lines
+    assert "JOIN #y" in srv.lines
+    assert "TOPIC #y :t" in srv.lines
