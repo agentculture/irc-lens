@@ -10,6 +10,8 @@ part. With the feature off nothing changes: ``derive_nick`` still applies.
 from __future__ import annotations
 
 import re
+import sqlite3
+import threading
 import types
 from collections.abc import AsyncIterator
 
@@ -243,3 +245,120 @@ async def test_legacy_mode_keeps_the_derived_nick(jwks, tmp_path, monkeypatch) -
     finally:
         await e.client.close()
         await e.mesh.stop()
+
+
+# -- review of PR #86 ------------------------------------------------------------
+
+
+async def test_finding2_a_second_in_flight_choice_never_renames(
+    env: Env, monkeypatch
+) -> None:
+    store = env.access
+    real_claim = store.claim_nickname
+
+    def raced(email: str, raw: str, *, actor):
+        # The other tab's POST passed the gate too and stored first.
+        real_claim(email, "first", actor=actor)
+        return real_claim(email, raw, actor=actor)
+
+    monkeypatch.setattr(store, "claim_nickname", raced)
+    r = await _choose(env, MEMBER, "second")
+    assert r.status == 303
+    assert r.headers["Location"] == "/"
+    assert store.get_user(MEMBER)["nickname"] == "first"
+    actions = [a[2] for a in store.audit_rows() if a[2].startswith("nickname.")]
+    assert actions == ["nickname.set"]
+
+
+_DATA_RIGHTS = (
+    ("GET", "/delete"),
+    ("POST", "/delete/request"),
+    ("POST", "/delete/confirm"),
+    ("GET", "/consent"),
+)
+
+
+@pytest.mark.parametrize(("method", "path"), _DATA_RIGHTS)
+async def test_finding4_data_rights_routes_skip_the_nickname_gate(
+    env: Env, method: str, path: str
+) -> None:
+    r = await env.client.request(
+        method, path, headers=env.jwt(MEMBER), allow_redirects=False
+    )
+    assert r.headers.get("Location") != NEW_PATH
+    assert r.headers.get("HX-Redirect") != NEW_PATH
+    assert r.status != 409
+
+
+async def test_finding8_store_error_is_a_form_error_not_a_500(
+    env: Env, monkeypatch
+) -> None:
+    def locked(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    monkeypatch.setattr(env.access, "claim_nickname", locked)
+    r = await _choose(env, MEMBER, "comet")
+    assert r.status == 503
+    assert nickname_web.ERR_STORE in await r.text()
+
+
+async def test_finding8_choice_is_stored_off_the_event_loop(
+    env: Env, monkeypatch
+) -> None:
+    loop_thread = threading.get_ident()
+    seen: list[int] = []
+    real_claim = env.access.claim_nickname
+
+    def spy(*args, **kwargs):
+        seen.append(threading.get_ident())
+        return real_claim(*args, **kwargs)
+
+    monkeypatch.setattr(env.access, "claim_nickname", spy)
+    assert (await _choose(env, MEMBER, "comet")).status == 303
+    assert seen
+    assert loop_thread not in seen
+
+
+async def _admin_rename(env: Env, raw: str):
+    return await env.client.post(
+        "/admin/users/nickname",
+        data={"email": MEMBER, "nickname": raw},
+        headers=env.jwt(ADMIN),
+        allow_redirects=False,
+    )
+
+
+async def test_finding8_admin_rename_store_error_is_a_form_error(
+    env: Env, monkeypatch
+) -> None:
+    def locked(*_args, **_kwargs):
+        raise sqlite3.OperationalError("database is locked")
+
+    env.access.set_nickname(ADMIN, "root", actor=None)
+    monkeypatch.setattr(env.access, "set_nickname", locked)
+    r = await _admin_rename(env, "comet")
+    assert r.status == 400
+    assert nickname_web.ERR_STORE in await r.text()
+
+
+async def test_finding8_admin_rename_runs_off_the_event_loop(
+    env: Env, monkeypatch
+) -> None:
+    loop_thread = threading.get_ident()
+    seen: list[int] = []
+    store = env.access
+
+    def spy(real):
+        def call(*args, **kwargs):
+            seen.append(threading.get_ident())
+            return real(*args, **kwargs)
+
+        return call
+
+    store.set_nickname(ADMIN, "root", actor=None)
+    monkeypatch.setattr(store, "set_nickname", spy(store.set_nickname))
+    r = await _admin_rename(env, "comet")
+    assert r.status == 303
+    assert env.access.get_user(MEMBER)["nickname"] == "comet"
+    assert seen
+    assert loop_thread not in seen

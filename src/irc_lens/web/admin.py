@@ -35,6 +35,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
+import sqlite3
 
 from aiohttp import web
 
@@ -224,6 +225,27 @@ async def post_remove(request: web.Request) -> web.Response:
     return _see_other("remove")
 
 
+async def _nickname_refusal(
+    request: web.Request, raw: str, current: str | None
+) -> tuple[str, str | None]:
+    """``(stored form, refusal reason or None)`` of an admin's nickname input.
+
+    The store's rules (``normalize_approved``) plus, for a change, a nick a
+    resident agent or anyone on the mesh holds right now.
+    """
+    chosen = nickname_rules.normalize_approved(raw)
+    if chosen is None:
+        refusal = nickname_rules.approved_refusal(raw)
+        return "", refusal or nickname_rules.REFUSAL_INVALID
+    if chosen != current:
+        server = request.app["config"].server_name
+        if await nickname.nick_in_use(
+            request.app, nickname_rules.mesh_nick(server, chosen)
+        ):
+            return chosen, nickname_rules.REFUSAL_TAKEN
+    return chosen, None
+
+
 @allows_anonymous
 async def post_nickname(request: web.Request) -> web.Response:
     admin = _admin(request)
@@ -231,23 +253,21 @@ async def post_nickname(request: web.Request) -> web.Response:
     form = await request.post()
     email = _norm_email(form.get("email"))
     raw = str(form.get("nickname") or "")[:200]
-    user = store.get_user(email)
-    if user is None:
-        return _refuse(request, _NO_SUCH_USER)
-    refusal = nickname_rules.approved_refusal(raw)
-    chosen = nickname_rules.sanitize_nickname(raw) or ""
-    if refusal is None and chosen != user["nickname"]:
-        server = request.app["config"].server_name
-        if await nickname.nick_in_use(
-            request.app, nickname_rules.mesh_nick(server, chosen)
-        ):
-            refusal = nickname_rules.REFUSAL_TAKEN
-    if refusal is not None:
-        return _refuse(request, nickname.error_text(refusal))
     try:
-        store.set_nickname(email, chosen, actor=admin.principal)
+        user = await asyncio.to_thread(store.get_user, email)
+        if user is None:
+            return _refuse(request, _NO_SUCH_USER)
+        chosen, refusal = await _nickname_refusal(request, raw, user["nickname"])
+        if refusal is not None:
+            return _refuse(request, nickname.error_text(refusal))
+        await asyncio.to_thread(
+            store.set_nickname, email, chosen, actor=admin.principal
+        )
     except NicknameError as exc:
         return _refuse(request, nickname.error_text(exc.reason))
+    except sqlite3.Error:
+        logger.warning("admin rename failed: access store error")
+        return _refuse(request, nickname.ERR_STORE)
     if user["nickname"] not in (None, chosen):
         await nickname.close_user_connections(request.app, email)
         logger.info("admin renamed a user")

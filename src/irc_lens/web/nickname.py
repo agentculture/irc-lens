@@ -8,10 +8,14 @@ user (admin or member) has one, they get no IRC session:
 * :func:`nickname_gate` (a middleware after the identity middleware) sends
   every request of such a user to ``GET /nickname``: page loads get a 303,
   htmx requests ``HX-Redirect``, anything else a 409. Sign-in, sign-out,
-  password and static paths stay reachable.
+  password and static paths stay reachable, and so do the data-rights
+  routes (``/delete``, ``/delete/request``, ``/delete/confirm``,
+  ``/consent``): nobody has to create a nickname to delete their data.
 * ``GET /nickname`` shows the form (the entry card's nickname pattern,
   CSP-clean: no script, no inline style); ``POST /nickname`` stores the
-  choice (:meth:`AccessStore.set_nickname`) and 303s to the console.
+  choice (:meth:`AccessStore.claim_nickname`, which only ever sets a first
+  nickname, so a second in-flight POST never renames) and 303s to the
+  console. A store error is a form error (503), never a 500.
 
 A person chooses once; afterwards only an admin renames them (``/admin`` or
 ``irc-lens users nick``). The form refuses what the store refuses (the guest
@@ -34,7 +38,7 @@ from typing import Any
 from aiohttp import web
 
 from irc_lens import nickname as rules
-from irc_lens.access_store import AccessStore, NicknameError
+from irc_lens.access_store import REFUSAL_CHOSEN, AccessStore, NicknameError
 from irc_lens.agent_nick import agent_nick_for, server_name_for
 from irc_lens.web import app_session
 from irc_lens.web.identity import TIER_APPROVED, Identity, nick_for_user
@@ -54,6 +58,7 @@ PATH = "/nickname"
 ERR_INVALID = "Invalid nickname"
 ERR_TAKEN = "Nickname taken"
 ERR_RESERVED = "That nickname is reserved"
+ERR_STORE = "Could not save the nickname right now; try again."
 ERR_CHOOSE_FIRST = "choose a nickname first"
 _HINT_CHOOSE_FIRST = f"open {PATH} and pick the nickname others will see"
 
@@ -69,8 +74,23 @@ def error_text(reason: str) -> str:
     return _ERRORS.get(reason, ERR_INVALID)
 
 
-#: Reachable without a nickname: the form itself, sign-in and sign-out.
-_EXEMPT_PATHS = frozenset({PATH, "/logout", "/login", "/healthz", "/guest/logout"})
+#: Reachable without a nickname: the form itself, sign-in and sign-out, and
+#: the data-rights routes (deleting one's data, the consent page), so nobody
+#: has to create a nickname to delete their data or consent. The Terms and
+#: Privacy Policy are external pages (``entry.TERMS_URL``/``PRIVACY_URL``).
+_EXEMPT_PATHS = frozenset(
+    {
+        PATH,
+        "/logout",
+        "/login",
+        "/healthz",
+        "/guest/logout",
+        "/delete",
+        "/delete/request",
+        "/delete/confirm",
+        "/consent",
+    }
+)
 _EXEMPT_PREFIXES = ("/entry", "/password", "/static/", "/media/")
 
 
@@ -207,22 +227,29 @@ async def post_nickname(request: web.Request) -> web.Response:
     identity = _requester(request)
     form = await request.post()
     raw = str(form.get("nickname") or "")[:200]
-    refusal = rules.approved_refusal(raw)
-    if refusal is not None:
+    chosen = rules.normalize_approved(raw)
+    if chosen is None:
+        refusal = rules.approved_refusal(raw) or rules.REFUSAL_INVALID
         return _page(request, status=400, nickname=raw, error=error_text(refusal))
-    chosen = rules.sanitize_nickname(raw) or ""
     server = request.app["config"].server_name
     if await nick_in_use(request.app, rules.mesh_nick(server, chosen)):
         return _page(request, status=400, nickname=raw, error=ERR_TAKEN)
     try:
+        # claim, never set: a second in-flight POST (another tab) that also
+        # passed the gate must not rename the first one's choice.
         await asyncio.to_thread(
-            _store(request).set_nickname,
+            _store(request).claim_nickname,
             identity.principal,
             chosen,
             actor=identity.principal,
         )
     except NicknameError as exc:
+        if exc.reason == REFUSAL_CHOSEN:
+            return _done()  # chosen already (the other request won)
         return _page(request, status=400, nickname=raw, error=error_text(exc.reason))
+    except sqlite3.Error:
+        logger.warning("nickname choice failed: access store error")
+        return _page(request, status=503, nickname=raw, error=ERR_STORE)
     logger.info("approved user chose a nickname")
     return _done()
 
@@ -356,6 +383,7 @@ __all__ = [
     "ERR_CHOOSE_FIRST",
     "ERR_INVALID",
     "ERR_RESERVED",
+    "ERR_STORE",
     "ERR_TAKEN",
     "PATH",
     "close_user_connections",

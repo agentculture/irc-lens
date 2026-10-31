@@ -4,7 +4,7 @@
 like the rest) and the CLI has ``irc-lens users nick <email> <nickname>``
 plus ``users add --nick``. A rename closes the user's open IRC sessions and
 their agent's connection so both come back under the new nick; the agent's
-credential, issued under the old nick, must be re-issued. Every set and
+credential, issued under the old nick, is revoked and must be re-issued. Every set and
 rename is audited with the nickname as target, never the email.
 """
 
@@ -109,8 +109,9 @@ async def test_rename_closes_sessions_and_agent_then_reconnects(env: Env) -> Non
     assert not env.registry.has(MEMBER, BACKEND_MESH)
     assert not env.registry.has(*_agent_key())
 
-    # The old credential carries the old agent nick: it must be re-issued.
-    assert "re-issue" in await env.refused(token, "whoami")
+    # The rename revoked the old credential (issued under the old agent
+    # nick) in the same transaction: it must be re-issued.
+    assert env.access.verify_agent_credential(token) is None
     assert not env.registry.has(*_agent_key())
     await env.human_online(env.jwt(MEMBER))
     assert env.human_session(MEMBER).nick == NEW_NICK
