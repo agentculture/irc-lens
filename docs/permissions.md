@@ -68,7 +68,16 @@ The checks run server-side in the lens session for every path that can reveal
 or emit channel content, so hiding a channel in the page is not the control.
 Views that enumerate channels or nicks are filtered to the viewer's grants,
 and commands that change channel state (`/topic`, `/kick`, `/invite`,
-`/icon`) are admin-only. The sandbox "guest view" toggle, the owner metrics
+`/icon`) are admin-only.
+
+Direct messages follow the same default-deny rule. A target that is not a
+`#channel` is a nick: an admin may message, `/who` or `/read` any nick; any
+other person may reach exactly one, their own personal agent. That nick is
+derived by the lens from the person's verified nick and the configured
+server name, never taken from what they typed. Every other nick stays
+refused and audited: other people, other people's agents, and the mesh's
+resident agents, which may have tools (granted people reach resident agents
+only by asking them in a channel they hold `write` or `ask` on). The sandbox "guest view" toggle, the owner metrics
 page and the residents page are admin-only as well
 (`src/irc_lens/web/routes.py`, `admin_only_denial`); a member gets 403.
 
@@ -170,7 +179,10 @@ an opaque bearer token that their agent sends to the MCP endpoint
 
 The agent's nick is derived from its human's nick and lives in a reserved
 namespace, `<server>-pa_-<name>` (`src/irc_lens/agent_nick.py`), which no human
-nick can enter. Ownership is never inferred from nick text; it comes from the
+nick can enter. `<server>` is the configured server name (`server.name` on
+the mesh, `guest_mode.sandbox.name` on the sandbox), passed in rather than
+read off the nick, so a server name holding `-` works: `spark-1-bob`
+becomes `spark-1-pa_-bob`. Ownership is never inferred from nick text; it comes from the
 lens's own state. Two people can derive the same nick; if credentials for
 one agent nick were issued to more than one person, a flag raised against
 that nick is not mapped to anyone (it is logged, without an address), so it
@@ -213,7 +225,7 @@ credential:
 | Tool | Does |
 | --- | --- |
 | `whoami` | the agent's nick, its human's tier and the channels it has joined |
-| `read` | unread lines delivered to the agent, each marked `owner: true` or `false` |
+| `read` | unread lines delivered to the agent, oldest first, each marked `owner: true` or `false`; at most `limit` per call, the rest stay unread for the next call |
 | `send` | one line to a channel or to the agent's own human, through the input gate and the human's grants |
 | `channels` | channels the agent has joined and may list |
 | `join`, `part` | join a granted channel, or leave one (not available to guests) |
