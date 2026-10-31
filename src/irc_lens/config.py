@@ -76,6 +76,8 @@ class LensConfig:
     guest_rate_entry_per_min: int = 10
     guest_rate_messages_per_min: int = 20
     guest_rate_password_attempts_per_15min: int = 5
+    # web.mcp_path: where the remote MCP endpoint is mounted (web/mcp_http.py).
+    mcp_path: str = "/mcp"
 
 
 def default_config_path() -> Path:
@@ -265,6 +267,22 @@ def _validate_web_section(raw: dict) -> tuple[str, int]:
     web_bind = str(web.get("bind", "127.0.0.1"))
     web_port = _coerce_port(web.get("port", 8765), "web.port")
     return web_bind, web_port
+
+
+def _validate_mcp_path(raw: dict) -> str:
+    """Return ``web.mcp_path`` (default ``/mcp``): an absolute URL path."""
+    web = raw.get("web")
+    value = web.get("mcp_path", "/mcp") if isinstance(web, dict) else "/mcp"
+    if (
+        not isinstance(value, str)
+        or not value.startswith("/")
+        or any(ch.isspace() for ch in value)
+    ):
+        raise _err(
+            f"web.mcp_path must be a URL path starting with '/', got {value!r}",
+            "set `web.mcp_path:` to a path like /mcp",
+        )
+    return value
 
 
 def _default_media_dir() -> str:
@@ -743,6 +761,7 @@ def load_config(path: Path) -> LensConfig:
         culture_overview_name=culture_overview_name,
         app_signin_enabled=app_signin_enabled,
         app_signin_base_url=app_signin_base_url,
+        mcp_path=_validate_mcp_path(raw),
         **guest_fields,
     )
 
