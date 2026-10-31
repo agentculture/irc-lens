@@ -238,7 +238,11 @@ def approved_user(app: web.Application, email: str) -> dict[str, str] | None:
     if getattr(config, "access_enabled", False):
         store = app.get(ACCESS_STORE)
         user = store.get_user(email) if store is not None else None
-        return user if user and user["state"] == "approved" else None
+        if not user or user["state"] != "approved":
+            return None
+        if getattr(config, "access_admins_only", False) and user["role"] != "admin":
+            return None  # switched off after migration: admins only
+        return user
     if email.lower() in allowed_lower(config):
         return {"email": email.lower(), "role": "", "state": "approved"}
     return None
@@ -266,6 +270,8 @@ def can_sign_in(app: web.Application, email: str) -> bool:
         user = store.get_user(email)
     except Exception:  # noqa: BLE001 - unreadable store => closed
         return False
+    if getattr(config, "access_admins_only", False):
+        return bool(user) and user["state"] == "approved" and user["role"] == "admin"
     return bool(user) and user["state"] in SIGNIN_STATES
 
 
@@ -425,7 +431,7 @@ async def post_logout(request: web.Request) -> web.Response:
     raw = read_session_cookie(request)
     if raw is not None:
         await end_session(request.app, raw)
-    logger.info("logout principal=%s", identity.principal)
+    logger.info("logout tier=%s", identity.tier)
     if request.headers.get("HX-Request"):
         response = web.Response(status=204, headers={"HX-Redirect": "/"})
     else:

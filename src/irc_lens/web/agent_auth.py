@@ -44,6 +44,15 @@ Agent connections
     sweeper's cadence) closes any whose credential was revoked or expired
     out of band (CLI, admin removal) or whose human no longer passes.
 
+Switches (``auth.email_permissions``)
+    ``agents_enabled: false`` is the kill switch: every MCP call is refused
+    before any credential is looked at, issuing is refused, and the sweeper
+    closes every live agent connection. Permissions switched off after the
+    access store was initialised resolve to the same (see
+    :func:`irc_lens.config.resolve_access`). Every refusal -- bad or missing
+    bearer, lapsed human, kill switch -- appends an ``agent.refuse`` audit row
+    (reason only, actor hashed) and is counted in ``/owner/metrics``.
+
 Plain emails and tokens are never logged.
 """
 
@@ -78,6 +87,9 @@ GUEST_KEY_PREFIX = GUEST_PRINCIPAL_PREFIX
 #: Registry-principal prefix for agent connections (t13): ``agent:<key>``.
 AGENT_PRINCIPAL_PREFIX = _REGISTRY_AGENT_PREFIX
 
+#: Audit action recorded for every refused agent call.
+REFUSE_ACTION = "agent.refuse"
+
 #: The background task closing agents whose credential or human lapsed.
 SWEEP_TASK = web.AppKey("agent_sweep_task", asyncio.Task)
 
@@ -91,8 +103,11 @@ __all__ = [
     "GUEST_KEY_PREFIX",
     "MCP_ROUTES",
     "PAGE_PATH",
+    "REFUSE_ACTION",
     "AgentPrincipal",
     "agent_nick_for",
+    "agents_off",
+    "audit_refusal",
     "agent_registry_principal",
     "authenticate_token",
     "build_agent_front",
@@ -239,6 +254,39 @@ def _no_caller():
     )
 
 
+# -- kill switch + refusal audit -------------------------------------------------
+
+
+def agents_off(app: web.Application) -> bool:
+    """Is the agent kill switch thrown? Read live from config; fails closed."""
+    config = app.get("config")
+    return config is None or not getattr(config, "agents_enabled", True)
+
+
+def _write_refusal(app: web.Application, reason: str, actor: str | None) -> None:
+    store = app.get(app_session.ACCESS_STORE)
+    if store is None:
+        return
+    with store._tx() as con:  # pylint: disable=protected-access
+        store._audit(  # pylint: disable=protected-access
+            con, actor, REFUSE_ACTION, reason
+        )
+
+
+async def audit_refusal(
+    app: web.Application, reason: str, actor: str | None = None
+) -> None:
+    """Best-effort ``agent.refuse`` audit row; the refusal stands regardless.
+
+    *actor* is an email (hashed by the store) or None; *reason* is a fixed
+    word, never request data.
+    """
+    try:
+        await asyncio.to_thread(_write_refusal, app, reason, actor)
+    except Exception:  # noqa: BLE001 - audit must never turn a refusal into a pass
+        logger.warning("agent refusal audit failed reason=%s", reason)
+
+
 # -- the human behind a credential ---------------------------------------------
 
 
@@ -300,16 +348,24 @@ async def authenticate_token(
     A live credential whose human no longer passes also closes the agent's
     connection (c39/h33).
     """
+    if agents_off(app):
+        logger.info("agent_auth=refused reason=agents-off")
+        await audit_refusal(app, "agents-off")
+        return None
     if not _TOKEN_RE.fullmatch(token or ""):
+        await audit_refusal(app, "malformed")
         return None
     try:
         outcome, value = await asyncio.to_thread(_resolve, app, token, ip)
     except Exception:  # noqa: BLE001 - unreadable store => refuse
-        logger.exception("agent_auth=refused reason=store-error")
+        logger.error("agent_auth=refused reason=store-error")
         return None
     if outcome == "ok":
         return value
     logger.info("agent_auth=refused reason=%s", outcome)
+    await audit_refusal(
+        app, outcome, _split_key(value)[0] if outcome == "human" else None
+    )
     if outcome == "human":
         await close_agent_connections(app, value)
     return None
@@ -332,9 +388,12 @@ def make_authenticator(app: web.Application):
     """
 
     async def authenticate(req) -> AgentPrincipal | None:
+        if agents_off(app):  # kill switch: refuse before reading anything
+            return await authenticate_token(app, "", ip="")
         token = _bearer(req.headers.get("authorization"))
         if token is None:
             logger.info("agent_auth=refused reason=no-bearer")
+            await audit_refusal(app, "no-bearer")
             return None
         ip = (req.headers.get("cf-connecting-ip") or "").strip()
         if not ip and req.client:
@@ -364,7 +423,8 @@ async def close_agent_connections(app: web.Application, credential_key: str) -> 
 def _still_live(app: web.Application, credential_key: str) -> bool:
     store = app.get(app_session.ACCESS_STORE)
     return (
-        store is not None
+        not agents_off(app)
+        and store is not None
         and store.active_credential_count(credential_key) > 0
         and _human_ok(app, credential_key, None)
     )
@@ -418,6 +478,12 @@ async def _requester(request: web.Request) -> tuple[str, str, str] | web.Respons
     identity still approved in the access store, or a guest identity (signed
     cookie, present, unbanned) with current consent.
     """
+    if agents_off(request.app):
+        return _deny(
+            403,
+            "agent access is switched off",
+            "an administrator has disabled personal agents",
+        )
     identity = request.get("identity")
     if identity is None or identity.tier == TIER_ANONYMOUS:
         return _deny(401, "sign-in required", "sign in to issue an agent credential")

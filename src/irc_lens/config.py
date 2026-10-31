@@ -9,7 +9,8 @@ the dispatcher renders without leaking a traceback.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+import sqlite3
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -24,6 +25,18 @@ _AUTH_MODES = ("dev", "cloudflare-access")
 #: Issuing a new credential (or revoking it) ends it sooner.
 DEFAULT_AGENT_CREDENTIAL_TTL_DAYS = 30
 DEFAULT_AGENT_CREDENTIAL_TTL_S = DEFAULT_AGENT_CREDENTIAL_TTL_DAYS * 86400
+
+
+#: The three states of ``auth.email_permissions.enabled`` (see
+#: :func:`resolve_access`). ``enforced``: the access store decides approval,
+#: roles and grants. ``legacy``: switched off and the access store was never
+#: initialised, so ``auth.allowed_emails`` is still the allowlist. ``admins-only``:
+#: switched off *after* the store was initialised -- fail closed, only
+#: approved admins pass, nobody falls back to the retired config allowlist,
+#: and no agent runs.
+ACCESS_ENFORCED = "enforced"
+ACCESS_LEGACY = "legacy"
+ACCESS_ADMINS_ONLY = "admins-only"
 
 
 @dataclass(frozen=True)
@@ -81,8 +94,16 @@ class LensConfig:
     app_signin_base_url: str | None = None
     # auth.email_permissions.enabled: approval + roles live in the access
     # store (irc_lens.access_store); auth.allowed_emails is then only the
-    # one-time admin import. Off: allowed_emails stays the allowlist.
+    # one-time admin import. Off: allowed_emails stays the allowlist -- but
+    # only until the access store has been initialised; see ACCESS_* and
+    # :func:`resolve_access` for the three switch states.
     access_enabled: bool = False
+    # auth.email_permissions.agents_enabled (default True): the agent kill
+    # switch. False refuses every MCP call and blocks all credentials.
+    agents_enabled: bool = True
+    # Set by :func:`resolve_access` (never by the YAML): the switch is off
+    # but the access store was initialised, so only approved admins pass.
+    access_admins_only: bool = False
     # auth.email_permissions.agent_credential_ttl_days, in seconds: how long
     # an issued agent credential (web/agent_auth.py) stays valid.
     agent_credential_ttl_s: int = DEFAULT_AGENT_CREDENTIAL_TTL_S
@@ -91,6 +112,13 @@ class LensConfig:
     guest_rate_password_attempts_per_15min: int = 5
     # web.mcp_path: where the remote MCP endpoint is mounted (web/mcp_http.py).
     mcp_path: str = "/mcp"
+
+    @property
+    def access_mode(self) -> str:
+        """Which switch state this config is in (one of the ``ACCESS_*``)."""
+        if not self.access_enabled:
+            return ACCESS_LEGACY
+        return ACCESS_ADMINS_ONLY if self.access_admins_only else ACCESS_ENFORCED
 
 
 def default_config_path() -> Path:
@@ -500,7 +528,9 @@ def _validate_app_signin(auth: dict) -> bool:
     return _coerce_bool(sect.get("enabled", True), "auth.app_signin.enabled")
 
 
-_EMAIL_PERMISSIONS_KEYS = frozenset({"enabled", "agent_credential_ttl_days"})
+_EMAIL_PERMISSIONS_KEYS = frozenset(
+    {"enabled", "agent_credential_ttl_days", "agents_enabled"}
+)
 
 
 def _email_permissions_section(auth: dict) -> dict:
@@ -515,6 +545,63 @@ def _validate_email_permissions(auth: dict) -> bool:
     """auth.email_permissions.enabled (default False)."""
     sect = _email_permissions_section(auth)
     return _coerce_bool(sect.get("enabled", False), "auth.email_permissions.enabled")
+
+
+def _validate_agents_enabled(auth: dict) -> bool:
+    """auth.email_permissions.agents_enabled (default True): the kill switch."""
+    sect = _email_permissions_section(auth)
+    return _coerce_bool(
+        sect.get("agents_enabled", True), "auth.email_permissions.agents_enabled"
+    )
+
+
+def _access_store_initialised(path: str) -> bool:
+    """Has the access store ever been initialised at *path*?
+
+    True when the one-time admin import ledger holds a row. A file that
+    exists but cannot be read counts as initialised (fail closed); a missing
+    file, or a database with no access tables or an empty ledger, does not.
+    Opens read-only: it never creates or alters anything.
+    """
+    p = Path(path)
+    if not p.exists():
+        return False
+    try:
+        con = sqlite3.connect(f"{p.resolve().as_uri()}?mode=ro", uri=True, timeout=30)
+        try:
+            tables = con.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='admin_imports'"
+            ).fetchone()
+            if tables is None:
+                return False
+            return con.execute("SELECT COUNT(*) FROM admin_imports").fetchone()[0] > 0
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return True
+
+
+def resolve_access(config: LensConfig) -> LensConfig:
+    """Apply the fail-closed switch rules; call once, at app start.
+
+    * ``enabled: true`` -- enforced, unchanged.
+    * ``enabled: false`` and the access store never initialised -- legacy:
+      ``auth.allowed_emails`` stays the allowlist, unchanged.
+    * ``enabled: false`` but the store *was* initialised -- admins-only:
+      the store keeps deciding, but only approved admins pass (a non-admin
+      approved user is refused the mesh, not given all of it), the retired
+      config allowlist is never consulted, and agents are off.
+    """
+    if config.access_enabled:
+        return config
+    # load_config always fills guest_store_path; a hand-built config without
+    # one never touches the operator's default store.
+    path = config.guest_store_path
+    if not path or not _access_store_initialised(path):
+        return config
+    return replace(
+        config, access_enabled=True, access_admins_only=True, agents_enabled=False
+    )
 
 
 def _agent_credential_ttl_s(auth: dict) -> int:
@@ -803,6 +890,7 @@ def load_config(path: Path) -> LensConfig:
         app_signin_enabled=app_signin_enabled,
         app_signin_base_url=app_signin_base_url,
         access_enabled=access_enabled,
+        agents_enabled=_validate_agents_enabled(auth),
         agent_credential_ttl_s=_agent_credential_ttl_s(auth),
         mcp_path=_validate_mcp_path(raw),
         **guest_fields,

@@ -16,7 +16,7 @@ from pathlib import Path
 from aiohttp import web
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
-from irc_lens.config import LensConfig
+from irc_lens.config import LensConfig, resolve_access
 from irc_lens.web import (
     admin,
     agent_auth,
@@ -224,6 +224,9 @@ def make_app(
     sandbox_session_factory: SessionFactory | None = None,
     ban_sweep_interval_s: float = bans.DEFAULT_SWEEP_INTERVAL_S,
 ) -> web.Application:
+    # Fail closed: permissions switched off *after* the access store was
+    # initialised means admins-only, not the retired config allowlist.
+    config = resolve_access(config)
     if config.auth_mode == "dev":
         middleware = _dev_identity_middleware(config)
     elif config.auth_mode == "cloudflare-access":

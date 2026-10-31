@@ -90,7 +90,7 @@ request. Handlers see the same contract as in CF mode.
 
 Every authenticated request emits one structured line on stderr:
 
-    auth=ok principal=<email-or-common-name> nick=<derived> method=<verb> path=<path>
+    auth=ok who=<12-hex-char hash of the principal> nick=<derived> method=<verb> path=<path>
 
 Auth denials log:
 
@@ -98,6 +98,25 @@ Auth denials log:
 
 When `--log-json` is passed, the same data goes through the
 `_JsonLineFormatter` and lands as one JSON object per line.
+
+## Permission switches (fail closed)
+
+`auth.email_permissions.enabled` has three effective states, resolved once at
+start (`irc_lens.config.resolve_access`):
+
+| `enabled` | access store | state | who passes |
+|---|---|---|---|
+| `true` | any | enforced | approved users, by role and grant |
+| `false` | never initialised (no admin import yet) | legacy | `auth.allowed_emails` |
+| `false` | initialised earlier | admins-only | approved admins only; no fallback to `allowed_emails`; agents off |
+
+An unreadable access store counts as initialised. `auth.email_permissions.agents_enabled: false`
+is the agent kill switch: every MCP call is refused before its credential is
+read, `/agent-credential` returns 403, and live agent connections are closed
+on the next sweep. Refused agent calls append an `agent.refuse` audit row
+(reason only; the actor is hashed). `GET /owner/metrics` adds an `access`
+object of counts only: `grant_changes`, `credential_events`, `access_denials`,
+`agent_refusals`. Service logs carry no email address.
 
 ## Service tokens
 
