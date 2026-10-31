@@ -38,16 +38,14 @@ from aiohttp import web
 
 from irc_lens import metrics
 from irc_lens.commands import (
-    DELETE_COMMAND,
     DELETE_PAGE,
     SANDBOX_COMMAND,
     CommandType,
     ParsedCommand,
-    allowed_in_sandbox,
     parse_command,
 )
 from irc_lens.session import LensConnectionLost
-from irc_lens.web import app_session
+from irc_lens.web import app_session, input_gate
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import client_ip
 from irc_lens.web.events import format_sse
@@ -737,12 +735,8 @@ async def post_input(request: web.Request) -> web.Response:
         await session.execute(parsed)
     except LensConnectionLost as exc:
         return _connection_lost(str(exc))
-    identity: Identity = request["identity"]
-    if identity.tier == TIER_GUEST and parsed.type == CommandType.CHAT:
-        # The export task reads these back for the guest's data export.
-        request.app["guest_store"].record_input(
-            identity.principal, kind="message", payload=text
-        )
+    # The input log (shared gate): the export task reads these back.
+    input_gate.record(request.app, _input_actor(request), parsed, text)
     return web.Response(status=204)
 
 
@@ -755,10 +749,16 @@ def _touch(request: web.Request) -> None:
         request.app["registry"].touch(identity.principal, backend)
 
 
-#: Rate-limit bucket / window for guest chat input (config:
-#: ``guest_mode.rate_limits.messages_per_min``).
-_MESSAGE_RATE_KIND = "message"
-_MESSAGE_RATE_WINDOW_S = 60
+def _input_actor(request: web.Request) -> input_gate.InputActor:
+    """The verified sender of this ``POST /input``, for the shared gate."""
+    identity: Identity = request["identity"]
+    _, backend = _backend_for(request)
+    return input_gate.InputActor(
+        tier=identity.tier,
+        email=identity.principal,
+        backend=backend,
+        ip=client_ip(request),
+    )
 
 
 def _is_sandbox_enter(request: web.Request, parsed: ParsedCommand, text: str) -> bool:
@@ -776,55 +776,30 @@ def _is_sandbox_enter(request: web.Request, parsed: ParsedCommand, text: str) ->
 def _sandbox_policy(
     request: web.Request, text: str, parsed: ParsedCommand
 ) -> web.Response | None:
-    """Server-side guest policy for ``POST /input`` (approved deviation d4).
+    """Server-side input policy for ``POST /input`` (approved deviation d4).
 
-    Applies to sessions the VERIFIED tier routed to the sandbox:
-
-    * (b) guests only: per-guest message rate limit
-      (``guest_rate_messages_per_min``) -> 429. Counted per guest email and
-      per IP over a 60 s window; every non-empty input counts, refused
-      commands included, so probing cannot be free.
-    * (a) allowlist: only commands that work in the sandbox
-      (:data:`irc_lens.commands.SANDBOX_ALLOWED`) are run; anything else is
-      refused with 403 before it can reach IRC.
+    The policy itself is :func:`irc_lens.web.input_gate.check` -- the one
+    gate the personal agent's sends go through too (o15): the ``/delete``
+    redirect, the per-guest rate limit (429) and the sandbox allowlist
+    (403). This adapter only renders its refusal as the web console's
+    ``{error, hint}`` responses.
     """
-    identity: Identity = request["identity"]
     if _is_sandbox_enter(request, parsed, text):
         return None
-    _, backend = _backend_for(request)
-    if backend != BACKEND_SANDBOX:
+    refusal = input_gate.check(request.app, _input_actor(request), parsed, text)
+    if refusal is None:
         return None
-    if identity.tier == TIER_GUEST and text.strip().lower() == DELETE_COMMAND:
+    if refusal.reason == input_gate.REASON_DELETE:
         # Deletion is a page (confirmed by an emailed code), not an IRC
         # command: send the guest there instead of "Not in guest view".
         return web.Response(status=204, headers={"HX-Redirect": DELETE_PAGE})
-    if identity.tier == TIER_GUEST and _message_rate_limited(request, identity):
-        metrics.get_metrics().rate_limited()
+    if refusal.reason == input_gate.REASON_RATE:
         return web.json_response(
-            {"error": "Slow down", "hint": "Too many messages"},
-            status=429,
-            headers={"Retry-After": str(_MESSAGE_RATE_WINDOW_S)},
+            {"error": refusal.error, "hint": refusal.hint},
+            status=refusal.status,
+            headers=refusal.headers,
         )
-    if not allowed_in_sandbox(parsed, preview=identity.tier != TIER_GUEST):
-        return _json_error(403, "Not in guest view", "Try /help")
-    return None
-
-
-def _message_rate_limited(request: web.Request, identity: Identity) -> bool:
-    """Check per-email and per-IP buckets, then count this message."""
-    store = request.app["guest_store"]
-    limit = request.app["config"].guest_rate_messages_per_min
-    keys = (f"e:{identity.principal}", f"i:{client_ip(request)}")
-    limited = any(
-        store.rate_limited(
-            _MESSAGE_RATE_KIND, k, limit=limit, window=_MESSAGE_RATE_WINDOW_S
-        )
-        for k in keys
-    )
-    if not limited:
-        for k in keys:
-            store.record_attempt(_MESSAGE_RATE_KIND, k)
-    return limited
+    return _json_error(refusal.status, refusal.error, refusal.hint)
 
 
 async def post_upload(request: web.Request) -> web.Response:
