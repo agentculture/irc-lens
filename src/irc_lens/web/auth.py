@@ -320,6 +320,11 @@ def _authorize_principal(
         ))
     role = ""
     if is_email and approved_user is not None:
+        # The access store keys people by their lowercased address; key the
+        # identity (and so its registry sessions) the same way, so lookups
+        # by address -- e.g. a personal agent finding its human's session --
+        # are one exact match.
+        principal = principal.strip().lower()
         user = approved_user(principal)
         if user is None:
             raise _AuthDenied(_http_error(

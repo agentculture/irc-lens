@@ -400,6 +400,29 @@ async def test_member_console_dm_to_anyone_else_never_reaches_irc(env: Env) -> N
     assert not any(ln.startswith("PRIVMSG") for ln in sent)
 
 
+async def test_owner_is_found_when_the_access_jwt_email_has_capitals(
+    env: Env,
+) -> None:
+    # The owner lookup is one registry peek on the normalised address
+    # (finding 10), so a mixed-case Access email must key the human's
+    # session by that same normalised address.
+    shouty = env.jwt(MEMBER.upper())
+    await env.human_online(shouty)
+    token = await env.issue(shouty)
+    await env.ok(token, "whoami")
+    human = next(
+        conn
+        for (principal, backend), conn in zip(
+            env.registry.keys(), env.registry.values()
+        )
+        if backend == BACKEND_MESH and principal.casefold() == MEMBER
+    )
+    await human.send_raw(f"PRIVMSG {MEMBER_AGENT} :caps")
+    await settle()
+    got = (await env.ok(token, "read"))["lines"]
+    assert [(ln["text"], ln["owner"]) for ln in got] == [("caps", True)]
+
+
 async def test_owner_is_lens_state_not_nick_text(env: Env) -> None:
     """A namesake (same derived nick) signed in through the lens, or a raw
     client holding the human's nick while the human is offline, is never the
