@@ -1,0 +1,49 @@
+{
+  "plan_slug": "email-keyed-permissions-one-sponsored-agent",
+  "schema_version": 2,
+  "created": "2026-10-31T06:39:10Z",
+  "updated": "2026-10-31T07:08:53Z",
+  "deviations": [
+    {
+      "id": "d1",
+      "what": "t11 also switches sign-in (web/entry.py x3), set-password (web/setpw.py) and the guests CLI (cli/_commands/guests.py) from the config allowlist to the access store, and wires t7's install_access into make_app",
+      "task_ref": "t11",
+      "reason": "t7 was scoped to four files, so after its merge an invited (store-only) user would still be treated as a guest at sign-in and could not set a password, and install_access was never called at startup; no task covered it",
+      "affects": [
+        "t7"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 1
+    },
+    {
+      "id": "d2",
+      "what": "The main agent wires Session.set_access(store, email) into the session registry (web/sessions.py get_or_open) for mesh sessions when access is enabled, as an integration commit before wave 4",
+      "task_ref": "t9",
+      "reason": "t9 built enforcement that activates only via set_access, and no task before t14 owned the registry; as merged, non-admin mesh sessions were unrestricted",
+      "affects": [
+        "t13",
+        "t14"
+      ],
+      "origin": "llm",
+      "status": "approved",
+      "classification": "needs-follow-up",
+      "seq": 2
+    },
+    {
+      "id": "d3",
+      "what": "t16 is assigned to a native sonnet subagent instead of colleague",
+      "task_ref": "t16",
+      "reason": "colleague finished 0 of 2 tasks this run (t3, t8 both needed native finishers)",
+      "affects": [],
+      "origin": "llm",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 3
+    }
+  ],
+  "evidence": [],
+  "deltas": [],
+  "supersessions": []
+}
