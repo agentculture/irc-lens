@@ -131,6 +131,39 @@ def sandbox_nick_for(config, identity: Identity) -> str:
     return f"{SANDBOX_NICK_PREFIX}{APPROVED_SANDBOX_INFIX}{suffix}"
 
 
+_ERR_ADMIN_REQUIRED = "admin sign-in required"
+
+
+def admin_only_denial(
+    identity: Identity | None, *, access_enabled: bool
+) -> web.Response | None:
+    """The single admin-only gate; ``None`` means allowed.
+
+    With email permissions on, only ``identity.is_admin`` passes: a non-admin
+    approved user (and, later, any agent identity) gets 403, guests and
+    anonymous get the standard 401. With them off, the legacy rule stands
+    (any approved identity), so existing deployments are unchanged.
+    """
+    if identity is None or not identity.is_approved:
+        return _json_error(
+            401, _ERR_APPROVED_REQUIRED, "sign in through /login to reach the real mesh"
+        )
+    if access_enabled and not identity.is_admin:
+        return _json_error(
+            403, _ERR_ADMIN_REQUIRED, "this action is limited to administrators"
+        )
+    return None
+
+
+def _admin_only(request: web.Request) -> web.Response | None:
+    app = getattr(request, "app", None)
+    config = app["config"] if app is not None else None
+    return admin_only_denial(
+        request.get("identity"),
+        access_enabled=bool(getattr(config, "access_enabled", False)),
+    )
+
+
 def _backend_for(request: web.Request) -> tuple[Identity, str]:
     """Pick (identity-for-registry, backend) from the VERIFIED tier only.
 
@@ -142,7 +175,10 @@ def _backend_for(request: web.Request) -> tuple[Identity, str]:
     config = request.app["config"]
     if identity.is_approved:
         toggled = request.app.get("sandbox_toggle", ())
-        if config.guest_enabled and identity.principal in toggled:
+        # With email permissions on, only admins may sit in the sandbox view;
+        # a member always gets the mesh, whatever a stale toggle says.
+        may_toggle = identity.is_admin if config.access_enabled else True
+        if may_toggle and config.guest_enabled and identity.principal in toggled:
             sandbox_identity = identity._replace(
                 nick=sandbox_nick_for(config, identity)
             )
@@ -314,10 +350,9 @@ async def post_sandbox_leave(request: web.Request) -> web.Response:  # NOSONAR S
 
 def _set_sandbox_toggle(request: web.Request, *, on: bool) -> web.Response:  # NOSONAR
     identity: Identity = request["identity"]
-    if not identity.is_approved:
-        return _json_error(
-            401, _ERR_APPROVED_REQUIRED, "sandbox toggle is for approved users"
-        )
+    denied = _admin_only(request)
+    if denied is not None:
+        return denied
     toggled: set[str] = request.app["sandbox_toggle"]
     if on:
         toggled.add(identity.principal)
@@ -998,6 +1033,10 @@ async def get_residents(request: web.Request) -> web.Response:
     Touches no ``Session`` — this page reads culture's HTTP surface,
     not the AgentIRC connection.
     """
+    if request.app["config"].access_enabled:
+        denied = _admin_only(request)
+        if denied is not None:
+            return denied
     config = request.app["config"]
     # The resolver reads the overview port file — a blocking read that
     # stays off the event loop like every other file read in this app
@@ -1040,15 +1079,9 @@ async def get_owner_metrics(request: web.Request) -> web.Response:  # NOSONAR S7
     middleware already 401s anonymous requests; the tier check here also
     refuses a ``guest`` identity with the same standard denial.
     """
-    identity = request.get("identity")
-    if identity is None or not identity.is_approved:
-        return web.json_response(
-            {
-                "error": _ERR_APPROVED_REQUIRED,
-                "hint": "sign in through /login to reach the real mesh",
-            },
-            status=401,
-        )
+    denied = _admin_only(request)
+    if denied is not None:
+        return denied
     return web.json_response(
         {
             "counters": metrics.get_metrics().snapshot(),
