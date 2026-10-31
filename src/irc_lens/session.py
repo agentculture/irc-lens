@@ -35,7 +35,6 @@ from irc_lens.commands import (
     PaletteEntry,
     ParsedCommand,
     help_for,
-    is_admin_only,
     palette_for,
 )
 from irc_lens.irc import IRCTransport, Message, MessageBuffer
@@ -803,7 +802,11 @@ class Session:
         """
         async with self._get_exec_lock():
             self._enforce_revocations()
-            if self.access_enforced and is_admin_only(parsed) and not self.is_access_admin():
+            if (
+                self.access_enforced
+                and access.is_admin_only(parsed)
+                and not self.is_access_admin()
+            ):
                 self._publish_error(f"/{parsed.type.name.lower()}: admins only")
                 return
             handler = self._exec_dispatch.get(parsed.type, self._exec_unsupported)

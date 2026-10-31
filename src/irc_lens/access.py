@@ -28,7 +28,22 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
+from irc_lens.commands import CommandType, ParsedCommand
+
 CHANNEL_KIND = "channel"
+
+#: Command types that change channel/room state or the shared identity on the
+#: mesh. With email permissions on, only an approved admin may run them
+#: (a non-admin is refused before any IRC line is sent). Kept here, not in
+#: the cited ``commands`` module, so that citation stays faithful.
+ADMIN_ONLY = frozenset(
+    {
+        CommandType.TOPIC,
+        CommandType.KICK,
+        CommandType.INVITE,
+        CommandType.ICON,
+    }
+)
 DENY_ACTION = "access.deny"
 
 _LIST_LEVELS = frozenset({"read", "write", "ask"})
@@ -101,6 +116,11 @@ def can_write(
     return _check(store, human, channel, "write", audit)
 
 
+def is_admin_only(parsed: ParsedCommand) -> bool:
+    """True iff *parsed* is a channel-changing command reserved for admins."""
+    return parsed.type in ADMIN_ONLY
+
+
 def is_admin(human: str | None, *, store: Any) -> bool:
     """True for an approved admin; fails closed. Never audits (a role probe)."""
     try:
@@ -143,6 +163,9 @@ agent_can_read = _agent_check("read")
 agent_can_write = _agent_check("write")
 
 __all__ = [
+    "ADMIN_ONLY",
+    "is_admin_only",
+    "record_denial",
     "can_list",
     "can_read",
     "can_write",
