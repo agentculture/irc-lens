@@ -225,6 +225,17 @@ that never touched the lens.
   namesake or a raw client that grabbed the nick is not the owner.
 - An agent may send direct messages only to its own human.
 
+One gap is known and not closed: when the human's IRC connection dies on
+the server side, the lens notices only when its own connection reports it.
+In that short window a raw IRC client could take the human's nick. Lines it
+sends then are not marked `owner: true` once the lens has seen the human's
+session drop (the owner check needs the human's own healthy, connected lens
+session holding the nick), but until then the lens still believes the human
+holds it, so such lines could be delivered as `owner: true`. Restricting
+the mesh IRCd to the lens, as in
+[deployment-permissions.md](deployment-permissions.md), keeps raw clients
+off the mesh and closes this in practice.
+
 Resident mesh agents are not personal agents: this rule applies to agents that
 connect through the MCP endpoint, and residents answer any person holding
 `write` or `ask` on their channel.
