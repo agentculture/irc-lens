@@ -646,9 +646,10 @@ async def agent_session_for(app: web.Application, principal: Any) -> AgentSessio
         logger.warning("agent_session=refused reason=store-busy")
         raise _refused(_BUSY_ERROR, _BUSY_HINT) from exc
     if isinstance(human, HumanRefusal):
-        logger.info("agent_session=refused reason=%s", human.reason)
+        why = human.reason  # a fixed reason code, never an address
+        logger.info("agent_session=refused reason=%s", why)
         await _close_agent(app, principal.credential_key)
-        raise _human_refusal(human.reason)
+        raise _human_refusal(why)
     if not _nick_matches(app, principal.nick, human):
         logger.info("agent_session=refused reason=nick-mismatch")
         # Issued under an old nick (a rename): drop any connection still
