@@ -10,13 +10,14 @@ Nothing is ever derived from the email address.
 from __future__ import annotations
 
 import sqlite3
+import threading
 from contextlib import closing
 from pathlib import Path
 
 import pytest
 
 from irc_lens import nickname
-from irc_lens.access_store import AccessStore, NicknameError
+from irc_lens.access_store import REFUSAL_CHOSEN, AccessStore, NicknameError
 from irc_lens.guest_store import email_hash
 from irc_lens.web import entry
 
@@ -150,3 +151,199 @@ def test_setting_the_same_nickname_is_not_audited_again(store: AccessStore) -> N
     store.set_nickname(ALICE, "comet", actor=ALICE)
     store.set_nickname(ALICE, "comet", actor=ALICE)
     assert [r[2] for r in store.audit_rows()].count("nickname.set") == 1
+
+
+# -- review of PR #86 -----------------------------------------------------------
+
+CAROL = "carol@example.net"
+
+
+def test_finding1_renamed_away_nickname_stays_reserved(store: AccessStore) -> None:
+    store.set_user(CAROL, role="member", state="approved", actor=None)
+    store.set_nickname(ALICE, "alice", actor=ALICE)
+    store.set_nickname(ALICE, "bob", actor=ADMIN)
+    assert _reason(store, CAROL, "alice") == "taken"
+    assert store.get_user(CAROL)["nickname"] is None
+
+
+def test_finding1_the_same_user_may_take_an_old_nickname_back(
+    store: AccessStore,
+) -> None:
+    store.set_nickname(ALICE, "alice", actor=ALICE)
+    store.set_nickname(ALICE, "bob", actor=ADMIN)
+    assert store.set_nickname(ALICE, "Alice", actor=ADMIN) == "alice"
+
+
+def test_finding1_rename_revokes_the_agent_credential(store: AccessStore) -> None:
+    store.set_nickname(ALICE, "alice", actor=ALICE)
+    token = store.issue_agent_credential(ALICE, "srv-pa_-alice", ttl=3600, actor=ALICE)
+    store.set_nickname(ALICE, "bob", actor=ADMIN)
+    assert store.verify_agent_credential(token) is None
+
+
+def test_finding1_first_choice_keeps_the_agent_credential(
+    store: AccessStore,
+) -> None:
+    token = store.issue_agent_credential(ALICE, "srv-pa_-x", ttl=3600, actor=ALICE)
+    store.set_nickname(ALICE, "alice", actor=ALICE)
+    assert store.verify_agent_credential(token) is not None
+
+
+def test_finding1_reservation_survives_a_store_reopen(store: AccessStore) -> None:
+    store.set_user(CAROL, role="member", state="approved", actor=None)
+    store.set_nickname(ALICE, "alice", actor=ALICE)
+    store.set_nickname(ALICE, "bob", actor=ADMIN)
+    reopened = AccessStore(store.path)
+    with pytest.raises(NicknameError) as info:
+        reopened.set_nickname(CAROL, "alice", actor=ADMIN)
+    assert info.value.reason == "taken"
+
+
+def test_finding1_migration_reserves_nicknames_already_held(tmp_path: Path) -> None:
+    db = tmp_path / "pre.db"
+    with closing(sqlite3.connect(db)) as con, con:
+        con.execute(
+            "CREATE TABLE users (email TEXT PRIMARY KEY, role TEXT NOT NULL, "
+            "state TEXT NOT NULL, nickname TEXT)"
+        )
+        con.execute(
+            "INSERT INTO users VALUES (?, 'member', 'approved', 'comet')", (ALICE,)
+        )
+        con.execute("INSERT INTO users VALUES (?, 'member', 'approved', NULL)", (BOB,))
+    store = AccessStore(db)
+    store.set_nickname(ALICE, "nova", actor=ADMIN)
+    assert _reason(store, BOB, "comet") == "taken"
+
+
+def test_finding2_concurrent_claims_store_exactly_one(store: AccessStore) -> None:
+    barrier = threading.Barrier(2)
+    outcomes: dict[str, str] = {}
+
+    def claim(raw: str) -> None:
+        barrier.wait()
+        try:
+            outcomes[raw] = store.claim_nickname(ALICE, raw, actor=ALICE)
+        except NicknameError as exc:
+            outcomes[raw] = exc.reason
+
+    threads = [threading.Thread(target=claim, args=(n,)) for n in ("comet", "nova")]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sorted(outcomes.values()).count(REFUSAL_CHOSEN) == 1
+    winner = next(n for n, why in outcomes.items() if why != REFUSAL_CHOSEN)
+    assert store.get_user(ALICE)["nickname"] == winner
+    actions = [r[2] for r in store.audit_rows() if r[2].startswith("nickname.")]
+    assert actions == ["nickname.set"]
+
+
+def test_finding2_claim_never_renames(store: AccessStore) -> None:
+    store.set_nickname(ALICE, "comet", actor=ADMIN)
+    with pytest.raises(NicknameError) as info:
+        store.claim_nickname(ALICE, "nova", actor=ALICE)
+    assert info.value.reason == REFUSAL_CHOSEN
+    assert store.get_user(ALICE)["nickname"] == "comet"
+
+
+def test_finding2_claim_applies_the_same_rules(store: AccessStore) -> None:
+    store.set_nickname(BOB, "comet", actor=ADMIN)
+    with pytest.raises(NicknameError) as info:
+        store.claim_nickname(ALICE, "Comet", actor=ALICE)
+    assert info.value.reason == "taken"
+    assert store.claim_nickname(ALICE, "Nova", actor=ALICE) == "nova"
+
+
+def test_finding5_add_with_a_taken_nickname_adds_nobody(store: AccessStore) -> None:
+    store.set_nickname(ALICE, "comet", actor=ADMIN)
+    with pytest.raises(NicknameError) as info:
+        store.set_user_keeping_admin(
+            CAROL, role="member", state="approved", actor=None, nickname="comet"
+        )
+    assert info.value.reason == "taken"
+    assert store.get_user(CAROL) is None
+
+
+def test_finding5_add_with_a_nickname_is_one_write(store: AccessStore) -> None:
+    store.set_user_keeping_admin(
+        CAROL, role="admin", state="approved", actor=None, nickname="Nova"
+    )
+    assert store.get_user(CAROL) == {
+        "email": CAROL,
+        "role": "admin",
+        "state": "approved",
+        "nickname": "nova",
+    }
+
+
+def test_finding5_add_with_a_reserved_nickname_adds_nobody(
+    store: AccessStore,
+) -> None:
+    with pytest.raises(NicknameError) as info:
+        store.set_user_keeping_admin(
+            CAROL, role="member", state="approved", actor=None, nickname="pa_x"
+        )
+    assert info.value.reason == "reserved"
+    assert store.get_user(CAROL) is None
+
+
+class _Interleave:
+    """A connection proxy: right after its first ``PRAGMA table_info``, a
+    second store migrates the same file (another process starting up)."""
+
+    def __init__(self, con: sqlite3.Connection, other) -> None:
+        self._con = con
+        self._other = other
+
+    def execute(self, sql: str, *args):
+        result = self._con.execute(sql, *args)
+        if sql.startswith("PRAGMA table_info") and self._other is not None:
+            rows = list(result)
+            other, self._other = self._other, None
+            other()
+            return iter(rows)
+        return result
+
+    def __getattr__(self, name: str):
+        return getattr(self._con, name)
+
+
+def test_finding7_two_stores_migrate_one_old_file_concurrently(
+    tmp_path: Path, monkeypatch
+) -> None:
+    db = tmp_path / "old.db"
+    with closing(sqlite3.connect(db)) as con, con:
+        con.execute(
+            "CREATE TABLE users (email TEXT PRIMARY KEY, role TEXT NOT NULL, "
+            "state TEXT NOT NULL)"
+        )
+    real_connect = AccessStore._connect
+    errors: list[BaseException] = []
+    second: list[threading.Thread] = []
+
+    def other_process() -> None:
+        def run() -> None:
+            try:
+                AccessStore(db)
+            except BaseException as exc:  # noqa: BLE001 - asserted below
+                errors.append(exc)
+
+        thread = threading.Thread(target=run)
+        thread.start()
+        second.append(thread)
+        thread.join(timeout=1.0)  # finishes now unless the first holds a lock
+
+    hooks = [other_process]
+
+    def connect(self, timeout: float = 30.0):
+        con = real_connect(self, timeout)
+        return _Interleave(con, hooks.pop() if hooks else None)
+
+    monkeypatch.setattr(AccessStore, "_connect", connect)
+    AccessStore(db)
+    for thread in second:
+        thread.join()
+    assert errors == []
+    with closing(sqlite3.connect(db)) as con:
+        cols = {row[1] for row in con.execute("PRAGMA table_info(users)")}
+    assert "nickname" in cols
