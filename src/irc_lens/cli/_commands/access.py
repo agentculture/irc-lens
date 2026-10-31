@@ -174,10 +174,8 @@ def cmd_users_add(args: argparse.Namespace) -> int:
     nick = _check_nickname(args, args.nick) if args.nick is not None else None
     store = _open_store(args)
     _set_user(store, email, args.role, STATE_APPROVED, nickname=nick)
-    if nick is not None:
-        print(f"added {email} as {args.role}, nickname {nick}")
-        return 0
-    print(f"added {email} as {args.role}")
+    suffix = f", nickname {nick}" if nick is not None else ""
+    print(f"added {email} as {args.role}{suffix}")
     return 0
 
 

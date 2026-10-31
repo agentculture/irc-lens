@@ -88,12 +88,16 @@ _REVOKE_LIVE_SQL = "UPDATE agent_credentials SET revoked=1 WHERE email=? AND rev
 def _immediate(con: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
     """One ``BEGIN IMMEDIATE`` transaction on *con*: commit, or roll back."""
     con.execute("BEGIN IMMEDIATE")
+    committed = False
     try:
         yield con
-    except BaseException:
-        con.execute("ROLLBACK")
-        raise
-    con.execute("COMMIT")
+        con.execute("COMMIT")
+        committed = True
+    finally:
+        # Any exit without a COMMIT (an exception, or the generator closed
+        # early) rolls back, so a transaction is never left open.
+        if not committed:
+            con.execute("ROLLBACK")
 
 
 def _migrate(con: sqlite3.Connection) -> None:

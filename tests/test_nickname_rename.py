@@ -225,8 +225,10 @@ def _principal() -> agent_auth.AgentPrincipal:
 
 
 async def _refusal(env: Env, app=None) -> str:
+    target_app = app or env.app
+    principal = _principal()
     with pytest.raises(AfiError) as info:
-        await agent_sessions.agent_session_for(app or env.app, _principal())
+        await agent_sessions.agent_session_for(target_app, principal)
     return f"{info.value.message} {info.value.remediation}"
 
 
