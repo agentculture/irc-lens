@@ -68,7 +68,7 @@ from typing import Any
 from aiohttp import web
 
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
-from irc_lens.agent_nick import agent_nick_for, is_agent_nick
+from irc_lens.agent_nick import agent_nick_for, is_agent_nick, server_name_for
 from irc_lens.commands import CommandType, ParsedCommand
 from irc_lens.session import LensConnectionLost
 from irc_lens.web import app_session, input_gate
@@ -564,6 +564,16 @@ async def _close_agent(app: web.Application, credential_key: str) -> None:
     await close_agent_connections(app, credential_key)
 
 
+def _nick_matches(app: web.Application, nick: str, human: HumanState) -> bool:
+    """Is *nick* the agent nick of *human*, on the configured server name?"""
+    server = server_name_for(app["config"], guest=human.backend == BACKEND_SANDBOX)
+    try:
+        expected = agent_nick_for(human.nick, server)
+    except ValueError:
+        return False
+    return is_agent_nick(nick, server) and nick == expected
+
+
 async def agent_session_for(app: web.Application, principal: Any) -> AgentSession:
     """The (lazily opened) lens-held session of the authenticated *principal*.
 
@@ -572,11 +582,7 @@ async def agent_session_for(app: web.Application, principal: Any) -> AgentSessio
     credential row and the human's current state only (o11).
     """
     human = await asyncio.to_thread(human_state, app, principal)
-    if (
-        human is None
-        or not is_agent_nick(principal.nick)
-        or principal.nick != agent_nick_for(human.nick)
-    ):
+    if human is None or not _nick_matches(app, principal.nick, human):
         logger.info("agent_session=refused reason=nick-mismatch")
         raise _refused(
             "this credential's agent nick no longer matches its human",

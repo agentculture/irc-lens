@@ -72,9 +72,9 @@ _TOKEN_RE = re.compile(r'data-testid="agent-token"[^>]*>([A-Za-z0-9_-]+)<')
 _MARKER_RE = re.compile(r"XMARK-[a-z0-9]+-\d+")
 
 NICK = {e: derive_nick("testsrv", e) for e in (ADMIN, A, B)}
-AGENT = {e: agent_nick_for(n) for e, n in NICK.items()}
+AGENT = {e: agent_nick_for(n, "testsrv") for e, n in NICK.items()}
 G_NICK = "sbx-gus"
-G_AGENT = agent_nick_for(G_NICK)
+G_AGENT = agent_nick_for(G_NICK, "sbx")
 
 
 class Env:

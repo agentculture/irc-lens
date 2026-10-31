@@ -58,8 +58,8 @@ MCP_PATH = "/mcp"
 _TOKEN_RE = re.compile(r'data-testid="agent-token"[^>]*>([A-Za-z0-9_-]+)<')
 
 MEMBER_NICK = derive_nick("testsrv", MEMBER)
-MEMBER_AGENT = agent_nick_for(MEMBER_NICK)
-GUEST_AGENT = agent_nick_for(GUEST_NICK)
+MEMBER_AGENT = agent_nick_for(MEMBER_NICK, "testsrv")
+GUEST_AGENT = agent_nick_for(GUEST_NICK, "sbx")
 
 
 class RawClient:
@@ -231,10 +231,11 @@ async def env(
     "email", ["pa_-bob@example.org", "pa-bob@example.org", "pa_bob@example.org"]
 )
 def test_no_human_nick_is_in_the_agent_namespace(email: str) -> None:
-    assert not is_agent_nick(derive_nick("testsrv", email))
-    assert not is_agent_nick("sbx-pa_bob")  # a guest nickname keeps only [a-z0-9_]
-    assert is_agent_nick(MEMBER_AGENT)
-    assert is_agent_nick(GUEST_AGENT)
+    assert not is_agent_nick(derive_nick("testsrv", email), "testsrv")
+    # A guest nickname keeps only [a-z0-9_].
+    assert not is_agent_nick("sbx-pa_bob", "sbx")
+    assert is_agent_nick(MEMBER_AGENT, "testsrv")
+    assert is_agent_nick(GUEST_AGENT, "sbx")
     assert AGENT_NICK_INFIX in MEMBER_AGENT
 
 
@@ -543,7 +544,7 @@ async def test_agents_never_run_admin_only_commands(env: Env) -> None:
     token = await env.issue(env.jwt(ADMIN))
     await env.ok(token, "join", channel="#ops")
     await env.ok(token, "send", target="#ops", text="/topic #ops pwned")
-    admin_agent = agent_nick_for(derive_nick("testsrv", ADMIN))
+    admin_agent = agent_nick_for(derive_nick("testsrv", ADMIN), "testsrv")
     sent = env.sent_by(env.mesh, admin_agent)
     assert not any(ln.startswith("TOPIC") for ln in sent)
     assert "PRIVMSG #ops :/topic #ops pwned" in sent
