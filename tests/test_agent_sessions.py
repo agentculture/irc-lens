@@ -374,6 +374,32 @@ async def test_owner_lines_are_delivered_and_marked(env: Env) -> None:
     assert all(isinstance(ln["owner"], bool) for ln in got)
 
 
+async def test_human_dm_to_own_agent_through_the_console_is_delivered(
+    env: Env,
+) -> None:
+    # Review 2, finding 1: the owner's /send to their own agent passes the
+    # session's DM check and reaches the agent as an owner DM.
+    token = await _member_agent_in_ops(env)
+    r = await env.human_input(env.jwt(MEMBER), f"/send {MEMBER_AGENT} private note")
+    assert r.status == 204, await r.text()
+    await settle()
+    got = (await env.ok(token, "read"))["lines"]
+    assert [(ln["target"], ln["text"], ln["owner"]) for ln in got] == [
+        ("DM", "private note", True)
+    ]
+
+
+async def test_member_console_dm_to_anyone_else_never_reaches_irc(env: Env) -> None:
+    await env.human_online(env.jwt(MEMBER))
+    # A mesh resident agent, another human, another person's agent.
+    for target in ("testsrv-claude", "testsrv-mallory", "testsrv-pa_-mallory"):
+        r = await env.human_input(env.jwt(MEMBER), f"/send {target} hi")
+        assert r.status == 204, await r.text()
+    await settle()
+    sent = env.sent_by(env.mesh, MEMBER_NICK)
+    assert not any(ln.startswith("PRIVMSG") for ln in sent)
+
+
 async def test_owner_is_lens_state_not_nick_text(env: Env) -> None:
     """A namesake (same derived nick) signed in through the lens, or a raw
     client holding the human's nick while the human is offline, is never the

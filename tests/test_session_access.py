@@ -177,6 +177,94 @@ def test_session_public_query_methods_guarded(store):
     assert srv.lines == []
 
 
+# --- direct messages: a member may DM only their own agent (finding 1) ----
+
+OWN_AGENT = "lens-pa_-test"
+
+
+def _make_member_with_agent(store: AccessStore) -> tuple[Session, FakeServer]:
+    """A member's session; its own agent nick comes from lens state."""
+    session = Session(host="127.0.0.1", port=6667, nick="lens-test")
+    session.set_access(store, USER, own_agent_nick=OWN_AGENT)
+    return session, FakeServer(session)
+
+
+def _privmsgs(srv: FakeServer) -> list[str]:
+    return [ln for ln in srv.lines if ln.startswith("PRIVMSG")]
+
+
+def test_member_may_dm_own_agent(store):
+    session, srv = _make_member_with_agent(store)
+    _run(session, CommandType.SEND, OWN_AGENT, text="hello agent")
+    assert _privmsgs(srv) == [f"PRIVMSG {OWN_AGENT} :hello agent"]
+
+
+def test_member_dm_to_own_agent_ignores_nick_case(store):
+    session, srv = _make_member_with_agent(store)
+    _run(session, CommandType.SEND, OWN_AGENT.upper(), text="hi")
+    assert len(_privmsgs(srv)) == 1
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "lens-bob",  # another human
+        "spark-claude",  # a mesh resident agent (may have tools: q8)
+        "lens-pa_-bob",  # someone else's personal agent
+        "lens-pa_-test-x",  # a lookalike of the own agent
+    ],
+)
+def test_member_may_not_dm_anyone_else(store, target):
+    session, srv = _make_member_with_agent(store)
+    events = _run(session, CommandType.SEND, target, text="hi")
+    assert _privmsgs(srv) == []
+    assert [e.name for e in events] == ["error"]
+
+
+def test_member_dm_refusal_is_audited(store):
+    session, _srv = _make_member_with_agent(store)
+    before = _denials(store)
+    _run(session, CommandType.SEND, "lens-bob", text="hi")
+    assert _denials(store) == before + 1
+
+
+def test_typed_agent_nick_without_lens_state_is_refused(store):
+    # No own agent nick from lens state: the typed text alone grants nothing.
+    session, srv = _make(store, USER)
+    _run(session, CommandType.SEND, OWN_AGENT, text="hi")
+    assert _privmsgs(srv) == []
+
+
+def test_member_may_who_own_agent(store):
+    session, srv = _make_member_with_agent(store)
+    _run(session, CommandType.WHO, OWN_AGENT)
+    assert f"WHO {OWN_AGENT}" in srv.lines
+
+
+def test_member_may_not_who_another_nick(store):
+    session, srv = _make_member_with_agent(store)
+    _run(session, CommandType.WHO, "lens-bob")
+    assert srv.lines == []
+
+
+def test_member_may_read_own_agent(store):
+    session, srv = _make_member_with_agent(store)
+    _run(session, CommandType.READ, OWN_AGENT)
+    assert any(ln.startswith(f"HISTORY RECENT {OWN_AGENT}") for ln in srv.lines)
+
+
+def test_member_may_not_read_another_nick(store):
+    session, srv = _make_member_with_agent(store)
+    _run(session, CommandType.READ, "lens-bob")
+    assert srv.lines == []
+
+
+def test_admin_may_dm_anyone(store):
+    session, srv = _make(store, ADMIN)
+    _run(session, CommandType.SEND, "spark-claude", text="hi")
+    assert _privmsgs(srv) == ["PRIVMSG spark-claude :hi"]
+
+
 # --- listings -----------------------------------------------------------
 
 

@@ -64,6 +64,12 @@ def _record_denial(store: Any, human: str | None, channel: str, op: str) -> None
         pass
 
 
+def record_denial(store: Any, human: str | None, target: str, op: str) -> None:
+    """Public form of the refusal audit row, for targets other than a
+    channel grant check (a direct message to a nick). Best effort."""
+    _record_denial(store, human, target, op)
+
+
 def _check(
     store: Any, human: str | None, channel: str, op: str, audit: bool = True
 ) -> bool:

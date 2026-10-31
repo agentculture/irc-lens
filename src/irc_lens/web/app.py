@@ -262,6 +262,7 @@ def make_app(
         guest_store=lambda: app.get("guest_store"),
         access_enabled=config.access_enabled,
         access_store=lambda: app.get(app_session.ACCESS_STORE),
+        server_name=config.server_name,
     )
     app["registry"] = registry
     app["config"] = config

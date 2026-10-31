@@ -319,6 +319,10 @@ class Session:
         # reads the store's current rows, so a revoked grant bites at once.
         self.access_store: Any = None
         self.access_human: str | None = None
+        # The nick of the viewer's own personal agent, derived by the
+        # registry from the verified identity and the configured server
+        # name (never from typed text). The one nick a non-admin may DM.
+        self.own_agent_nick: str | None = None
         self._bg_tasks: set[asyncio.Task[None]] = set()
 
         # Guest-mode UI context, set by the session registry / routes from
@@ -558,11 +562,18 @@ class Session:
     # Channel access (email-keyed grants; no-ops while access is off)
     # ------------------------------------------------------------------
 
-    def set_access(self, store: Any, human: str | None) -> None:
+    def set_access(
+        self, store: Any, human: str | None, *, own_agent_nick: str | None = None
+    ) -> None:
         """Enforce *human*'s grants from *store* on every channel path.
-        ``store=None`` turns enforcement off (the legacy behaviour)."""
+        ``store=None`` turns enforcement off (the legacy behaviour).
+
+        *own_agent_nick* is the human's own personal agent nick, from lens
+        state: the only nick a non-admin may message, ``/who`` or ``/read``.
+        """
         self.access_store = store
         self.access_human = human
+        self.own_agent_nick = own_agent_nick
 
     @property
     def access_enforced(self) -> bool:
@@ -577,14 +588,37 @@ class Session:
     def may(self, op: str, channel: str, *, audit: bool = True) -> bool:
         """Whether the viewer may ``list``/``read``/``write`` *channel*.
 
+        A target that is not a ``#channel`` is a nick (a direct message,
+        ``/who`` or ``/read`` of a person): see :meth:`_may_nick`.
+
         *audit=False* is for filtering listings and live lines, where a
         hidden row is not an event worth an audit entry."""
         if not self.access_enforced:
             return True
+        if not channel.startswith("#"):
+            return self._may_nick(op, channel, audit=audit)
         check = {"list": access.can_list, "read": access.can_read}.get(
             op, access.can_write
         )
         return check(self.access_human, channel, store=self.access_store, audit=audit)
+
+    def _may_nick(self, op: str, nick: str, *, audit: bool) -> bool:
+        """An admin may reach any nick; anyone else only their own agent.
+
+        The own agent's nick comes from lens state (:attr:`own_agent_nick`),
+        never from the typed target alone. Every other nick -- other humans,
+        other people's agents and the mesh's resident agents, which may have
+        tools -- stays refused (q8: granted users reach only tool-less agents,
+        in granted channels).
+        """
+        if self.is_access_admin():
+            return True
+        own = self.own_agent_nick
+        if op in ("read", "write") and own and nick.casefold() == own.casefold():
+            return True
+        if audit:
+            access.record_denial(self.access_store, self.access_human, nick, op)
+        return False
 
     def _refuse(self, channel: str) -> None:
         # Deliberately generic: never confirm whether the channel exists.
@@ -995,10 +1029,10 @@ class Session:
                     return
                 i += 2
                 continue
-            if tok.startswith("#"):
+            # A #channel, or a nick (only the viewer's own agent passes the
+            # check below for a non-admin). A stray flag is ignored.
+            if not tok.startswith("-"):
                 channel = tok
-                i += 1
-                continue
             i += 1
         if not channel:
             self._publish_error("/read: no channel — /join #x first or pass /read #x")
