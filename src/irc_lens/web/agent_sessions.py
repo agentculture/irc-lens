@@ -481,6 +481,63 @@ class AgentSession:
         return out
 
 
+async def _guest_consent_current(app: web.Application, email: str) -> bool:
+    """Has the guest consented to the *current* Terms and Privacy versions?
+
+    Same seam as the browser's consent gate (``routes._consent_current``);
+    fails closed.
+    """
+    import inspect
+
+    try:
+        from irc_lens import legal
+
+        versions = await legal.current_legal_versions(app["config"])
+        ok = legal.consent_is_current(app["guest_store"], email, versions)
+        if inspect.isawaitable(ok):
+            ok = await ok
+        return bool(ok)
+    except Exception:  # noqa: BLE001 - fail closed
+        logger.exception("agent consent check failed; refusing")
+        return False
+
+
+async def _guest_agent_gate(app: web.Application, principal: Any) -> None:
+    """Refuse (and close) a guest's agent that may not run right now.
+
+    Checked on every agent request, before any connection is (re)opened:
+
+    * the guest must hold consent for the current legal versions, so a
+      legal bump stops an existing agent until the guest re-consents;
+    * the guest's agent is present only where its human is: the human's own
+      sandbox session must be open, unless a live admin extension covers
+      the agent (o19). Without this, any tool call would lazily reopen an
+      agent the reaper had just closed with its human.
+    """
+    if not await _guest_consent_current(app, principal.email):
+        logger.info("agent_session=refused reason=consent")
+        await _close_agent(app, principal.credential_key)
+        raise _refused(
+            "your human must accept the current Terms and Privacy Policy",
+            "the guest re-consents in the app, then call the tool again",
+        )
+    registry = app["registry"]
+    if not await asyncio.to_thread(registry.guest_agent_may_run, principal.email):
+        logger.info("agent_session=refused reason=human-absent")
+        await _close_agent(app, principal.credential_key)
+        raise _refused(
+            "your human is not signed in to the sandbox",
+            "a guest's agent runs only while its human is signed in "
+            "(or an admin extension is live)",
+        )
+
+
+async def _close_agent(app: web.Application, credential_key: str) -> None:
+    from irc_lens.web.agent_auth import close_agent_connections
+
+    await close_agent_connections(app, credential_key)
+
+
 async def agent_session_for(app: web.Application, principal: Any) -> AgentSession:
     """The (lazily opened) lens-held session of the authenticated *principal*.
 
@@ -499,6 +556,8 @@ async def agent_session_for(app: web.Application, principal: Any) -> AgentSessio
             "this credential's agent nick no longer matches its human",
             "re-issue the agent credential from the app",
         )
+    if human.backend == BACKEND_SANDBOX:
+        await _guest_agent_gate(app, principal)
     holder: dict[str, AgentSession] = {}
 
     def prepare(session: Any) -> None:

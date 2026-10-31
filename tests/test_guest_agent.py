@@ -88,16 +88,53 @@ async def test_agent_never_adds_to_active_guests(env: Env) -> None:
     env.guests.record_consent(
         OTHER_GUEST, "127.0.0.2", tos_version="v1", privacy_version="v1"
     )
+    # Its human is signed off, so only a live extension lets it run.
+    env.access.set_extension(
+        OTHER_GUEST, until=int(time.time()) + 3600, set_by="system"
+    )
     other = await env.issue(env.guest(OTHER_GUEST))
     await env.ok(other, "whoami")
     assert env.registry.active_guests() == {GUEST_PRINCIPAL}
 
 
 async def test_agent_alone_holds_no_seat(env: Env) -> None:
+    """Finding 5: a guest's agent is present only where its human is. With
+    the human signed off and no extension the agent is not opened at all;
+    under a live admin extension it opens -- and still takes no seat."""
     token = await env.issue(env.guest())
+    assert "signed in" in await env.refused(token, "whoami")
+    assert not _agent_open(env)
+    assert env.registry.active_guests() == set()
+    env.access.set_extension(GUEST, until=int(time.time()) + 3600, set_by="system")
     await env.ok(token, "whoami")
     assert _agent_open(env)
     assert env.registry.active_guests() == set()
+
+
+async def test_agent_is_not_reopened_after_its_human_signs_off(env: Env) -> None:
+    """Finding 5: once the reaper closes the agent with its human, a tool
+    call must not lazily reopen it (and chat on until the next reap)."""
+    token = await _guest_with_agent(env)
+    await _reap(env)
+    assert not _human_open(env) and not _agent_open(env)
+    for verb in ("whoami", "read", "channels"):
+        assert "signed in" in await env.refused(token, verb)
+    assert "signed in" in await env.refused(token, "send", text="still here?")
+    assert not _agent_open(env)
+    # The human coming back lets the agent in again.
+    await env.human_online(env.guest())
+    await env.ok(token, "whoami")
+    assert _agent_open(env)
+
+
+async def test_open_agent_is_stopped_once_its_human_is_gone(env: Env) -> None:
+    """Finding 5: between reaps, an already open agent whose human left is
+    closed on its next call rather than kept chatting."""
+    token = await _guest_with_agent(env)
+    await env.registry.close(GUEST_PRINCIPAL, BACKEND_SANDBOX)
+    assert _agent_open(env)
+    assert "signed in" in await env.refused(token, "send", text="hello?")
+    assert not _agent_open(env)
 
 
 # -- ban (o9) ------------------------------------------------------------------------
@@ -139,6 +176,9 @@ async def test_ban_leaves_other_guests_agents_alone(env: Env) -> None:
     await _guest_with_agent(env)
     env.guests.record_consent(
         OTHER_GUEST, "127.0.0.2", tos_version="v1", privacy_version="v1"
+    )
+    env.access.set_extension(
+        OTHER_GUEST, until=int(time.time()) + 3600, set_by="system"
     )
     other = await env.issue(env.guest(OTHER_GUEST))
     await env.ok(other, "whoami")
@@ -356,6 +396,21 @@ async def test_stale_consent_is_reprompted_before_an_agent_is_issued(
     consent["ok"] = True  # re-consented through the entry flow
     await env.issue(env.guest())
     assert _credential_rows(env) == 1
+
+
+async def test_a_legal_bump_stops_an_existing_agent_until_reconsent(
+    env: Env, consent  # noqa: F811
+) -> None:
+    """Finding 5: consent is re-checked on every agent request, so a legal
+    version bump stops an agent that was connected under the old version."""
+    token = await _guest_with_agent(env)
+    consent["ok"] = False
+    assert "consent" in await env.refused(token, "whoami")
+    assert "consent" in await env.refused(token, "send", text="hi")
+    assert not _agent_open(env)
+    consent["ok"] = True
+    await env.ok(token, "whoami")
+    assert _agent_open(env)
 
 
 def test_consent_agent_migrates_an_existing_store(tmp_path) -> None:

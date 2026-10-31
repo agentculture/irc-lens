@@ -231,6 +231,14 @@ How the extension changes when a guest's agent disconnects
 - When the guest's own sandbox session is gone (signed off for idleness, or
   never opened) and no extension is live, the agent is disconnected on the
   next reap.
+- Every agent request checks the same rule before anything connects
+  (`_guest_agent_gate` in `src/irc_lens/web/agent_sessions.py`): while the
+  human is signed off and no extension is live, the call is refused and an
+  open agent connection is closed, so a tool call never reopens an agent
+  the reaper closed. The agent works again once its human signs back in.
+- The same check re-reads the guest's consent: after a Terms or Privacy
+  version bump, the agent is refused and disconnected until the guest
+  accepts the new version.
 - While an extension is live, the agent stays connected. Once the extension
   ends or is cleared, the next reap applies the normal rule.
 - For a guest, the extension is looked up under the bare email (what the

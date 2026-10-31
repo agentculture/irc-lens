@@ -413,6 +413,7 @@ async def test_three_credentials_get_three_scopes(env: Env) -> None:
     sandbox room."""
     admin_t = await env.issue(env.jwt(ADMIN))
     member_t = await env.issue(env.jwt(A))
+    await env.online(env.guest())  # a guest's agent runs only with its human
     guest_t = await env.issue(env.guest())
     assert len({admin_t, member_t, guest_t}) == 3
     # All three reach the same URL; a bad token does not.

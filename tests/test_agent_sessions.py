@@ -293,6 +293,7 @@ async def test_browser_logout_does_not_tear_the_agent_down(env: Env) -> None:
 
 
 async def test_guest_agent_joins_only_its_humans_room(env: Env) -> None:
+    await env.human_online(env.guest())  # a guest's agent runs only with its human
     token = await env.issue(env.guest())
     me = await env.ok(token, "whoami")
     assert me["nick"] == GUEST_AGENT and me["tier"] == "guest"
@@ -560,6 +561,7 @@ async def test_guest_agent_shares_the_guests_rate_limit(env: Env) -> None:
 
 
 async def test_guest_agent_gets_the_guest_allowlist(env: Env) -> None:
+    await env.human_online(env.guest())  # a guest's agent runs only with its human
     token = await env.issue(env.guest())
     assert "Not in guest view" in await env.refused(token, "join", channel="#lobby")
     assert "Not in guest view" in await env.refused(token, "part", channel="#lobby")
@@ -573,6 +575,7 @@ async def test_guest_agent_gets_the_guest_allowlist(env: Env) -> None:
 
 
 async def test_guest_agent_sends_are_in_the_humans_input_log(env: Env) -> None:
+    await env.human_online(env.guest())  # a guest's agent runs only with its human
     token = await env.issue(env.guest())
     await env.ok(token, "send", text="what is a sandbox?")
     kinds = [(k, p) for k, p, _ts in env.guests.inputs_for(GUEST)]
@@ -582,6 +585,7 @@ async def test_guest_agent_sends_are_in_the_humans_input_log(env: Env) -> None:
 
 
 async def test_guest_agent_delete_is_refused_like_the_page_redirect(env: Env) -> None:
+    await env.human_online(env.guest())  # a guest's agent runs only with its human
     token = await env.issue(env.guest())
     msg = await env.refused(token, "send", text="/delete")
     assert "/delete" in msg or "page" in msg

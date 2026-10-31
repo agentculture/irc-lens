@@ -340,6 +340,17 @@ class SessionRegistry:
         except Exception:  # noqa: BLE001 -- an unreadable store grants nothing
             return False
 
+    def guest_agent_may_run(self, email: str) -> bool:
+        """May the guest *email*'s agent be connected right now?
+
+        Only while its human's own sandbox session is open, or while a live
+        admin extension covers it (o19). Blocking when it has to read the
+        access store for the extension; fails closed.
+        """
+        if (GUEST_PRINCIPAL_PREFIX + email, BACKEND_SANDBOX) in self._sessions:
+            return True
+        return self._agent_extended(email)
+
     async def _reap_guest_agents(self) -> None:
         """Close a guest's agent once its human is signed off (o19).
 
@@ -355,9 +366,7 @@ class SessionRegistry:
             if backend != BACKEND_SANDBOX or not principal.startswith(prefix):
                 continue
             email = principal[len(prefix) :]
-            if (GUEST_PRINCIPAL_PREFIX + email, BACKEND_SANDBOX) in self._sessions:
-                continue
-            if self._agent_extended(email):
+            if self.guest_agent_may_run(email):
                 continue
             await self.close(principal, backend)
 
