@@ -2,7 +2,7 @@
   "plan_slug": "chat-edge-gate-and-spark2-fallback",
   "schema_version": 2,
   "created": "2026-11-03T22:34:54Z",
-  "updated": "2026-11-03T22:34:54Z",
+  "updated": "2026-11-03T23:00:29Z",
   "deviations": [
     {
       "id": "d1",
@@ -31,6 +31,34 @@
       "status": "approved",
       "classification": "acceptable",
       "seq": 2
+    },
+    {
+      "id": "d3",
+      "what": "Drop the session pin cookie from t8. All traffic goes to one active origin, so a session can't reach a second one while the first is healthy",
+      "task_ref": "t8",
+      "reason": "Warm standby has a single active origin, so the cookie would add code with nothing to do and could send someone to the wrong host; h7 still holds and is still tested",
+      "affects": [
+        "c5",
+        "h7"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 3
+    },
+    {
+      "id": "d4",
+      "what": "t5 moves link secrets to grant: units inject them, and culture checks grant before the keyring",
+      "task_ref": "t5",
+      "reason": "Owner chose grant over keyring auto-unlock: it works unattended at boot, as agent secrets already do",
+      "affects": [
+        "c19",
+        "h13"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 4
     }
   ],
   "evidence": [],
