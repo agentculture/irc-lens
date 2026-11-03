@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-03T16:02:01Z",
-  "updated": "2026-11-03T21:18:08Z",
+  "updated": "2026-11-03T21:24:36Z",
   "claims": [
     {
       "id": "c1",
@@ -191,14 +191,20 @@
     {
       "id": "c11",
       "kind": "assumption",
-      "text": "The failover site needs its own sbx IRCd and guest agents, and a model path that does not run through spark",
+      "text": "spark2 needs no guest sandbox or model path, because guest mode is off on standby; a second sbx would only be needed if guests are later served there",
       "origin": "llm",
       "status": "confirmed",
       "honesty_conditions": [],
       "hard_questions": [],
       "links": [],
       "instruction": "",
-      "revisions": []
+      "revisions": [
+        {
+          "text": "The failover site needs its own sbx IRCd and guest agents, and a model path that does not run through spark",
+          "kind": "assumption",
+          "reason": "owner decided q3: approved users only on standby"
+        }
+      ]
     },
     {
       "id": "c12",
@@ -466,6 +472,137 @@
       "links": [],
       "instruction": "",
       "revisions": []
+    },
+    {
+      "id": "c28",
+      "kind": "requirement",
+      "text": "Browser POSTs work through the Worker: _origin_ok compares Origin to the request host, so a Worker fetching an origin hostname with a different Host gets every browser POST refused",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h19",
+          "text": "A real browser signs in and sends a message through the Worker, on both origins",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c29",
+      "kind": "requirement",
+      "text": "Health pings check the primary's own local /readyz as well as the public one, so a failover can't hide that spark is down: after failover the public /readyz would answer 200 from spark2",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h20",
+          "text": "With spark's IRCd stopped and traffic on spark2, the check goes down and hourly reminders arrive",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c30",
+      "kind": "requirement",
+      "text": "Failover trips only after several consecutive failed /readyz checks, and returning to spark is a deliberate step, so a routine restart can't bounce everyone onto a different nick",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h21",
+          "text": "Restarting the console or IRCd during a deploy moves no one to spark2",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c31",
+      "kind": "requirement",
+      "text": "The Worker can be removed in one step: deleting its route restores direct access through the existing tunnel, and that path stays available until the Worker has proven itself",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h22",
+          "text": "A rehearsed rollback restores signed-in service within 5 minutes",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c32",
+      "kind": "requirement",
+      "text": "The guests.db copy to spark2 stays private: it holds emails, password and token hashes, so it travels only over the tailnet or LAN, stays mode 0600 on spark2, and has the same retention as the original",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h23",
+          "text": "After a copy, the file on spark2 is mode 0600 and no copy path crosses the public internet",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c33",
+      "kind": "assumption",
+      "text": "During failover people see rooms but no spark agents, media uploaded on spark is missing, and personal agent credentials issued for spark- nicks don't work; standby means keeping humans talking, not full service",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c34",
+      "kind": "assumption",
+      "text": "Rate limits keep working through the Worker because same-zone subrequests keep the visitor's IP in CF-Connecting-IP, per Cloudflare docs; if the origin isn't same-zone they collapse to one IP and one visitor could lock out all sign-ins",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c35",
+      "kind": "decision",
+      "text": "Owner decision 2026-11-03: standby is approved users only, with no account changes and guest mode off. Guests get the outage message during a failover, and spark2 needs no guest sandbox or model path",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
     }
   ],
   "open_vagueness": [
@@ -499,6 +636,15 @@
     {
       "id": "v4",
       "text": "Why spark has no established links to thor and orin after its restart (culture#510 suspected, unconfirmed)",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v5",
+      "text": "Whether cf.resolveOverride keeps the Host header through the tunnel on this plan, or the lens must instead trust a configured public origin; needs a small POST spike before building",
       "kind": "unknown_nonblocking",
       "claim_id": null,
       "resolved": false,
@@ -656,8 +802,100 @@
       "seeds": [
         "c27"
       ]
+    },
+    {
+      "id": "s21",
+      "surface": "challenge pass / adjacent-systems lens: irc-lens web/routes.py _origin_ok, web/csrf.py",
+      "finding": "Origin must equal the request host. Cloudflare docs: changing the fetch URL hostname changes Host, while cf.resolveOverride keeps Host but needs both hosts in the zone. The spike only sent GETs, so this was untested and every send would have returned 403. Whether the tunnel ingress and resolveOverride combine on this plan is unknown",
+      "seeds": [
+        "c28"
+      ]
+    },
+    {
+      "id": "s22",
+      "surface": "challenge pass / observability lens: ~/.culture/healthcheck-ping.sh",
+      "finding": "the ping script probes the public URL only. It is correct today, but once the Worker fails over, a dead spark IRCd with a live spark host would keep reporting healthy, which silently defeats the owner's hourly email during standby",
+      "seeds": [
+        "c29"
+      ]
+    },
+    {
+      "id": "s23",
+      "surface": "challenge pass / failure-mode lens: this session's deploy",
+      "finding": "restarting the IRCd and console took seconds, and the spec states no threshold or failback rule, so a plain deploy could trigger failover and change everyone's nick",
+      "seeds": [
+        "c30"
+      ]
+    },
+    {
+      "id": "s24",
+      "surface": "challenge pass / reversibility lens: spec c8 and tunnel config",
+      "finding": "c8 locks origins to the Worker's credential, but nothing states how to undo it. Worker bugs, Free-plan error 1027 or an expired service token would be a full outage with no way around",
+      "seeds": [
+        "c31"
+      ]
+    },
+    {
+      "id": "s25",
+      "surface": "challenge pass / security lens: irc-lens guest_store.py, access_store.py",
+      "finding": "the store holds consents, password hashes, token hashes and audit rows, and c25 says only that it is copied",
+      "seeds": [
+        "c32"
+      ]
+    },
+    {
+      "id": "s26",
+      "surface": "challenge pass / overlooked-actors lens: systemd units on spark, web/store.py, access_store.py:64-66",
+      "finding": "all 4 mesh agents and the media directory live only on spark, and agent_credentials store the full prefixed nick. Cross-server rooms also need #519 fixed, since mesh links are down today",
+      "seeds": [
+        "c33"
+      ]
+    },
+    {
+      "id": "s27",
+      "surface": "challenge pass / security lens: irc-lens web/entry.py:291,426",
+      "finding": "client_ip reads only CF-Connecting-IP and drives sign-in, guest and deletion limits. The documented same-zone behaviour is untested here, as the spike ran from workers.dev",
+      "seeds": [
+        "c34"
+      ]
+    },
+    {
+      "id": "s28",
+      "surface": "challenge pass / adjacent-systems lens: spark2 gateway",
+      "finding": "spark2 has nothing on port 8001, and both sandbox agents use gateway localhost:8001, confirming c11: guests on spark2 have no model path until that's built",
+      "seeds": []
+    },
+    {
+      "id": "s29",
+      "surface": "challenge pass / operations lens: Worker quota",
+      "finding": "clean for now: the console logged 71 requests in 24h against 100k per day. Residual: each request counts, and Worker service token expiry needs an owner",
+      "seeds": []
+    },
+    {
+      "id": "s30",
+      "surface": "challenge pass / security lens: cookies and Turnstile",
+      "finding": "clean: cookies are Secure and host-only and passed through in the spike. Turnstile wasn't exercised, and its behaviour through a Worker is unexamined",
+      "seeds": []
+    },
+    {
+      "id": "s31",
+      "surface": "challenge pass / migration lens: guests.db schema",
+      "finding": "tables use additive CREATE IF NOT EXISTS migrations, so a copy from a newer spark to an older spark2 lens is unexamined: both hosts need matching versions, to be a plan risk",
+      "seeds": []
     }
   ],
-  "lapses": [],
+  "lapses": [
+    {
+      "id": "l1",
+      "code": "assumption-for-measurement",
+      "what": "The Worker spike sent only GETs, so it didn't cover the POST path, yet I reported it as proving the riskiest assumption; the Origin check shows POSTs could fail",
+      "skipped_check": "a POST through the Worker",
+      "refs": [
+        "spike/worker.mjs"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    }
+  ],
   "obligations": []
 }

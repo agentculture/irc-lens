@@ -37,6 +37,16 @@
   - honesty: After a copy, an approved person can sign in on spark2 and holds the same role and grants
 - The health ping ships as part of the culture app: a CLI verb installs the timer on any host, reads the check URL from grant and the site address from the lens config, replacing the hand-written script and units on spark
   - honesty: On a host with only the culture install and the grant secret, the CLI verb alone produces a timer that pings healthchecks.io, reports /fail when /readyz fails, and spark runs on it with the hand-written files removed
+- Browser POSTs work through the Worker: `_origin_ok` compares Origin to the request host, so a Worker fetching an origin hostname with a different Host gets every browser POST refused
+  - honesty: A real browser signs in and sends a message through the Worker, on both origins
+- Health pings check the primary's own local /readyz as well as the public one, so a failover can't hide that spark is down: after failover the public /readyz would answer 200 from spark2
+  - honesty: With spark's IRCd stopped and traffic on spark2, the check goes down and hourly reminders arrive
+- Failover trips only after several consecutive failed /readyz checks, and returning to spark is a deliberate step, so a routine restart can't bounce everyone onto a different nick
+  - honesty: Restarting the console or IRCd during a deploy moves no one to spark2
+- The Worker can be removed in one step: deleting its route restores direct access through the existing tunnel, and that path stays available until the Worker has proven itself
+  - honesty: A rehearsed rollback restores signed-in service within 5 minutes
+- The guests.db copy to spark2 stays private: it holds emails, password and token hashes, so it travels only over the tailnet or LAN, stays mode 0600 on spark2, and has the same retention as the original
+  - honesty: After a copy, the file on spark2 is mode 0600 and no copy path crosses the public internet
 
 ## Honesty conditions
 
@@ -65,8 +75,10 @@
 
 - A single source of truth for sign-in, permissions and agent credentials must exist across both instances; separate guests.db files would sign people out on failover
 - On failover a person's nick changes from `spark-<nick>` to `spark2-<nick>` unless the design changes that
-- The failover site needs its own sbx IRCd and guest agents, and a model path that does not run through spark
+- spark2 needs no guest sandbox or model path, because guest mode is off on standby; a second sbx would only be needed if guests are later served there
 - Moved history is partial: a person failing over may see gaps because history is per-server and backfill replays only recent in-memory events
+- During failover people see rooms but no spark agents, media uploaded on spark is missing, and personal agent credentials issued for spark- nicks don't work; standby means keeping humans talking, not full service
+- Rate limits keep working through the Worker because same-zone subrequests keep the visitor's IP in CF-Connecting-IP, per Cloudflare docs; if the origin isn't same-zone they collapse to one IP and one visitor could lock out all sign-ins
 
 ## Scope exploration
 
@@ -105,6 +117,24 @@
 - `s19` — `Worker spike, workers.dev to chat.culture.dev tunnel, 2026-11-03`: PASSED: a throwaway Worker reached the tunnel hostname with an Access service token (login 303 with session cookie) and held GET /events open as text/event-stream for the full 300s, 20 chunks, on the Free plan, with no CPU-limit error; Worker deleted afterwards. NOT tested: a Worker route on chat.culture.dev itself, Access in front of that same hostname, a second tunnel, failover between origins, or streams longer than 5 minutes
 - `s20` — `spark ~/.culture/healthcheck-ping.sh and culture-healthcheck units`: the working ping is hand-installed on spark, hardcodes chat.culture.dev, and isn't in any repo; the owner decided it belongs in the app. `culture_core`/cli/console.py already has an install verb, so this is the likely home, to confirm while planning
   - seeds: `c27`
+- `s21` — `challenge pass / adjacent-systems lens: irc-lens web/routes.py _origin_ok, web/csrf.py`: Origin must equal the request host. Cloudflare docs: changing the fetch URL hostname changes Host, while cf.resolveOverride keeps Host but needs both hosts in the zone. The spike only sent GETs, so this was untested and every send would have returned 403. Whether the tunnel ingress and resolveOverride combine on this plan is unknown
+  - seeds: `c28`
+- `s22` — `challenge pass / observability lens: ~/.culture/healthcheck-ping.sh`: the ping script probes the public URL only. It is correct today, but once the Worker fails over, a dead spark IRCd with a live spark host would keep reporting healthy, which silently defeats the owner's hourly email during standby
+  - seeds: `c29`
+- `s23` — `challenge pass / failure-mode lens: this session's deploy`: restarting the IRCd and console took seconds, and the spec states no threshold or failback rule, so a plain deploy could trigger failover and change everyone's nick
+  - seeds: `c30`
+- `s24` — `challenge pass / reversibility lens: spec c8 and tunnel config`: c8 locks origins to the Worker's credential, but nothing states how to undo it. Worker bugs, Free-plan error 1027 or an expired service token would be a full outage with no way around
+  - seeds: `c31`
+- `s25` — `challenge pass / security lens: irc-lens guest_store.py, access_store.py`: the store holds consents, password hashes, token hashes and audit rows, and c25 says only that it is copied
+  - seeds: `c32`
+- `s26` — `challenge pass / overlooked-actors lens: systemd units on spark, web/store.py, access_store.py:64-66`: all 4 mesh agents and the media directory live only on spark, and `agent_credentials` store the full prefixed nick. Cross-server rooms also need #519 fixed, since mesh links are down today
+  - seeds: `c33`
+- `s27` — `challenge pass / security lens: irc-lens web/entry.py:291,426`: `client_ip` reads only CF-Connecting-IP and drives sign-in, guest and deletion limits. The documented same-zone behaviour is untested here, as the spike ran from workers.dev
+  - seeds: `c34`
+- `s28` — `challenge pass / adjacent-systems lens: spark2 gateway`: spark2 has nothing on port 8001, and both sandbox agents use gateway localhost:8001, confirming c11: guests on spark2 have no model path until that's built
+- `s29` — `challenge pass / operations lens: Worker quota`: clean for now: the console logged 71 requests in 24h against 100k per day. Residual: each request counts, and Worker service token expiry needs an owner
+- `s30` — `challenge pass / security lens: cookies and Turnstile`: clean: cookies are Secure and host-only and passed through in the spike. Turnstile wasn't exercised, and its behaviour through a Worker is unexamined
+- `s31` — `challenge pass / migration lens: guests.db schema`: tables use additive CREATE IF NOT EXISTS migrations, so a copy from a newer spark to an older spark2 lens is unexamined: both hosts need matching versions, to be a plan risk
 
 ## Decisions
 
@@ -113,12 +143,14 @@
 - Owner decision 2026-11-03: hourly email only while a check is down, using the healthchecks.io reminder setting; silence means healthy; no always-on status mail
 - Owner decision 2026-11-03: the Worker is gate-only first (routing, failover, outage page, keeping anonymous traffic off the origin); sign-in stays on the lens; identity in D1 is a later separate phase
 - Owner decision 2026-11-03: /readyz covers the main IRC server only, so a guest sandbox failure never triggers failover for everyone; a separate sbx signal can come later
+- Owner decision 2026-11-03: standby is approved users only, with no account changes and guest mode off. Guests get the outage message during a failover, and spark2 needs no guest sandbox or model path
 
 ## Open parks
 
 - [unknown_nonblocking] Whether remote-origin messages are written to the local history.db (agentirc), which decides how complete history looks after failover
 - [unknown_nonblocking] Whether moving email and consent records to Cloudflare D1 requires a Terms/Privacy update (katvan legal pages not read)
 - [unknown_nonblocking] Why spark has no established links to thor and orin after its restart (culture#510 suspected, unconfirmed)
+- [unknown_nonblocking] Whether cf.resolveOverride keeps the Host header through the tunnel on this plan, or the lens must instead trust a configured public origin; needs a small POST spike before building
 
 ## Resolved vagueness
 
