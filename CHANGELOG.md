@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-04
+
+### Added
+
+- `deploy/chat-edge/`: a Cloudflare Worker for the console's edge, not deployed by this change. It sends traffic to one active origin, fails over after repeated `/readyz` failures, and shows an outage page when origins are unreachable. Returning to the primary is a deliberate step.
+
 ## [0.20.0] - 2026-11-04
 
 ### Added
