@@ -16,7 +16,7 @@ Ratified frame decisions this implements:
   middleware (dev or cloudflare-access) guards ``/agent`` exactly like the
   console root. In cloudflare-access mode an unauthenticated request to the
   prefix is rejected with 401 by the middleware before this handler ever runs
-  — and the exempt list stays ``/static`` / ``/healthz`` / ``/media`` only
+  — and the exempt list stays ``/static`` / ``/healthz`` / ``/readyz`` / ``/media`` only
   (see ``web/app.py`` and ``web/auth.py``; ``/agent`` is deliberately absent
   from both).
 

@@ -84,6 +84,7 @@ _EXEMPT_PATHS = frozenset(
         "/logout",
         "/login",
         "/healthz",
+        "/readyz",
         "/guest/logout",
         "/delete",
         "/delete/request",

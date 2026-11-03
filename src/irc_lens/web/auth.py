@@ -393,10 +393,11 @@ def _require_cf_config(config: LensConfig) -> None:
 
 
 def _is_public_path(request: web.Request) -> bool:
-    """Static assets, ``/healthz`` and capability ``/media/`` URLs need no identity."""
+    """Static assets, ``/healthz``, ``/readyz`` and capability ``/media/`` URLs need no identity."""
     return (
         request.path.startswith("/static/")
         or request.path == "/healthz"
+        or request.path == "/readyz"
         or request.path.startswith("/media/")
     )
 
@@ -537,9 +538,9 @@ def build_cloudflare_middleware(config: LensConfig):
     async def middleware(request: web.Request, handler):
         # Static assets never require identity (browser fetches them
         # before the SSO redirect lands on every page load). `/healthz`
-        # is also unauthenticated by spec — cloudflared and external
-        # uptime probes hit it without a JWT, and the response is opaque
-        # (`{"ok": true}`) so it doesn't leak any allowlist state.
+        # and `/readyz` are also unauthenticated: process and IRC TCP
+        # probes respectively. Their opaque responses reveal no identity
+        # or allowlist state.
         # `/media/{token}.{ext}` (task t6) is a capability URL — the
         # unguessable token in the path *is* the credential, so a JWT
         # would be redundant and would break the agent-fetch path

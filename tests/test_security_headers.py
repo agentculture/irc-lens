@@ -23,12 +23,16 @@ none of these assertions touch AgentIRC state.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
 
 from irc_lens.session import Session
 
-from helpers import make_app_for as _make_app_for
+from helpers import DEV_CONFIG, make_app_for as _make_app_for
+from _readyz_server import listener
+from irc_lens.web import make_app
 
 
 _EXPECTED_CSP = (
@@ -95,6 +99,20 @@ async def test_healthz_has_baseline_headers_but_no_csp(client: TestClient) -> No
     assert resp.headers["X-Content-Type-Options"] == "nosniff"
     assert resp.headers["Referrer-Policy"] == "no-referrer"
     assert "Content-Security-Policy" not in resp.headers
+
+
+async def test_readyz_has_baseline_headers_but_no_csp(session: Session) -> None:
+    """Readiness JSON has baseline headers and cannot be cached at the edge."""
+    async with listener() as tcp:
+        config = replace(DEV_CONFIG, server_host="127.0.0.1", server_port=tcp.port)
+        app = make_app(config, lambda _nick: session)
+        async with TestClient(TestServer(app)) as client:
+            resp = await client.get("/readyz")
+            assert resp.status == 200
+            assert resp.headers["X-Content-Type-Options"] == "nosniff"
+            assert resp.headers["Referrer-Policy"] == "no-referrer"
+            assert resp.headers["Cache-Control"] == "no-store"
+            assert "Content-Security-Policy" not in resp.headers
 
 
 async def test_static_asset_has_baseline_headers_but_no_csp(client: TestClient) -> None:

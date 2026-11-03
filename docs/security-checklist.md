@@ -63,6 +63,9 @@ item is a yes/no.
       fine). Review `auth=denied` lines after each test session.
 - [ ] `GET /healthz` returns `{"ok": true}` and nothing else; the
       response does not reveal whether any user has a live session.
+- [ ] Public `GET /readyz` returns only `{"ok": true}` (200) or
+      `{"ok": false}` (503), probing the main IRCd with a two-second
+      timeout and a shared five-second cache; responses use `Cache-Control: no-store`.
 - [ ] You have a way to rotate the IdP credentials and the CF API
       token without downtime.
 
