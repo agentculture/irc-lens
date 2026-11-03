@@ -1,0 +1,663 @@
+{
+  "slug": "chat-edge-gate-and-spark2-fallback",
+  "title": "chat edge gate and spark2 fallback",
+  "schema_version": 6,
+  "status": "exported",
+  "created": "2026-11-03T16:02:01Z",
+  "updated": "2026-11-03T21:18:08Z",
+  "claims": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "chat.culture.dev sits behind a Cloudflare Worker that gates traffic at the edge, so anonymous traffic never reaches our machines and a real outage page shows when both sparks are down; when spark fails, signed-in people land on spark2 instead of a 500, after signing in again if needed",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h3",
+          "text": "A simulated spark failure with Worker and spark2 in place returns the app, not a 500, to a signed-in test account",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "chat.culture.dev sits behind a Cloudflare Worker that accepts sign-in at the edge, so anonymous traffic never reaches our machines, and when spark fails signed-in people land on spark2 instead of a 500",
+          "kind": "announcement",
+          "reason": "owner decided gate-only first: sign-in stays on the lens"
+        }
+      ]
+    },
+    {
+      "id": "c2",
+      "kind": "why_it_matters",
+      "text": "On 2026-11-03 signed-in users got 500s from LensConnectionLost for up to 41h after the Nov 2 00:44 reboot, while anonymous GET / still returned 200, and nothing alerted anyone",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h4",
+          "text": "The dates and durations match the journal: first refusal Nov 2 00:44, restored Nov 3 17:58",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c3",
+      "kind": "requirement",
+      "text": "culture server start ignores a pidfile whose PID is not a culture process, so a reboot cannot wedge the IRCd; this ships before any failover work",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h5",
+          "text": "With a pidfile pointing at another user's thread, culture server start succeeds; a test covers it",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c4",
+      "kind": "requirement",
+      "text": "The lens exposes a readiness check that fails when its IRCd is unreachable; failover and alerting key on it, not on / or /healthz",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h6",
+          "text": "With the IRCd stopped the readiness check returns non-200, and with it running returns 200",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c5",
+      "kind": "boundary",
+      "text": "No per-request round-robin between instances: one person's session stays on one instance until that instance fails",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h7",
+          "text": "Two requests from one session always reach the same instance while that instance is healthy",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c6",
+      "kind": "boundary",
+      "text": "Tunnel replicas are not the fallback mechanism: each host gets its own tunnel and the Worker chooses between them",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h8",
+          "text": "spark and spark2 connect through different tunnel UUIDs",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c7",
+      "kind": "requirement",
+      "text": "A Worker on chat.culture.dev picks the origin, pins a session to it, fails over on origin failure, and serves a static outage page when both are down",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h9",
+          "text": "Stopping both origins yields the static outage page, and the Worker stays within Free limits at current traffic",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c8",
+      "kind": "requirement",
+      "text": "Origin hostnames accept only the Worker's credential and the lens trusts a verifiable identity from it, so anonymous traffic never reaches our machines",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h10",
+          "text": "A direct request to an origin hostname without the Worker's credential is refused before reaching the lens",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c9",
+      "kind": "assumption",
+      "text": "A single source of truth for sign-in, permissions and agent credentials must exist across both instances; separate guests.db files would sign people out on failover",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c10",
+      "kind": "assumption",
+      "text": "On failover a person's nick changes from spark-<nick> to spark2-<nick> unless the design changes that",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c11",
+      "kind": "assumption",
+      "text": "The failover site needs its own sbx IRCd and guest agents, and a model path that does not run through spark",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c12",
+      "kind": "requirement",
+      "text": "spark2 is provisioned with irc-lens config, cloudflared, its own secrets and a running IRCd, using the supported install verbs",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h11",
+          "text": "culture console install and culture server install produce running units on spark2, reachable only through its tunnel",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c13",
+      "kind": "non_goal",
+      "text": "This does not survive a home power or internet outage on the machines; only the Worker's static outage page does",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c14",
+      "kind": "assumption",
+      "text": "Moved history is partial: a person failing over may see gaps because history is per-server and backfill replays only recent in-memory events",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c15",
+      "kind": "decision",
+      "text": "Owner decision 2026-11-03: warm standby on spark2 is enough; active-active sharing of live load is not wanted",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c16",
+      "kind": "decision",
+      "text": "Owner decision 2026-11-03: a person's nick may change from spark-<nick> to spark2-<nick> during failover",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c17",
+      "kind": "requirement",
+      "text": "The service sends periodic pings to healthchecks.io using the grant secret CULTURE_HEALTHCHECK_URL, so an outage alerts even when our machines cannot send anything",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h1",
+          "text": "Pings are sent only after a real IRCd readiness check passes, so a healthy landing page with a dead IRCd stops the pings",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h2",
+          "text": "The check also alerts when the pinger's host is off, because silence alone turns it down",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c18",
+      "kind": "requirement",
+      "text": "The owner receives an hourly email while any health check is down, until it recovers",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h12",
+          "text": "With the check down for over an hour, at least 2 reminder emails arrive at the owner's address",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "The owner receives an email every hour; exact trigger pending owner clarification",
+          "kind": "requirement",
+          "reason": "owner clarified the trigger"
+        }
+      ]
+    },
+    {
+      "id": "c19",
+      "kind": "requirement",
+      "text": "After a reboot the standby rejoins the mesh without a person unlocking its keyring, because a locked keyring leaves spark2 with no link credentials",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h13",
+          "text": "After a spark2 reboot with no human action, it links to at least one peer",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c20",
+      "kind": "audience",
+      "text": "The owner as operator, and approved people who use chat.culture.dev as their mesh console",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h14",
+          "text": "Every behaviour in this spec is observable by one of these two groups",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c21",
+      "kind": "after_state",
+      "text": "When spark fails, people reach spark2 after signing in again if needed, as spark2-<nick>; when both are down they see an outage page; the owner is told by email either way",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h15",
+          "text": "Each clause is exercised in the failover drill: sign-in again, spark2 nick, outage page, email",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c22",
+      "kind": "success_signal",
+      "text": "An IRCd outage behind a healthy landing page alerts the owner within 10 minutes, against about 41 hours unnoticed on 2026-11-03; a simulated spark failure serves signed-in people from spark2 within 5 minutes",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h16",
+          "text": "Both timings are measured in a drill, not estimated",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c23",
+      "kind": "decision",
+      "text": "Owner decision 2026-11-03: hourly email only while a check is down, using the healthchecks.io reminder setting; silence means healthy; no always-on status mail",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c24",
+      "kind": "decision",
+      "text": "Owner decision 2026-11-03: the Worker is gate-only first (routing, failover, outage page, keeping anonymous traffic off the origin); sign-in stays on the lens; identity in D1 is a later separate phase",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c25",
+      "kind": "requirement",
+      "text": "spark2's standby lens holds a copy of accounts and permissions from spark's guests.db, one-way and refreshed on a schedule, because an empty store would refuse every approved person including the admin",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h17",
+          "text": "After a copy, an approved person can sign in on spark2 and holds the same role and grants",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c26",
+      "kind": "decision",
+      "text": "Owner decision 2026-11-03: /readyz covers the main IRC server only, so a guest sandbox failure never triggers failover for everyone; a separate sbx signal can come later",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c27",
+      "kind": "requirement",
+      "text": "The health ping ships as part of the culture app: a CLI verb installs the timer on any host, reads the check URL from grant and the site address from the lens config, replacing the hand-written script and units on spark",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h18",
+          "text": "On a host with only the culture install and the grant secret, the CLI verb alone produces a timer that pings healthchecks.io, reports /fail when /readyz fails, and spark runs on it with the hand-written files removed",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    }
+  ],
+  "open_vagueness": [
+    {
+      "id": "v1",
+      "text": "Whether Worker subrequests can reach tunnel hostnames behind an Access service token and hold SSE through the 10ms CPU limit; needs a spike",
+      "kind": "unknown_blocking",
+      "claim_id": null,
+      "resolved": true,
+      "resolution": "Owner resolved 2026-11-03: the spike proved a Free-plan Worker can reach the tunnel through an Access service token and hold SSE for 5 minutes (scope s19). Route on chat.culture.dev, Access on the same hostname, second tunnel, failover and longer streams become plan acceptance tests.",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v2",
+      "text": "Whether remote-origin messages are written to the local history.db (agentirc), which decides how complete history looks after failover",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v3",
+      "text": "Whether moving email and consent records to Cloudflare D1 requires a Terms/Privacy update (katvan legal pages not read)",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v4",
+      "text": "Why spark has no established links to thor and orin after its restart (culture#510 suspected, unconfirmed)",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    }
+  ],
+  "scope_entries": [
+    {
+      "id": "s1",
+      "surface": "spark journal + console log, 2026-11-03",
+      "finding": "stale pidfile server-spark.pid held a PID reused as a thread of another user's process (xdg-document-portal); sbx and spark2 the same",
+      "seeds": [
+        "c2"
+      ]
+    },
+    {
+      "id": "s2",
+      "surface": "culture_core/cli/server.py:564 + pidfile.py:100",
+      "finding": "_check_already_running calls is_process_alive only; kill(pid,0) PermissionError counts as alive; is_culture_process exists at pidfile.py:75 but is not called. No open issue for this; overview/renderer_web.py:139-154 can signal an unrelated PID",
+      "seeds": [
+        "c3"
+      ]
+    },
+    {
+      "id": "s3",
+      "surface": "irc-lens web/routes.py:1079-1088, session.py:429-446",
+      "finding": "/healthz is a constant ok with no IRC check; connect() has one host, no retry; auto-reconnect is deliberately off, dead sessions return 503 on input",
+      "seeds": [
+        "c4"
+      ]
+    },
+    {
+      "id": "s4",
+      "surface": "irc-lens web/sessions.py:195-205, web/routes.py:746-756,975-980",
+      "finding": "IRC sessions and SSE buses are in-memory per process, so a send on A never reaches a stream on B; affinity is assumed, unstated, and no stickiness code exists",
+      "seeds": [
+        "c5"
+      ]
+    },
+    {
+      "id": "s5",
+      "surface": "Cloudflare tunnel docs + tunnel API GET",
+      "finding": "chat tunnel has one connector today; docs say replicas give no steering or stickiness and route to the closest one, and session affinity needs a separate tunnel per host",
+      "seeds": [
+        "c6"
+      ]
+    },
+    {
+      "id": "s6",
+      "surface": "culture.dev zone + account via CF API GET",
+      "finding": "Free Website plan; Load Balancing API 403; existing Workers learn-api and lens-delivery-alert, 2 KV, 1 D1, no routes; docs: 10ms CPU, 100k req/day then error 1027, no wall-clock limit while client connected",
+      "seeds": [
+        "c7"
+      ]
+    },
+    {
+      "id": "s7",
+      "surface": "lens config auth.mode + web/auth.py:399",
+      "finding": "auth.mode is cloudflare-access with app_signin enabled; no Worker-trust mode exists. Worker fetch through Access service token on a tunnel hostname is unverified and needs a spike",
+      "seeds": [
+        "c8"
+      ]
+    },
+    {
+      "id": "s8",
+      "surface": "irc-lens access_store.py:236-267, app_session.py:84-103,190-213, guest_store.py:60-101",
+      "finding": "sessions, users, grants, agent_credentials, guests, consents all in one local rollback-journal SQLite file with a per-process read cache; unsafe over NFS; cookie is an opaque id so no key to share, but the row must exist",
+      "seeds": [
+        "c9"
+      ]
+    },
+    {
+      "id": "s9",
+      "surface": "agentirc client.py:469-476, irc-lens web/nickname.py:67-69, agent_nick.py, access_store.py:64-66",
+      "finding": "NICK must start with the server name, hard-coded with no config switch; lens prefixes from server.name; grants key on email and survive, agent_credentials store the full prefixed nick and would not; no identity links spark-ori to spark2-ori",
+      "seeds": [
+        "c10"
+      ]
+    },
+    {
+      "id": "s10",
+      "surface": "docs/guest-sandbox.md:12-38 + ~/.culture/sandbox/*.yaml",
+      "finding": "sbx is loopback, standalone, no-persist so a second copy is cheap but relocation of its agents is undocumented; both agents use gateway localhost:8001 on spark; models cortex-spark2 and worker-spark span both hosts",
+      "seeds": [
+        "c11"
+      ]
+    },
+    {
+      "id": "s11",
+      "surface": "spark2 over ssh; docs/durable-mesh.md:21-26, culture_core/cli/console.py:696",
+      "finding": "spark2 has culture 14.11.1 (spark 14.13.0), grant, no cloudflared, no ~/.config/irc-lens; culture console install exists; server crash-looping on the stale pidfile",
+      "seeds": [
+        "c12"
+      ]
+    },
+    {
+      "id": "s12",
+      "surface": "ip route on spark and spark2",
+      "finding": "both hosts use the same home router as default gateway, so they share a LAN and uplink; correction: an older note that spark2's gateway is spark is stale",
+      "seeds": [
+        "c13"
+      ]
+    },
+    {
+      "id": "s13",
+      "surface": "docs/reference/server/architecture.md:120,166,181-183, agentirc ircd.py:59, server_link.py:975-1008",
+      "finding": "HistoryStore is local SQLite; event log is a 10000-entry in-memory deque; whether remote-origin messages land in local history.db is unknown",
+      "seeds": [
+        "c14"
+      ]
+    },
+    {
+      "id": "s14",
+      "surface": "grant on spark and spark2",
+      "finding": "CULTURE_HEALTHCHECK_URL is set on spark (https, host hc-ping.com, value not printed); spark2's grant has no such secret, so a ping from spark2 needs it copied or a separate check URL",
+      "seeds": []
+    },
+    {
+      "id": "s15",
+      "surface": "culture-server-spark2 on spark2",
+      "finding": "fixed 2026-11-03 16:18 UTC by moving the stale pidfile aside after confirming its PID was a thread of another user's process and 6667 was not listening; server now listens on spark2's tailnet address",
+      "seeds": []
+    },
+    {
+      "id": "s16",
+      "surface": "mesh links on spark, thor, orin, spark2",
+      "finding": "2026-11-03 18:2x: all peer ports reachable from spark, but no established server-to-server sockets on spark, thor or orin; spark logged Linking to thor/orin once with no follow-up, thor/orin logged nothing; spark2 login keyring Locked=true, logging No credential found for all peers. Cause on spark side unconfirmed; matches culture#510 no-retry shape",
+      "seeds": []
+    },
+    {
+      "id": "s17",
+      "surface": "spark restart 18:22 and agentirc ircd.py:521-532",
+      "finding": "restart logged Linking to all three peers including spark2, yet zero peer sockets on spark, thor or orin and nothing in the thor/orin server logs; connect_to_peer spawns link.handle as a background task, so a failed handshake may be silent. Restart did not restore federation; cause unconfirmed",
+      "seeds": []
+    },
+    {
+      "id": "s18",
+      "surface": "irc-lens web/app_session.py:100-103, access_store.py:59-78",
+      "finding": "with gate-only sign-in on the lens, spark2 opens its own guests.db; unknown session ids mean signed out and an empty users table means no approved people, so failover needs at least a copied store. This follows from the owner's gate-first decision and was not explicit in the options offered",
+      "seeds": [
+        "c25"
+      ]
+    },
+    {
+      "id": "s19",
+      "surface": "Worker spike, workers.dev to chat.culture.dev tunnel, 2026-11-03",
+      "finding": "PASSED: a throwaway Worker reached the tunnel hostname with an Access service token (login 303 with session cookie) and held GET /events open as text/event-stream for the full 300s, 20 chunks, on the Free plan, with no CPU-limit error; Worker deleted afterwards. NOT tested: a Worker route on chat.culture.dev itself, Access in front of that same hostname, a second tunnel, failover between origins, or streams longer than 5 minutes",
+      "seeds": []
+    },
+    {
+      "id": "s20",
+      "surface": "spark ~/.culture/healthcheck-ping.sh and culture-healthcheck units",
+      "finding": "the working ping is hand-installed on spark, hardcodes chat.culture.dev, and isn't in any repo; the owner decided it belongs in the app. culture_core/cli/console.py already has an install verb, so this is the likely home, to confirm while planning",
+      "seeds": [
+        "c27"
+      ]
+    }
+  ],
+  "lapses": [],
+  "obligations": []
+}
