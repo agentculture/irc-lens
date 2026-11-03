@@ -97,6 +97,16 @@ async def test_healthz_has_baseline_headers_but_no_csp(client: TestClient) -> No
     assert "Content-Security-Policy" not in resp.headers
 
 
+async def test_readyz_has_baseline_headers_but_no_csp(client: TestClient) -> None:
+    """Readiness JSON has baseline headers and cannot be cached at the edge."""
+    resp = await client.get("/readyz")
+    assert resp.status in (200, 503)
+    assert resp.headers["X-Content-Type-Options"] == "nosniff"
+    assert resp.headers["Referrer-Policy"] == "no-referrer"
+    assert resp.headers["Cache-Control"] == "no-store"
+    assert "Content-Security-Policy" not in resp.headers
+
+
 async def test_static_asset_has_baseline_headers_but_no_csp(client: TestClient) -> None:
     resp = await client.get("/static/lens.css")
     assert resp.status == 200

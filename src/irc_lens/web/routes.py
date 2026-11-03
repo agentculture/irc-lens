@@ -1,5 +1,6 @@
 """HTTP route handlers for irc-lens.
 
+* ``GET /readyz``  — public, cached TCP readiness for the main IRC server.
 * ``GET /``        — render the three-pane index from Session state.
 * ``POST /input``  — read the input line (JSON or form-encoded body),
   parse via ``parse_command``, dispatch through ``Session.execute``.
@@ -30,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 import urllib.parse
 from collections.abc import AsyncIterator
 
@@ -1074,6 +1076,48 @@ async def get_residents(request: web.Request) -> web.Response:
         logger.exception("residents render failed; degrading to notice")
         body = render_residents_page("unavailable", None)
     return web.Response(text=body, content_type=_HTML)
+
+
+class ReadinessProbe:
+    """Per-app TCP readiness result, shared for five monotonic seconds."""
+
+    def __init__(self, host: str, port: int) -> None:
+        self.host = host
+        self.port = port
+        self._lock = asyncio.Lock()
+        self._expires_at = 0.0
+        self._ok = False
+
+    async def check(self) -> bool:
+        async with self._lock:
+            if time.monotonic() < self._expires_at:
+                return self._ok
+            writer = None
+            try:
+                async with asyncio.timeout(2):
+                    _, writer = await asyncio.open_connection(self.host, self.port)
+                    writer.close()
+                    await writer.wait_closed()
+                self._ok = True
+            except (OSError, TimeoutError) as exc:
+                logger.warning("IRC readiness probe failed: %s: %s", type(exc).__name__, exc)
+                self._ok = False
+            finally:
+                if writer is not None:
+                    writer.close()
+            self._expires_at = time.monotonic() + 5
+            return self._ok
+
+
+READINESS_PROBE = web.AppKey("readiness_probe", ReadinessProbe)
+
+
+async def get_readyz(request: web.Request) -> web.Response:
+    """Public, opaque readiness for the main IRC server only."""
+    ok = await request.app[READINESS_PROBE].check()
+    return web.json_response(
+        {"ok": ok}, status=200 if ok else 503, headers={"Cache-Control": "no-store"}
+    )
 
 
 async def get_healthz(_request: web.Request) -> web.Response:  # NOSONAR S7503

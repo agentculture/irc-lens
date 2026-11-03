@@ -109,7 +109,7 @@ Reverse on shutdown.
 ## 9. Verify
 
 - Visit `https://<your-hostname>/healthz` → `{"ok": true}` (no auth
-  required; safe for uptime probes).
+  required at the lens; checks the HTTP process only).
 
   > **Note on `/healthz`**: The lens itself bypasses auth on `/healthz`
   > (so cloudflared-local probes work). Cloudflare Access at the edge,
@@ -125,6 +125,20 @@ Reverse on shutdown.
 - Visit `https://<your-hostname>/` → SSO redirect → lens UI.
 - Send a slash-command — it dispatches into AgentIRC under the
   derived nick `<agentirc-server-name>-<sanitized-email-local>`.
+
+## Readiness monitoring
+
+Use `GET /readyz` for external monitors: `/healthz` does not check the IRCd.
+Readiness opens and closes a TCP connection to the configured main
+`server.host` / `server.port` with a two-second timeout (not the guest sandbox).
+It returns only `{"ok": true}` with 200 when reachable, or `{"ok": false}`
+with 503 on failure. Failure reasons are logged server-side.
+
+No identity or JWT is required by the lens. Configure an Access edge bypass
+for `/readyz` as described for `/healthz` above so external monitors can reach
+it without SSO. Responses carry `Cache-Control: no-store`; the lens shares
+one result in memory for five seconds, including across concurrent requests,
+so changes may take up to five seconds to appear.
 
 ## Troubleshooting
 

@@ -10,7 +10,7 @@ console's auth middleware. This file pins:
 * the **sitemap** ``<loc>`` URLs carry the ``/agent`` prefix;
 * **cloudflare-access mode** — an unauthenticated GET on the prefix is 401,
   and the middleware exempt lists still contain *exactly* ``/static`` /
-  ``/healthz`` / ``/media`` (``/agent`` must never be exempted);
+  ``/healthz`` / ``/readyz`` / ``/media`` (``/agent`` must never be exempted);
 * the **security headers** (nosniff + referrer-policy) ride on ``/agent``
   responses via the existing middleware, with no CSP (these are not HTML);
 * a **blind fetch-only traversal**: start at ``/agent/llms.txt``, enumerate
@@ -252,9 +252,9 @@ async def test_cf_valid_jwt_reaches_front(cf_client: TestClient, jwks: FakeJWKS)
 
 
 async def test_cf_exempt_paths_are_not_401(cf_client: TestClient) -> None:
-    """The prefix is guarded, but the three exempt families still are not:
-    a JWT-less request to /healthz, /static/*, /media/* must NOT be 401."""
-    for path in ("/healthz", "/static/does-not-exist.js", "/media/bogus.png"):
+    """The prefix is guarded, but the four exempt families still are not:
+    a JWT-less request to /healthz, /readyz, /static/*, /media/* must NOT be 401."""
+    for path in ("/healthz", "/readyz", "/static/does-not-exist.js", "/media/bogus.png"):
         resp = await cf_client.get(path)
         assert resp.status != 401, f"{path} must remain auth-exempt"
 
@@ -264,23 +264,23 @@ def _exempt_paths_in(func) -> set[str]:
 
     Both middlewares gate on ``request.path.startswith("/x/")`` /
     ``request.path == "/x"``; this pulls those literals out so the test can
-    assert the exempt set is *exactly* the three expected families."""
+    assert the exempt set is *exactly* the four expected families."""
     src = inspect.getsource(func)
     startswith = re.findall(r"request\.path\.startswith\(\s*[\"']([^\"']+)[\"']", src)
     equals = re.findall(r"request\.path\s*==\s*[\"']([^\"']+)[\"']", src)
     return set(startswith) | set(equals)
 
 
-def test_exempt_lists_contain_exactly_static_healthz_media() -> None:
+def test_exempt_lists_contain_exactly_static_healthz_readyz_media() -> None:
     """Neither middleware may add /agent (or anything else) to the exempt set.
 
     Guards decision c30: the WSGI front sits behind CF Access with zero new
-    auth exemptions. The exempt families stay exactly {/static, /healthz,
+    auth exemptions. The exempt families stay exactly {/static, /healthz, /readyz,
     /media}."""
     from irc_lens.web import app as app_module
     from irc_lens.web import auth as auth_module
 
-    expected = {"/static/", "/healthz", "/media/"}
+    expected = {"/static/", "/healthz", "/readyz", "/media/"}
     dev_exempt = _exempt_paths_in(app_module._dev_identity_middleware)
     cf_exempt = _exempt_paths_in(auth_module._is_public_path)
 

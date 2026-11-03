@@ -4,7 +4,7 @@ Phase 3: dev-mode and cloudflare-access modes both wired. Takes a
 :class:`LensConfig` and a session factory rather than a single connected
 Session. Builds the per-principal :class:`SessionRegistry`, mounts the
 appropriate identity middleware for the configured auth mode, and exposes
-a ``/healthz`` endpoint.
+``/healthz`` and ``/readyz`` endpoints.
 """
 
 from __future__ import annotations
@@ -154,6 +154,7 @@ def _dev_identity_middleware(config: LensConfig):
         if (
             request.path.startswith("/static/")
             or request.path == "/healthz"
+            or request.path == "/readyz"
             or request.path.startswith("/media/")
         ):
             return await handler(request)
@@ -297,6 +298,8 @@ def make_app(
     app.router.add_get("/events", routes.get_events)
     app.router.add_get("/presence", routes.get_presence)
     app.router.add_get("/residents", routes.get_residents)
+    app[routes.READINESS_PROBE] = routes.ReadinessProbe(config.server_host, config.server_port)
+    app.router.add_get("/readyz", routes.get_readyz)
     app.router.add_get("/healthz", routes.get_healthz)
     app.router.add_get("/owner/metrics", routes.get_owner_metrics)
     if access_store is not None:

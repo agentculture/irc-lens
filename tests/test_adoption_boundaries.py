@@ -40,7 +40,7 @@ _SRC_DIR = _REPO_ROOT / "src"
 
 def test_media_capability_urls_stay_auth_exempt() -> None:
     """Same source-introspection technique
-    ``tests/test_web_front.py::test_exempt_lists_contain_exactly_static_healthz_media``
+    ``tests/test_web_front.py::test_exempt_lists_contain_exactly_static_healthz_readyz_media``
     already applies — reused here via that file's ``_exempt_paths_in``
     helper (not duplicated) to pin specifically that ``/media/`` stays in
     both middlewares' auth-exempt path sets after the adoption."""

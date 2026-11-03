@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-11-03
+
+### Added
+
+- `GET /readyz`: a public, opaque readiness check for monitors. It returns 200 when the IRC server accepts a TCP connection and 503 when it doesn't, and shares one result for 5 seconds. `/healthz` is unchanged and still says nothing about the IRC server.
+
 ## [0.18.1] - 2026-10-31
 
 ### Fixed

@@ -126,7 +126,7 @@ mismatch. `/media/{token}` serves auth-exempt blobs via capability URLs
 (128-bit tokens). `/events` uses `text/event-stream` with no-cache.
 `/agent` and every `/agent/{slug}` — the index, `llms.txt`,
 `sitemap.xml`, `front`, and each purpose-authored doc page — are
-ordinary, **non-exempt** routes: unlike `/static`, `/healthz`, and
+ordinary, **non-exempt** routes: unlike `/static`, `/healthz`, `/readyz`, and
 `/media`, they sit *behind* the same identity middleware as the console
 root (dev mode's synthetic identity, or a valid Cloudflare Access JWT in
 `cloudflare-access` mode). See `web/front.py` and the decision log entry
@@ -368,7 +368,7 @@ User-ratified decisions from that adoption:
 * **The `/agent` prefix sits *behind* Cloudflare Access** in
   `cloudflare-access` mode, exactly like the console root — zero new
   auth exemptions. Anonymous agent discovery of a deployed lens was
-  explicitly not a goal; `/static`, `/healthz`, and `/media` remain
+  explicitly not a goal; `/static`, `/healthz`, `/readyz`, and `/media` remain
   the only exempt paths (see `web/app.py`).
 
 The one deliberate implementation deviation from a pure "just use
