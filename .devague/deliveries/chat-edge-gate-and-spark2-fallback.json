@@ -1,0 +1,39 @@
+{
+  "plan_slug": "chat-edge-gate-and-spark2-fallback",
+  "schema_version": 2,
+  "created": "2026-11-03T22:34:54Z",
+  "updated": "2026-11-03T22:34:54Z",
+  "deviations": [
+    {
+      "id": "d1",
+      "what": "The Worker sends the visitor's IP in its own header, overwriting any client-sent value; the lens trusts it only when the Worker's credential verifies, otherwise behaving as today, with a test that a forged header without the credential is ignored",
+      "task_ref": "t6",
+      "reason": "The t2 spike measured a Cloudflare Worker address as the client through a same-zone Worker, so assumption c34 is false and all visitors would share one rate-limit bucket",
+      "affects": [
+        "t8",
+        "c34"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "needs-follow-up",
+      "seq": 1
+    },
+    {
+      "id": "d2",
+      "what": "t9 must prove a browser-style POST through the Worker reaches spark2's tunnel with Origin accepted; if cf.resolveOverride can't do it, t6's configured public origin is the fallback",
+      "task_ref": "t9",
+      "reason": "The t2 spike only tried resolveOverride against the same host, so reaching a second tunnel is unproven",
+      "affects": [
+        "t6",
+        "t8"
+      ],
+      "origin": "user",
+      "status": "approved",
+      "classification": "acceptable",
+      "seq": 2
+    }
+  ],
+  "evidence": [],
+  "deltas": [],
+  "supersessions": []
+}
