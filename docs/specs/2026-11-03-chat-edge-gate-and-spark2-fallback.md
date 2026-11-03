@@ -8,7 +8,7 @@
 
 ## Before → After
 
-- After: When spark fails, people reach spark2 after signing in again if needed, as spark2-<nick>; when both are down they see an outage page; the owner is told by email either way
+- After: When spark fails, people reach spark2 after signing in again if needed, as `spark2-<nick>`; when both are down they see an outage page; the owner is told by email either way
 
 ## Why it matters
 
@@ -64,7 +64,7 @@
 ## Assumptions
 
 - A single source of truth for sign-in, permissions and agent credentials must exist across both instances; separate guests.db files would sign people out on failover
-- On failover a person's nick changes from spark-<nick> to spark2-<nick> unless the design changes that
+- On failover a person's nick changes from `spark-<nick>` to `spark2-<nick>` unless the design changes that
 - The failover site needs its own sbx IRCd and guest agents, and a model path that does not run through spark
 - Moved history is partial: a person failing over may see gaps because history is per-server and backfill replays only recent in-memory events
 
@@ -109,7 +109,7 @@
 ## Decisions
 
 - Owner decision 2026-11-03: warm standby on spark2 is enough; active-active sharing of live load is not wanted
-- Owner decision 2026-11-03: a person's nick may change from spark-<nick> to spark2-<nick> during failover
+- Owner decision 2026-11-03: a person's nick may change from `spark-<nick>` to `spark2-<nick>` during failover
 - Owner decision 2026-11-03: hourly email only while a check is down, using the healthchecks.io reminder setting; silence means healthy; no always-on status mail
 - Owner decision 2026-11-03: the Worker is gate-only first (routing, failover, outage page, keeping anonymous traffic off the origin); sign-in stays on the lens; identity in D1 is a later separate phase
 - Owner decision 2026-11-03: /readyz covers the main IRC server only, so a guest sandbox failure never triggers failover for everyone; a separate sbx signal can come later
