@@ -63,6 +63,8 @@ class LensConfig:
     media_trusted_hosts: tuple[str, ...]
     culture_residents_url: str | None = None
     culture_overview_name: str | None = None
+    # Standby serves approved users while freezing account changes.
+    standby_enabled: bool = False
     guest_enabled: bool = False
     guest_sandbox_name: str = "sbx"
     guest_sandbox_host: str = "127.0.0.1"
@@ -815,6 +817,11 @@ def _validate_guest_mode_section(raw: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
+def _validate_standby(raw: dict) -> bool:
+    section = _optional_mapping(raw.get("standby"), "standby", frozenset({"enabled"}))
+    return _coerce_bool(section.get("enabled", False), "standby.enabled")
+
+
 def load_config(path: Path) -> LensConfig:
     if not path.exists():
         raise _err(
@@ -878,6 +885,7 @@ def load_config(path: Path) -> LensConfig:
     access_enabled = _validate_email_permissions(auth)
 
     return LensConfig(
+        standby_enabled=_validate_standby(raw),
         auth_mode=mode,
         dev_nick=dev_nick,
         dev_email=dev_email,

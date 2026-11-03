@@ -184,7 +184,7 @@ def _sandbox_view_allowed(request: web.Request) -> bool:
     return may_use_sandbox_view(
         request.get("identity"),
         access_enabled=bool(getattr(config, "access_enabled", False)),
-        guest_enabled=bool(config.guest_enabled),
+        guest_enabled=bool(config.guest_enabled and not config.standby_enabled),
     )
 
 
@@ -201,8 +201,7 @@ def _backend_for(request: web.Request) -> tuple[Identity, str]:
         toggled = request.app.get("sandbox_toggle", ())
         # With email permissions on, only admins may sit in the sandbox view;
         # a member always gets the mesh, whatever a stale toggle says.
-        may_toggle = identity.is_admin if config.access_enabled else True
-        if may_toggle and config.guest_enabled and identity.principal in toggled:
+        if _sandbox_view_allowed(request) and identity.principal in toggled:
             sandbox_identity = identity._replace(
                 nick=sandbox_nick_for(config, identity)
             )

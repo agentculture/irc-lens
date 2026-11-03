@@ -212,7 +212,7 @@ def install_access(app: web.Application) -> AccessStore | None:
         return None
     store = AccessStore(_store_path(config))
     first_start = _sql_count(store, "SELECT COUNT(*) FROM admin_imports") == 0
-    if first_start:
+    if first_start and not config.standby_enabled:
         store.import_admins(config.allowed_emails)
     if store.admin_count() == 0:
         raise AfiError(
@@ -271,6 +271,8 @@ def can_sign_in(app: web.Application, email: str) -> bool:
     closed without a store); otherwise ``auth.allowed_emails`` does.
     """
     config = app["config"]
+    if config.standby_enabled:
+        return approved_user(app, email) is not None
     if not getattr(config, "access_enabled", False):
         return email.lower() in allowed_lower(config)
     store = app.get(ACCESS_STORE)
@@ -287,6 +289,8 @@ def can_sign_in(app: web.Application, email: str) -> bool:
 
 def promote_on_signin(app: web.Application, email: str) -> None:
     """After a right sign-in code: an ``invited`` user becomes ``approved``."""
+    if app["config"].standby_enabled:
+        return
     store = app.get(ACCESS_STORE)
     if store is None:
         return

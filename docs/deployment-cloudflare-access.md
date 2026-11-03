@@ -163,3 +163,58 @@ from the host to `<your-team>.cloudflareaccess.com`.
 
 Walk [security-checklist.md](security-checklist.md) before opening
 the hostname to the internet.
+
+## Standby replica
+
+Enable standby on spark2 with:
+
+```yaml
+standby:
+  enabled: true
+```
+
+It defaults to `false`. Restart the lens after changing it. Use a copy of the
+existing access/guest database with approved users, chosen nicknames, grants and
+passwords already present; standby does not import administrators. Keep the
+existing sign-in configuration (`guest_mode.enabled` and app sign-in) when using
+email/password sign-in: that switch also installs the approved sign-in machinery.
+Standby overrides guest access, including previously issued guest cookies and the
+approved user's sandbox view. Invited users cannot become approved during standby.
+Approved users keep their usual `<server.name>-<chosen nickname>` on IRC; configure
+`server.name: spark2` for this replica. A user without a chosen nickname must wait
+until account changes are available again.
+
+The single standby middleware returns HTTP 503 with a clear outage message for
+account changes. The inventory traced from `access_store.py` and `guest_store.py`
+is all of these POST routes:
+
+| Routes | Account data affected |
+| --- | --- |
+| `/admin/users`, `/admin/users/remove` | Users, roles, approval, credential revocation |
+| `/admin/users/nickname`, `/nickname` | Nicknames and reservations |
+| `/admin/grants` | Channel grants |
+| `/admin/extension` | Agent extensions |
+| `/agent-credential` | Agent credentials and guest agent consent |
+| `/entry/welcome`, `/entry/guest/start`, `/entry/verify` | Guest tokens, accounts and consents |
+| `/password`, `/password/{token}` | Password reset tokens, passwords, trusted-device removal |
+| `/delete/request`, `/delete/confirm` | Deletion tokens and guest data deletion |
+
+`/entry/signin` and `/entry/code` are conditional: only already-approved emails
+may proceed. Invitation promotion and guest creation through these routes are
+blocked. Approved sign-in codes, attempts/rate limits, trusted-browser records,
+and session creation, touch and logout remain local writes on spark2. They are
+not replicated account changes. The automatic guest retention sweep is suspended.
+CLI administration is outside this HTTP gate; do not run account-changing CLI
+commands against the standby copy.
+
+All other unsafe requests are denied by default except the reviewed POST paths
+`/entry/email`, `/entry/signin`, `/entry/code`, `/input`, `/logout` and
+`/guest/logout`. This also blocks uploads, the old Guest mode button and sandbox
+switches. Cloudflare service tokens cannot act as approved humans. Agent credential pages and the configured MCP endpoint are unavailable.
+The route-inventory test must be updated when adding a POST route; a new unsafe
+route cannot silently pass the gate.
+
+HTML pages display “Standby mode: agents and spark media are unavailable.”
+`/healthz`, `/readyz`, `/static/` and existing capability URLs under `/media/`
+continue through their usual handlers. Readiness still reflects actual IRC
+reachability; the banner does not imply that locally stored media is deleted.
