@@ -3,6 +3,7 @@ import asyncio
 import re
 import socket
 from dataclasses import replace
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 from urllib.parse import urlencode
 
@@ -16,7 +17,7 @@ from irc_lens._errors import AfiError
 from irc_lens.access_store import AccessStore
 from irc_lens.config import load_config
 from irc_lens.mail import RecordingAdapter
-from irc_lens.web import app_session, entry, make_app, routes, standby
+from irc_lens.web import app_session, bans, entry, make_app, routes, standby
 from test_registry_access import _factory
 
 ADMIN = "admin@example.org"
@@ -284,3 +285,14 @@ def test_standby_does_not_import_admins(tmp_path):
     with pytest.raises(AfiError):
         app_session.install_access(app)
     assert AccessStore(cfg.guest_store_path).list_users() == []
+
+
+def test_ban_sweep_gets_no_access_store_on_standby():
+    """The sweep purges a banned guest's credentials: that's an account change."""
+    store = object()
+    for enabled, expected in ((True, None), (False, store)):
+        app = web.Application()
+        app["config"] = SimpleNamespace(standby_enabled=enabled)
+        app[app_session.ACCESS_STORE] = store
+        assert bans._writable_access(app) is expected
+

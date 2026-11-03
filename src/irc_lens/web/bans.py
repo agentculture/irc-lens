@@ -91,6 +91,13 @@ async def sweep_once(registry: SessionRegistry, store, access=None) -> list[str]
     return dropped
 
 
+def _writable_access(app: web.Application):
+    """The access store, unless standby: its credentials are a frozen replica."""
+    if app["config"].standby_enabled:
+        return None
+    return app.get(app_session.ACCESS_STORE)
+
+
 async def _loop(app: web.Application, interval: float) -> None:
     while True:
         await asyncio.sleep(interval)
@@ -98,7 +105,7 @@ async def _loop(app: web.Application, interval: float) -> None:
             await sweep_once(
                 app["registry"],
                 app["guest_store"],
-                access=app.get(app_session.ACCESS_STORE),
+                access=_writable_access(app),
             )
         except Exception:  # noqa: BLE001 -- the sweeper must never die
             logger.exception("ban sweep failed")
