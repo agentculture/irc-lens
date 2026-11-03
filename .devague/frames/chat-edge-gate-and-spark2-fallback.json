@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-03T16:02:01Z",
-  "updated": "2026-11-03T21:24:36Z",
+  "updated": "2026-11-03T22:32:58Z",
   "claims": [
     {
       "id": "c1",
@@ -881,6 +881,12 @@
       "id": "s31",
       "surface": "challenge pass / migration lens: guests.db schema",
       "finding": "tables use additive CREATE IF NOT EXISTS migrations, so a copy from a newer spark to an older spark2 lens is unexamined: both hosts need matching versions, to be a plan risk",
+      "seeds": []
+    },
+    {
+      "id": "s32",
+      "surface": "t2 POST spike, same-zone Worker route, 2026-11-04",
+      "finding": "MEASURED: browser-style POST through a same-zone Worker returned 204 with the public Origin and 403 with a foreign one, on Host chat. The lens recorded a Cloudflare Worker IPv6 address as the client, not the visitor's IP, so c34's same-zone assumption is false here and all visitors would share one rate-limit bucket. resolveOverride was only tried against the same host, so reaching a second tunnel is still untested",
       "seeds": []
     }
   ],
