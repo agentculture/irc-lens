@@ -1,6 +1,6 @@
 """HTTP route handlers for irc-lens.
 
-* ``GET /readyz``  — public, cached TCP readiness for the main IRC server.
+* ``GET /readyz``  — public, cached IRC PING/PONG readiness for the main IRC server.
 * ``GET /``        — render the three-pane index from Session state.
 * ``POST /input``  — read the input line (JSON or form-encoded body),
   parse via ``parse_command``, dispatch through ``Session.execute``.
@@ -1079,33 +1079,56 @@ async def get_residents(request: web.Request) -> web.Response:
 
 
 class ReadinessProbe:
-    """Per-app TCP readiness result, shared for five monotonic seconds."""
+    """Main IRCd readiness: PING must receive PONG within two seconds.
+
+    Results are shared for five monotonic seconds, so a change can take
+    about seven seconds to appear. Monitor timeouts must exceed two seconds
+    to receive a 503 rather than timing out themselves.
+    """
+
+    TIMEOUT = 2
 
     def __init__(self, host: str, port: int) -> None:
         self.host = host
         self.port = port
         self._lock = asyncio.Lock()
         self._expires_at = 0.0
-        self._ok = False
+        self._ok: bool | None = None
 
     async def check(self) -> bool:
         async with self._lock:
-            if time.monotonic() < self._expires_at:
+            if self._ok is not None and time.monotonic() < self._expires_at:
                 return self._ok
-            writer = None
+            ok = False
+            reason = "connection closed without PONG"
             try:
-                async with asyncio.timeout(2):
-                    _, writer = await asyncio.open_connection(self.host, self.port)
-                    writer.close()
-                    await writer.wait_closed()
-                self._ok = True
-            except (OSError, TimeoutError) as exc:
-                logger.warning("IRC readiness probe failed: %s: %s", type(exc).__name__, exc)
-                self._ok = False
-            finally:
-                if writer is not None:
-                    writer.close()
+                async with asyncio.timeout(self.TIMEOUT):
+                    reader, writer = await asyncio.open_connection(self.host, self.port)
+                    try:
+                        writer.write(b"PING :readyz\r\n")
+                        await writer.drain()
+                        while True:
+                            line = await reader.readuntil(b"\n")
+                            if b"PONG" in line:
+                                ok = True
+                                break
+                    finally:
+                        # Initiate shutdown without waiting beyond the deadline.
+                        try:
+                            writer.close()
+                        except Exception:
+                            pass  # Cleanup must never override the probe result.
+            except (OSError, UnicodeError, asyncio.LimitOverrunError) as exc:
+                reason = f"{type(exc).__name__}: {exc}"
+            except asyncio.IncompleteReadError:
+                pass  # EOF before a complete PONG line.
+            previous = self._ok
+            self._ok = ok
             self._expires_at = time.monotonic() + 5
+            if not ok and previous is not False:
+                logger.warning("IRC readiness probe failed: %s", reason)
+            elif ok and previous is False:
+                logger.info("IRC readiness probe recovered")
             return self._ok
 
 

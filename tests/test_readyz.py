@@ -7,6 +7,10 @@ from contextlib import asynccontextmanager
 from dataclasses import replace
 from types import SimpleNamespace
 
+import pytest
+from unittest.mock import AsyncMock, Mock
+
+from _readyz_server import listener
 from aiohttp.test_utils import TestClient, TestServer
 
 from helpers import DEV_CONFIG
@@ -14,37 +18,8 @@ from irc_lens.web import make_app, routes
 
 
 @asynccontextmanager
-async def listener(port=0):
-    connections = []
-    closed = asyncio.Event()
-
-    async def accept(reader, writer):
-        connections.append(writer)
-        try:
-            assert await reader.read() == b""
-        finally:
-            writer.close()
-            await writer.wait_closed()
-            closed.set()
-
-    server = await asyncio.start_server(accept, "127.0.0.1", port)
-    state = SimpleNamespace(
-        server=server, port=server.sockets[0].getsockname()[1],
-        connections=connections, closed=closed,
-    )
-    try:
-        yield state
-    finally:
-        server.close()
-        await server.wait_closed()
-        for writer in connections:
-            writer.close()
-            await writer.wait_closed()
-
-
-@asynccontextmanager
-async def client_for(port, **kwargs):
-    config = replace(DEV_CONFIG, server_host="127.0.0.1", server_port=port, **kwargs)
+async def client_for(port, host="127.0.0.1", **kwargs):
+    config = replace(DEV_CONFIG, server_host=host, server_port=port, **kwargs)
 
     def boom_factory(_nick):
         raise AssertionError("readiness must not create an IRC session")
@@ -126,3 +101,88 @@ async def test_readyz_uses_main_server_not_sandbox():
                               guest_sandbox_port=sandbox.port) as client:
             await assert_result(client, False)
         assert len(sandbox.connections) == 0
+
+
+async def test_readyz_silent_server_times_out(monkeypatch):
+    monkeypatch.setattr(routes.ReadinessProbe, "TIMEOUT", 0.05)
+    async with listener(reply=None) as tcp, client_for(tcp.port) as client:
+        await asyncio.wait_for(assert_result(client, False), 1)
+        await asyncio.wait_for(tcp.closed.wait(), 1)
+
+
+async def test_readyz_eof_without_pong():
+    async with listener(reply=b"") as tcp, client_for(tcp.port) as client:
+        await assert_result(client, False)
+
+
+async def test_readyz_junk_then_pong():
+    async with listener(reply=b"NOTICE junk\r\n:spark PONG spark readyz\r\n") as tcp:
+        async with client_for(tcp.port) as client:
+            await assert_result(client, True)
+
+
+async def test_readyz_invalid_host_is_opaque():
+    async with client_for(6667, host="foo..bar") as client:
+        await assert_result(client, False)
+
+
+@pytest.mark.parametrize("failure", [OSError("refused"), UnicodeError("bad host")])
+async def test_probe_failed_results_cached(monkeypatch, failure):
+    now = [100.0]
+    monkeypatch.setattr(routes, "time", SimpleNamespace(monotonic=lambda: now[0]))
+    connect = AsyncMock(side_effect=failure)
+    monkeypatch.setattr(routes.asyncio, "open_connection", connect)
+    probe = routes.ReadinessProbe("foo..bar", 6667)
+    assert await probe.check() is False
+    now[0] = 104.999
+    assert await probe.check() is False
+    assert connect.await_count == 1
+    now[0] = 105.0
+    assert await probe.check() is False
+    assert connect.await_count == 2
+
+
+async def test_probe_logs_only_state_changes(monkeypatch, caplog):
+    reader = asyncio.StreamReader()
+    reader.feed_data(b"PONG\r\n" * 3)
+    writer = Mock(drain=AsyncMock())
+    connect = AsyncMock(side_effect=[
+        (reader, writer), OSError("refused"), OSError("still refused"),
+        (reader, writer), (reader, writer), OSError("down again"),
+    ])
+    monkeypatch.setattr(routes.asyncio, "open_connection", connect)
+    probe = routes.ReadinessProbe("localhost", 6667)
+    with caplog.at_level(logging.INFO, logger=routes.__name__):
+        for expected, count in [(True, 0), (False, 1), (False, 1),
+                                (True, 2), (True, 2), (False, 3)]:
+            probe._expires_at = 0
+            assert await probe.check() is expected
+            assert len(caplog.records) == count
+    assert [r.levelno for r in caplog.records] == [
+        logging.WARNING, logging.INFO, logging.WARNING,
+    ]
+    assert "refused" in caplog.records[0].message
+    assert "recovered" in caplog.records[1].message
+
+
+@pytest.mark.parametrize("reply", [b"PONG\r\n", b"", None, b"junk\r\n", b"x" * 70000])
+@pytest.mark.parametrize("close_fails", [False, True])
+async def test_probe_closes_and_caches_every_outcome(monkeypatch, reply, close_fails):
+    reader = asyncio.StreamReader()
+    if reply is not None:
+        reader.feed_data(reply)
+        if not reply:
+            reader.feed_eof()
+    writer = Mock(drain=AsyncMock())
+    if close_fails:
+        writer.close.side_effect = RuntimeError("close failed")
+    connect = AsyncMock(return_value=(reader, writer))
+    monkeypatch.setattr(routes.asyncio, "open_connection", connect)
+    monkeypatch.setattr(routes.ReadinessProbe, "TIMEOUT", 0.01)
+    probe = routes.ReadinessProbe("localhost", 6667)
+    expected = reply == b"PONG\r\n"
+    assert await probe.check() is expected
+    writer.write.assert_called_once_with(b"PING :readyz\r\n")
+    writer.close.assert_called_once()
+    assert await probe.check() is expected
+    assert connect.await_count == 1

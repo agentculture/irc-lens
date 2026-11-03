@@ -129,16 +129,19 @@ Reverse on shutdown.
 ## Readiness monitoring
 
 Use `GET /readyz` for external monitors: `/healthz` does not check the IRCd.
-Readiness opens and closes a TCP connection to the configured main
-`server.host` / `server.port` with a two-second timeout (not the guest sandbox).
-It returns only `{"ok": true}` with 200 when reachable, or `{"ok": false}`
-with 503 on failure. Failure reasons are logged server-side.
+Readiness connects to the configured main `server.host` / `server.port`,
+sends IRC `PING :readyz`, and requires a `PONG` within a two-second timeout
+(not the guest sandbox). It returns only `{"ok": true}` with 200 on success,
+or `{"ok": false}` with 503 on failure. Failures are logged server-side only
+on state change, with an info log on recovery. A monitor’s own timeout must
+exceed two seconds, or it may time out instead of receiving a 503.
 
 No identity or JWT is required by the lens. Configure an Access edge bypass
 for `/readyz` as described for `/healthz` above so external monitors can reach
 it without SSO. Responses carry `Cache-Control: no-store`; the lens shares
 one result in memory for five seconds, including across concurrent requests,
-so changes may take up to five seconds to appear.
+so changes may take up to about seven seconds to appear (the two-second
+probe timeout plus five-second sharing).
 
 ## Troubleshooting
 

@@ -26,6 +26,7 @@ import re
 import xml.etree.ElementTree as ET
 from collections.abc import AsyncIterator
 from pathlib import Path
+from dataclasses import replace
 
 import pytest
 import pytest_asyncio
@@ -37,6 +38,7 @@ from irc_lens.session import Session
 from irc_lens.web import make_app
 
 from _jwks_server import FakeJWKS
+from _readyz_server import listener
 from helpers import make_app_for as _make_app_for
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -251,12 +253,20 @@ async def test_cf_valid_jwt_reaches_front(cf_client: TestClient, jwks: FakeJWKS)
     assert (await resp.text()).strip()
 
 
-async def test_cf_exempt_paths_are_not_401(cf_client: TestClient) -> None:
-    """The prefix is guarded, but the four exempt families still are not:
-    a JWT-less request to /healthz, /readyz, /static/*, /media/* must NOT be 401."""
-    for path in ("/healthz", "/readyz", "/static/does-not-exist.js", "/media/bogus.png"):
-        resp = await cf_client.get(path)
-        assert resp.status != 401, f"{path} must remain auth-exempt"
+async def test_cf_exempt_paths_are_not_401(jwks: FakeJWKS) -> None:
+    """The four exempt families remain accessible without a JWT."""
+    def boom_factory(_nick: str):
+        raise AssertionError("exempt paths must not create an IRC session")
+
+    async with listener() as tcp:
+        config = replace(_cf_config(jwks, allowed=["alice@example.com"]),
+                         server_host="127.0.0.1", server_port=tcp.port)
+        async with TestClient(TestServer(make_app(config, boom_factory))) as client:
+            for path, status in (("/healthz", 200), ("/readyz", 200),
+                                 ("/static/does-not-exist.js", 404),
+                                 ("/media/bogus.png", 404)):
+                resp = await client.get(path)
+                assert resp.status == status, f"{path} must remain auth-exempt"
 
 
 def _exempt_paths_in(func) -> set[str]:
