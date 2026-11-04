@@ -89,6 +89,11 @@ auth:
     team_domain: <your-team>.cloudflareaccess.com
   allowed_emails:
     - <your-email>
+  # Add these when a routing Worker fronts the origin. Enforcement remains
+  # off until the Worker is live; the YAML names an env var, never its value.
+  public_origin: https://<your-hostname>
+  require_edge_credential: false
+  edge_credential_env: IRC_LENS_EDGE_TOKEN
 server:
   name: <agentirc-server-name>
   host: 127.0.0.1
@@ -105,6 +110,44 @@ web:
 3. `cloudflared` (already running as a systemd unit after step 5).
 
 Reverse on shutdown.
+
+## Worker-to-origin trust and staged rollout
+
+When a Cloudflare Worker routes the public hostname to a separate tunnel
+hostname, browser POSTs retain the public `Origin`. Set `auth.public_origin` to
+that exact browser-visible origin so the CSRF check accepts it; an Origin other
+than the configured one is still refused. Without this setting, the existing
+request-host comparison remains unchanged.
+
+The Worker must overwrite both of these request headers before forwarding:
+
+- `X-Lens-Edge-Token`: the shared Worker credential.
+- `X-Lens-Edge-Client-IP`: the visitor address from `CF-Connecting-IP`.
+
+The lens trusts `X-Lens-Edge-Client-IP` only when the token verifies. A direct
+client cannot forge the rate-limit address by sending the IP header alone. The
+credential is compared in constant time and is never logged.
+
+Keep the secret out of the YAML. The value of `auth.edge_credential_env` is the
+name of the lens process environment variable that holds it. For example, set a
+strong random value as the Worker's `EDGE_TOKEN` secret and set the same value
+in `IRC_LENS_EDGE_TOKEN` for the lens service. If the named environment
+variable is absent or empty, verification fails closed.
+
+Roll this out without creating an origin outage:
+
+1. Deploy the lens config above with `require_edge_credential: false`.
+2. Deploy the Worker with the matching secret and confirm GET, browser POST,
+   event streaming, and the visitor IP on each origin.
+3. Change `require_edge_credential` to `true` on each origin and restart it.
+4. Confirm a Worker request succeeds and a direct request without
+   `X-Lens-Edge-Token` gets HTTP 403, including `/healthz` and `/readyz`.
+
+The switch defaults to `false`, `public_origin` defaults to unset, and the
+credential environment-variable name defaults to unset. Therefore an existing
+deployment with none of these keys keeps its previous behavior. For emergency
+rollback, set `require_edge_credential: false` and restart the lens; do not
+remove or expose the Worker secret.
 
 ## 9. Verify
 

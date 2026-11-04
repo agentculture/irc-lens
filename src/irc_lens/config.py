@@ -115,6 +115,11 @@ class LensConfig:
     guest_rate_password_attempts_per_15min: int = 5
     # web.mcp_path: where the remote MCP endpoint is mounted (web/mcp_http.py).
     mcp_path: str = "/mcp"
+    # Worker-to-origin gate. The config stores only the environment-variable
+    # name; the credential itself never belongs in YAML.
+    public_origin: str | None = None
+    require_edge_credential: bool = False
+    edge_credential_env: str | None = None
 
     @property
     def access_mode(self) -> str:
@@ -822,6 +827,61 @@ def _validate_standby(raw: dict) -> bool:
     return _coerce_bool(section.get("enabled", False), "standby.enabled")
 
 
+def _public_origin(auth: dict) -> str | None:
+    """Return the browser-visible origin, without any path or credentials."""
+    value = _optional_str(auth.get("public_origin"), "auth.public_origin")
+    if value is None:
+        return None
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError:
+        parsed, port = None, None
+    valid = bool(
+        parsed
+        and parsed.scheme in ("http", "https")
+        and parsed.hostname
+        and parsed.username is None
+        and parsed.password is None
+        and parsed.path in ("", "/")
+        and not parsed.query
+        and not parsed.fragment
+        and (port is None or 1 <= port <= 65535)
+    )
+    if not valid:
+        raise _err(
+            f"auth.public_origin must be an http(s) origin without a path, "
+            f"got {value!r}",
+            "set `auth.public_origin:` to the browser-facing origin, e.g. "
+            "https://chat.example.com",
+        )
+    return value.rstrip("/")
+
+
+def _edge_trust_fields(auth: dict) -> tuple[str | None, bool, str | None]:
+    """Return public origin and the default-off Worker credential settings."""
+    required = _coerce_bool(
+        auth.get("require_edge_credential", False),
+        "auth.require_edge_credential",
+    )
+    env_name = _optional_str(
+        auth.get("edge_credential_env"), "auth.edge_credential_env"
+    )
+    if env_name is not None and not env_name.strip():
+        raise _err(
+            "auth.edge_credential_env must not be empty",
+            "set `auth.edge_credential_env:` to the name of the environment "
+            "variable holding the Worker credential",
+        )
+    if required and env_name is None:
+        raise _err(
+            "auth.require_edge_credential needs auth.edge_credential_env",
+            "name the environment variable holding the Worker credential in "
+            "`auth.edge_credential_env:`",
+        )
+    return _public_origin(auth), required, env_name
+
+
 def load_config(path: Path) -> LensConfig:
     if not path.exists():
         raise _err(
@@ -883,6 +943,9 @@ def load_config(path: Path) -> LensConfig:
         app_signin_enabled = False
     app_signin_base_url = _app_signin_base_url(auth)
     access_enabled = _validate_email_permissions(auth)
+    public_origin, require_edge_credential, edge_credential_env = (
+        _edge_trust_fields(auth)
+    )
 
     return LensConfig(
         standby_enabled=_validate_standby(raw),
@@ -913,6 +976,9 @@ def load_config(path: Path) -> LensConfig:
         agents_enabled=_validate_agents_enabled(auth),
         agent_credential_ttl_s=_agent_credential_ttl_s(auth),
         mcp_path=_validate_mcp_path(raw),
+        public_origin=public_origin,
+        require_edge_credential=require_edge_credential,
+        edge_credential_env=edge_credential_env,
         **guest_fields,
     )
 

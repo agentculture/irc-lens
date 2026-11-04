@@ -405,14 +405,16 @@ def _connection_lost(message: str) -> web.Response:
 
 
 def _origin_ok(request: web.Request) -> bool:
-    """CSRF defense-in-depth: verify Origin matches the request host.
+    """CSRF defense-in-depth: verify Origin matches its trusted target.
 
     Compares ``(hostname.lower(), port_or_default_for_scheme)`` tuples
     rather than raw header strings so that case, default-port elision,
     and IPv6 bracket formatting don't cause false 403s.
 
     - Origin absent → allow (curl, cloudflared probes, internal monitors).
-    - Origin present → match → allow; mismatch → deny.
+    - Configured public origin → compare to that browser-visible origin.
+    - Otherwise, preserve the existing comparison to the request host.
+    - Any mismatch → deny.
 
     A proper CSRF-token scheme is tracked in issue #27 and will replace
     this floor in a later phase.
@@ -420,6 +422,12 @@ def _origin_ok(request: web.Request) -> bool:
     origin = request.headers.get("Origin")
     if origin is None:
         return True
+    config = request.app.get("config")
+    public_origin = getattr(config, "public_origin", None)
+    if public_origin is not None:
+        normalized = _normalized_origin(origin)
+        expected = _normalized_origin(public_origin)
+        return normalized is not None and normalized == expected
     parsed = urllib.parse.urlparse(origin)
     if not parsed.hostname:
         return False
@@ -428,6 +436,19 @@ def _origin_ok(request: web.Request) -> bool:
     request_host = (request.url.host or "").lower()
     request_port = _request_effective_port(request)
     return (origin_host, origin_port) == (request_host, request_port)
+
+
+def _normalized_origin(value: str) -> tuple[str, str, int] | None:
+    """Normalize an HTTP(S) origin for configured-public-origin comparison."""
+    try:
+        parsed = urllib.parse.urlparse(value)
+        port = parsed.port
+    except ValueError:
+        return None
+    scheme = parsed.scheme.lower()
+    if scheme not in ("http", "https") or not parsed.hostname:
+        return None
+    return scheme, parsed.hostname.lower(), _effective_port(port, scheme)
 
 
 def _request_effective_port(request: web.Request) -> int:

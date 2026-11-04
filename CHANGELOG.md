@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-04
+
+### Added
+
+- Edge Worker trust, off by default: `auth.public_origin`, `auth.require_edge_credential`
+  and `auth.edge_credential_env`. A request's `X-Lens-Edge-Client-IP` is honored only
+  with a valid `X-Lens-Edge-Token`, compared in constant time.
+
 ## [0.21.1] - 2026-11-04
 
 ### Fixed
