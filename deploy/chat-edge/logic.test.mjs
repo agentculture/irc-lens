@@ -39,7 +39,7 @@ test("a dead standby is never failed over to", () => {
   let state = DEFAULT_STATE;
   for (let i = 0; i < 5; i++) state = nextState(state, BOTH_DOWN, 3);
   assert.equal(state.active, PRIMARY);
-  assert.equal(state.failures, 5);
+  assert.equal(state.failures, 3);
 });
 
 test("a failing standby returns to a healthy primary", () => {
@@ -82,7 +82,7 @@ test("a forged client IP is dropped when there's no real one", () => {
 });
 
 test("gateway failures are told apart from app answers", () => {
-  for (const status of [502, 503, 504, 530]) assert.equal(isGatewayFailure(status), true);
+  for (const status of [502, 504, 530]) assert.equal(isGatewayFailure(status), true);
   for (const status of [200, 204, 302, 401, 403, 404, 500]) assert.equal(isGatewayFailure(status), false);
 });
 

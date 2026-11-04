@@ -8,7 +8,8 @@ export const DEFAULT_STATE = Object.freeze({ active: PRIMARY, failures: 0 });
 export const CLIENT_IP_HEADER = "X-Lens-Edge-Client-IP";
 export const EDGE_TOKEN_HEADER = "X-Lens-Edge-Token";
 
-const GATEWAY_FAILURES = new Set([502, 503, 504, 520, 521, 522, 523, 524, 525, 526, 530]);
+// No 503: the lens answers 503 itself in standby mode and on some forms, and those must pass.
+const GATEWAY_FAILURES = new Set([502, 504, 520, 521, 522, 523, 524, 525, 526, 530]);
 
 /**
  * Next failover state after one readiness check of both origins.
@@ -21,7 +22,8 @@ export function nextState(state, { primaryOk, standbyOk }, threshold) {
   const activeOk = state.active === PRIMARY ? primaryOk : standbyOk;
   if (activeOk) return { active: state.active, failures: 0 };
 
-  const failures = state.failures + 1;
+  // Capped so a long outage stops changing the state, and so stops writing to KV.
+  const failures = Math.min(state.failures + 1, threshold);
   const otherOk = state.active === PRIMARY ? standbyOk : primaryOk;
   if (failures >= threshold && otherOk) {
     return { active: state.active === PRIMARY ? STANDBY : PRIMARY, failures: 0 };

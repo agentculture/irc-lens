@@ -13,7 +13,7 @@ function makeEnv(stored = null) {
     ORIGIN_STANDBY: "b.example.org",
     EDGE_TOKEN: "real-token",
     STATE: {
-      get: async (key) => (kv.has(key) ? JSON.parse(kv.get(key)) : null),
+      get: async (key) => kv.get(key) ?? null,
       put: async (key, value) => {
         writes += 1;
         kv.set(key, value);
@@ -122,4 +122,67 @@ test("a probe that throws counts as a failed check", async () => {
   };
   const state = await checkOrigins(env, fetchImpl);
   assert.equal(state.failures, 1);
+});
+
+test("a KV failure on a request still serves the origin", async () => {
+  const env = makeEnv();
+  env.STATE.get = async () => {
+    throw new Error("kv down");
+  };
+  const response = await handleRequest(page(), env, {
+    fetchImpl: async () => new Response("ok"),
+    outageHtml: PAGE,
+  });
+  assert.equal(await response.text(), "ok");
+});
+
+test("a mistyped stored state serves the primary", async () => {
+  const env = makeEnv();
+  env.STATE.get = async () => "{not json";
+  const seen = [];
+  await handleRequest(page(), env, {
+    fetchImpl: async (_request, init) => {
+      seen.push(init.cf.resolveOverride);
+      return new Response("ok");
+    },
+    outageHtml: PAGE,
+  });
+  assert.deepEqual(seen, ["a.example.org"]);
+});
+
+test("a KV failure during a check writes nothing, so failover state survives", async () => {
+  const env = makeEnv({ active: STANDBY, failures: 0 });
+  env.STATE.get = async () => {
+    throw new Error("kv down");
+  };
+  await assert.rejects(checkOrigins(env, probe(true, true)));
+  assert.equal(env.writes, 0);
+});
+
+test("a redirecting origin isn't ready, and the probe doesn't follow it", async () => {
+  const env = makeEnv({ active: "primary", failures: 0 });
+  const modes = [];
+  const fetchImpl = async (url, init) => {
+    modes.push(init.redirect);
+    return new Response("", { status: url.includes("a.example.org") ? 302 : 200 });
+  };
+  const next = await checkOrigins(env, fetchImpl);
+  assert.equal(next.failures, 1);
+  assert.deepEqual(modes, ["manual", "manual"]);
+});
+
+test("the lens's own 503 reaches the visitor", async () => {
+  const body = "standby refuses this";
+  const response = await handleRequest(page(), makeEnv(), {
+    fetchImpl: async () => new Response(body, { status: 503, headers: { "Retry-After": "30" } }),
+    outageHtml: PAGE,
+  });
+  assert.equal(await response.text(), body);
+  assert.equal(response.headers.get("Retry-After"), "30");
+});
+
+test("a long outage with no failover target stops writing to KV", async () => {
+  const env = makeEnv();
+  for (let run = 0; run < 10; run += 1) await checkOrigins(env, probe(false, false));
+  assert.equal(env.writes, 3);
 });
