@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-04T17:31:15Z",
-  "updated": "2026-11-04T17:53:49Z",
+  "updated": "2026-11-04T17:56:34Z",
   "claims": [
     {
       "id": "c1",
@@ -734,7 +734,7 @@
       "behavior": "once the hourly or daily guest budget is reached, no further guest code reaches the mail adapter, and the count survives a console restart",
       "source_text": "A persistent global budget caps guest code mail per hour and per day, counted before the send is scheduled because sends run in background tasks (web/entry.py:552,569), covering the guest-code paths at entry.py:668 and :989. It reuses the attempts table helpers (guest_store.py:565-592); retention there is one day (ATTEMPT_RETENTION_S), so a daily window needs margin added.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o2",
@@ -743,7 +743,7 @@
       "behavior": "with the guest budget at 0, a correct password still sends the approved sign-in code",
       "source_text": "Approved users' sign-in code, new-browser notice and set-password mail stay outside the budget (entry.py:663,732; setpw.py:196-205), so guests can never lock an owner out of signing in.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o3",
@@ -752,7 +752,7 @@
       "behavior": "repeat requests for one address stop reaching the mail adapter at the hourly per-address limit",
       "source_text": "All outgoing mail has a total ceiling below the provider quota, and set-password and delete-confirm mail get an hourly per-address limit. Today web/setpw.py post_password and web/deletion.py post_request allow 10 mails per minute per address with no bot check, to anyone who knows an approved or guest address.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o4",
@@ -761,7 +761,7 @@
       "behavior": "total sends in a window never exceed the mail ceiling, whichever path sent them",
       "source_text": "All outgoing mail has a total ceiling below the provider quota, and set-password and delete-confirm mail get an hourly per-address limit. Today web/setpw.py post_password and web/deletion.py post_request allow 10 mails per minute per address with no bot check, to anyone who knows an approved or guest address.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o5",
@@ -770,7 +770,7 @@
       "behavior": "one IP alone can't use the whole hourly guest budget; other IPs still get codes",
       "source_text": "The guest budget gets an hourly per-IP cap beside it, and exhausting the budget is treated as a denial of guest sign-in, not only as protection: 20 scripted posts an hour would stop real guests, who still see the normal code page because entry.py keeps responses identical.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o6",
@@ -779,7 +779,7 @@
       "behavior": "a budget-hit alert fires and says real guests may be getting no mail",
       "source_text": "The guest budget gets an hourly per-IP cap beside it, and exhausting the budget is treated as a denial of guest sign-in, not only as protection: 20 scripted posts an hour would stop real guests, who still see the normal code page because entry.py keeps responses identical.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o7",
@@ -788,7 +788,7 @@
       "behavior": "a reserved-domain address never reaches the mail adapter, and status, body apart from the echoed address, cookie presence and timing floor match a normal guest submission",
       "source_text": "Reserved domains are refused before any provider call, keeping the same status, page, pending cookie, pad floor, attempt counting and dummy verify as a normal submission (entry.py:653-678), so a refusal reveals nothing.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o8",
@@ -797,7 +797,7 @@
       "behavior": "a recipient error raises no alert and doesn't use up the alert slot; a 5xx or network failure alerts",
       "source_text": "Provider failures are classified so recipient errors don't alert, each failure logs its HTTP status but never the address or body, and failed sends are counted in metrics. classify (alerts.py:48) separates only 429 today; MailSendError.status exists; failures log the type alone (entry.py:549,571).",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o9",
@@ -806,7 +806,7 @@
       "behavior": "the line includes the HTTP status and never the address, code or provider body",
       "source_text": "Provider failures are classified so recipient errors don't alert, each failure logs its HTTP status but never the address or body, and failed sends are counted in metrics. classify (alerts.py:48) separates only 429 today; MailSendError.status exists; failures log the type alone (entry.py:549,571).",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o10",
@@ -815,7 +815,7 @@
       "behavior": "guest mode on with no Turnstile keys gives one startup warning and a doctor finding; with keys set, neither",
       "source_text": "With guest mode on and no bot check configured, the console warns at startup and in doctor, and a setting can refuse guest codes in that state. make_bot_verifier silently returns NoopVerifier (entry.py:193-200), and doctor (cli/_meta.py:317) has no such check.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o11",
@@ -824,7 +824,7 @@
       "behavior": "a trusted browser signs in while verify is failing; an untrusted browser doesn't",
       "source_text": "With Turnstile on, already-trusted approved browsers skip the verify, so approved access survives a Cloudflare outage. New browsers stay blocked until verify recovers.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o12",
@@ -833,7 +833,7 @@
       "behavior": "changing config and restarting lifts the budget and required bot check, restoring guest mail with no code change",
       "source_text": "Operators can lift or reset the budget and turn off required bot check through config, with no code change, and the rollback steps are documented.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o13",
@@ -842,7 +842,7 @@
       "behavior": "the existing approved sign-in tests pass unchanged",
       "source_text": "No change to the approved sign-in flow or its alerts; irc-lens#69 owns those.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o14",
@@ -851,7 +851,7 @@
       "behavior": "a window crossing a trigger raises an alert with its counts, whatever Clef answers",
       "source_text": "Clef is a layer in the console's threat detection, across public traffic and not only sign-in: fixed rules watch counts of sign-in activity, mail spend, probed paths, 401 and 403 responses, and when a window crosses a trigger the console sends the decider (Clef, general domain) counts only and raises an operator alert with its threat verdict and the numbers. Clef detects and never enforces; the bot check, limits and budget do the blocking.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o15",
@@ -860,7 +860,7 @@
       "behavior": "the request body holds derived counts only: no address, IP, user agent or path text",
       "source_text": "Clef is a layer in the console's threat detection, across public traffic and not only sign-in: fixed rules watch counts of sign-in activity, mail spend, probed paths, 401 and 403 responses, and when a window crosses a trigger the console sends the decider (Clef, general domain) counts only and raises an operator alert with its threat verdict and the numbers. Clef detects and never enforces; the bot check, limits and budget do the blocking.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o16",
@@ -869,7 +869,7 @@
       "behavior": "sign-in behaves the same, and the alert still goes out marked not assessed",
       "source_text": "Clef is a layer in the console's threat detection, across public traffic and not only sign-in: fixed rules watch counts of sign-in activity, mail spend, probed paths, 401 and 403 responses, and when a window crosses a trigger the console sends the decider (Clef, general domain) counts only and raises an operator alert with its threat verdict and the numbers. Clef detects and never enforces; the bot check, limits and budget do the blocking.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o17",
@@ -878,7 +878,7 @@
       "behavior": "10000 requests in a window cause at most 1 decider call, fixed-size counter state and no added database writes",
       "source_text": "Threat detection stays cheap and can't be driven by attackers. Counting per request is in memory, with no database write or network call. Clef runs at most once per 15-minute window and at most 24 times a day, only after a rule triggers, with one call in flight, a 5 second timeout and no retries or queue: a skipped call is dropped and the alert says not assessed. These caps are config defaults and hold under any traffic volume.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o18",
@@ -887,7 +887,7 @@
       "behavior": "startup is clean and every other layer works",
       "source_text": "Clef detection is optional and off by default: decider URL and credential come from config and an env var, and a deployment with no gateway, such as a standby host or an outside user of irc-lens, runs every other layer unchanged.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o19",
@@ -896,7 +896,7 @@
       "behavior": "an unrouted path counts as a probe, and a 401 on a real route doesn't",
       "source_text": "Probe counting uses route matching in middleware, not status codes: anonymous requests to real and nonexistent paths both get 401, because auth runs first (auth.py:97 reads match_info), so status can't separate a probe from a mistake.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     }
   ]
 }
