@@ -155,7 +155,7 @@ test("a KV failure during a check writes nothing, so failover state survives", a
   env.STATE.get = async () => {
     throw new Error("kv down");
   };
-  await assert.rejects(checkOrigins(env, probe(200, 200)));
+  await assert.rejects(checkOrigins(env, probe(true, true)));
   assert.equal(env.writes, 0);
 });
 
@@ -183,6 +183,6 @@ test("the lens's own 503 reaches the visitor", async () => {
 
 test("a long outage with no failover target stops writing to KV", async () => {
   const env = makeEnv();
-  for (let run = 0; run < 10; run += 1) await checkOrigins(env, probe(503, 503));
+  for (let run = 0; run < 10; run += 1) await checkOrigins(env, probe(false, false));
   assert.equal(env.writes, 3);
 });
