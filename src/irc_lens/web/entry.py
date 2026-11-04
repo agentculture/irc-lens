@@ -76,7 +76,10 @@ from irc_lens.nickname import (  # shared with approved users' nicknames
     sanitize_nickname,
 )
 from irc_lens.web import app_session, csrf
-from irc_lens.web.auth import allows_anonymous
+from irc_lens.web.auth import (
+    allows_anonymous,
+    trusted_edge_client_ip,
+)
 from irc_lens.web.render import render_fragment, static_url
 from irc_lens.web.identity import TIER_GUEST
 from irc_lens.web.sessions import BACKEND_SANDBOX, GUEST_PRINCIPAL_PREFIX
@@ -289,13 +292,15 @@ def _plausible_email(email: str) -> bool:
 
 
 def client_ip(request: web.Request) -> str:
-    """Visitor IP: ``CF-Connecting-IP`` (cloudflared), else the peer.
+    """Visitor IP from a proven Worker, cloudflared, or the peer.
 
-    The lens binds loopback behind cloudflared, so every peer address is
-    the tunnel's; Cloudflare's header is the only per-visitor signal.
+    ``X-Lens-Edge-Client-IP`` is attacker-controlled unless the request also
+    presents the configured Worker credential. Without that proof, ignore it
+    and retain the existing ``CF-Connecting-IP``/peer behavior.
     """
     return (
-        request.headers.get("CF-Connecting-IP", "").strip()
+        trusted_edge_client_ip(request)
+        or request.headers.get("CF-Connecting-IP", "").strip()
         or request.remote
         or "unknown"
     )
