@@ -1,0 +1,640 @@
+{
+  "slug": "chat-edge-gate-and-spark2-fallback",
+  "title": "chat edge gate and spark2 fallback",
+  "frame_slug": "chat-edge-gate-and-spark2-fallback",
+  "schema_version": 5,
+  "status": "exported",
+  "created": "2026-11-03T21:26:10Z",
+  "updated": "2026-11-03T21:29:19Z",
+  "targets": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "chat.culture.dev sits behind a Cloudflare Worker that gates traffic at the edge, so anonymous traffic never reaches our machines and a real outage page shows when both sparks are down; when spark fails, signed-in people land on spark2 instead of a 500, after signing in again if needed",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h3",
+      "kind": "honesty",
+      "text": "A simulated spark failure with Worker and spark2 in place returns the app, not a 500, to a signed-in test account",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c2",
+      "kind": "why_it_matters",
+      "text": "On 2026-11-03 signed-in users got 500s from LensConnectionLost for up to 41h after the Nov 2 00:44 reboot, while anonymous GET / still returned 200, and nothing alerted anyone",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h4",
+      "kind": "honesty",
+      "text": "The dates and durations match the journal: first refusal Nov 2 00:44, restored Nov 3 17:58",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c3",
+      "kind": "requirement",
+      "text": "culture server start ignores a pidfile whose PID is not a culture process, so a reboot cannot wedge the IRCd; this ships before any failover work",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h5",
+      "kind": "honesty",
+      "text": "With a pidfile pointing at another user's thread, culture server start succeeds; a test covers it",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c4",
+      "kind": "requirement",
+      "text": "The lens exposes a readiness check that fails when its IRCd is unreachable; failover and alerting key on it, not on / or /healthz",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h6",
+      "kind": "honesty",
+      "text": "With the IRCd stopped the readiness check returns non-200, and with it running returns 200",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c5",
+      "kind": "boundary",
+      "text": "No per-request round-robin between instances: one person's session stays on one instance until that instance fails",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h7",
+      "kind": "honesty",
+      "text": "Two requests from one session always reach the same instance while that instance is healthy",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c6",
+      "kind": "boundary",
+      "text": "Tunnel replicas are not the fallback mechanism: each host gets its own tunnel and the Worker chooses between them",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h8",
+      "kind": "honesty",
+      "text": "spark and spark2 connect through different tunnel UUIDs",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c7",
+      "kind": "requirement",
+      "text": "A Worker on chat.culture.dev picks the origin, pins a session to it, fails over on origin failure, and serves a static outage page when both are down",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h9",
+      "kind": "honesty",
+      "text": "Stopping both origins yields the static outage page, and the Worker stays within Free limits at current traffic",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c8",
+      "kind": "requirement",
+      "text": "Origin hostnames accept only the Worker's credential and the lens trusts a verifiable identity from it, so anonymous traffic never reaches our machines",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h10",
+      "kind": "honesty",
+      "text": "A direct request to an origin hostname without the Worker's credential is refused before reaching the lens",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c12",
+      "kind": "requirement",
+      "text": "spark2 is provisioned with irc-lens config, cloudflared, its own secrets and a running IRCd, using the supported install verbs",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h11",
+      "kind": "honesty",
+      "text": "culture console install and culture server install produce running units on spark2, reachable only through its tunnel",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c17",
+      "kind": "requirement",
+      "text": "The service sends periodic pings to healthchecks.io using the grant secret CULTURE_HEALTHCHECK_URL, so an outage alerts even when our machines cannot send anything",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h1",
+      "kind": "honesty",
+      "text": "Pings are sent only after a real IRCd readiness check passes, so a healthy landing page with a dead IRCd stops the pings",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h2",
+      "kind": "honesty",
+      "text": "The check also alerts when the pinger's host is off, because silence alone turns it down",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c18",
+      "kind": "requirement",
+      "text": "The owner receives an hourly email while any health check is down, until it recovers",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h12",
+      "kind": "honesty",
+      "text": "With the check down for over an hour, at least 2 reminder emails arrive at the owner's address",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c19",
+      "kind": "requirement",
+      "text": "After a reboot the standby rejoins the mesh without a person unlocking its keyring, because a locked keyring leaves spark2 with no link credentials",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h13",
+      "kind": "honesty",
+      "text": "After a spark2 reboot with no human action, it links to at least one peer",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c20",
+      "kind": "audience",
+      "text": "The owner as operator, and approved people who use chat.culture.dev as their mesh console",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h14",
+      "kind": "honesty",
+      "text": "Every behaviour in this spec is observable by one of these two groups",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c21",
+      "kind": "after_state",
+      "text": "When spark fails, people reach spark2 after signing in again if needed, as spark2-<nick>; when both are down they see an outage page; the owner is told by email either way",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h15",
+      "kind": "honesty",
+      "text": "Each clause is exercised in the failover drill: sign-in again, spark2 nick, outage page, email",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c22",
+      "kind": "success_signal",
+      "text": "An IRCd outage behind a healthy landing page alerts the owner within 10 minutes, against about 41 hours unnoticed on 2026-11-03; a simulated spark failure serves signed-in people from spark2 within 5 minutes",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h16",
+      "kind": "honesty",
+      "text": "Both timings are measured in a drill, not estimated",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c25",
+      "kind": "requirement",
+      "text": "spark2's standby lens holds a copy of accounts and permissions from spark's guests.db, one-way and refreshed on a schedule, because an empty store would refuse every approved person including the admin",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h17",
+      "kind": "honesty",
+      "text": "After a copy, an approved person can sign in on spark2 and holds the same role and grants",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c27",
+      "kind": "requirement",
+      "text": "The health ping ships as part of the culture app: a CLI verb installs the timer on any host, reads the check URL from grant and the site address from the lens config, replacing the hand-written script and units on spark",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h18",
+      "kind": "honesty",
+      "text": "On a host with only the culture install and the grant secret, the CLI verb alone produces a timer that pings healthchecks.io, reports /fail when /readyz fails, and spark runs on it with the hand-written files removed",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c28",
+      "kind": "requirement",
+      "text": "Browser POSTs work through the Worker: _origin_ok compares Origin to the request host, so a Worker fetching an origin hostname with a different Host gets every browser POST refused",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h19",
+      "kind": "honesty",
+      "text": "A real browser signs in and sends a message through the Worker, on both origins",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c29",
+      "kind": "requirement",
+      "text": "Health pings check the primary's own local /readyz as well as the public one, so a failover can't hide that spark is down: after failover the public /readyz would answer 200 from spark2",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h20",
+      "kind": "honesty",
+      "text": "With spark's IRCd stopped and traffic on spark2, the check goes down and hourly reminders arrive",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c30",
+      "kind": "requirement",
+      "text": "Failover trips only after several consecutive failed /readyz checks, and returning to spark is a deliberate step, so a routine restart can't bounce everyone onto a different nick",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h21",
+      "kind": "honesty",
+      "text": "Restarting the console or IRCd during a deploy moves no one to spark2",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c31",
+      "kind": "requirement",
+      "text": "The Worker can be removed in one step: deleting its route restores direct access through the existing tunnel, and that path stays available until the Worker has proven itself",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h22",
+      "kind": "honesty",
+      "text": "A rehearsed rollback restores signed-in service within 5 minutes",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c32",
+      "kind": "requirement",
+      "text": "The guests.db copy to spark2 stays private: it holds emails, password and token hashes, so it travels only over the tailnet or LAN, stays mode 0600 on spark2, and has the same retention as the original",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h23",
+      "kind": "honesty",
+      "text": "After a copy, the file on spark2 is mode 0600 and no copy path crosses the public internet",
+      "deferred": false,
+      "deferred_reason": ""
+    }
+  ],
+  "tasks": [
+    {
+      "id": "t1",
+      "summary": "Record the reliability work as delivered: stale pidfile fix (culture#520, 14.13.2) and /readyz (irc-lens#91, 0.19.0)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "spark, spark2, thor and orin report culture 14.13.2, and spark reports irc-lens 0.19.0",
+        "Public /readyz returns 200 with Cache-Control no-store",
+        "Stopping a test IRCd makes /readyz return 503 in tests/test_readyz.py"
+      ],
+      "deps": [],
+      "covers": [
+        "c2",
+        "h4",
+        "c3",
+        "h5",
+        "c4",
+        "h6"
+      ],
+      "instruction": "Verification only, no code. Cite the merged PRs and test names. If a check fails, file a deviation."
+    },
+    {
+      "id": "t2",
+      "summary": "POST spike: prove a browser POST through a Worker on an in-zone test hostname reaches the lens with Origin accepted",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "A POST through the Worker to a test route returns the lens's normal response, not the Origin-denied 403",
+        "The result records whether cf.resolveOverride keeps Host chat.culture.dev through the tunnel, or whether the lens needs a configured public origin",
+        "Visitor IP seen by the lens equals the client's IP, not a Cloudflare address, so client_ip rate limits still work",
+        "The test Worker and hostname are deleted afterwards"
+      ],
+      "deps": [],
+      "covers": [],
+      "instruction": "Extend the earlier scratch spike with a POST and a same-zone route. Owner runs the deploy, since auto mode blocks it. The result chooses t6's approach, so finish this first."
+    },
+    {
+      "id": "t3",
+      "summary": "culture: `culture console install --healthcheck` verb that installs the health ping timer on any host",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "Files: culture_core/cli/console.py, a new culture_core/cli/shared/healthcheck.py, tests/test_console_healthcheck.py, docs/reference/cli/console.md",
+        "Generated unit reads the URL from grant, and the site address from the lens config, with no hardcoded host",
+        "Ping logic checks local /readyz and public /readyz, and reports /fail unless both pass",
+        "Tests use real local HTTP listeners for: both pass, local fails, public fails, URL missing",
+        "The all-backends rule isn't touched"
+      ],
+      "deps": [],
+      "covers": [
+        "c17",
+        "h1",
+        "h2",
+        "c27",
+        "h18",
+        "c29"
+      ],
+      "instruction": "Follow the existing `verb == \"install\"` flow in console.py and culture_core/persistence.py for unit generation. Keep the check logic in one small function that's testable without systemd."
+    },
+    {
+      "id": "t4",
+      "summary": "culture: log every server link outcome and find why spark's outbound links don't form (#519)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "Every link attempt logs success, handshake failure or rejection, with no secrets",
+        "Root cause of #519 is written on the issue",
+        "spark holds an established link to thor and orin after a server restart, shown by ss and a link-state query"
+      ],
+      "deps": [],
+      "covers": [],
+      "instruction": "Start in agentirc ircd.py connect_to_peer and server_link.py handle, where the task's result is never awaited. agentirc is a sibling repo: the fix may land there first, then a pin bump in culture. See also #510."
+    },
+    {
+      "id": "t5",
+      "summary": "culture: standby rejoins the mesh after a reboot without a person unlocking its keyring (#509)",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "After a spark2 reboot with no human action, its server holds a link to at least one peer",
+        "Link secrets are never written in plain text to a world-readable file, or printed",
+        "Docs describe how it's set up and how to rotate it"
+      ],
+      "deps": [
+        "t4"
+      ],
+      "covers": [
+        "c19",
+        "h13"
+      ],
+      "instruction": "Read #509 first. Moving link secrets from the login keyring to grant, as agent secrets already are, may be simpler than unlocking the keyring. Propose the approach to the owner before building: it touches secret storage."
+    },
+    {
+      "id": "t6",
+      "summary": "irc-lens: trust the public origin and the Worker's credential, so browser POSTs work and direct requests are refused",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "Files: src/irc_lens/config.py, web/auth.py, web/routes.py (_origin_ok), tests/test_worker_trust.py, docs/deployment-cloudflare-access.md",
+        "A POST with Origin equal to the configured public origin passes through the Worker path; any other Origin still gets 403",
+        "A request without the Worker's credential is refused when `auth.require_edge_credential` is on, and behaviour is unchanged when it's off",
+        "The credential comparison is constant-time, and the secret comes from an env var"
+      ],
+      "deps": [
+        "t2"
+      ],
+      "covers": [
+        "c8",
+        "h10",
+        "c28"
+      ],
+      "instruction": "Take the approach t2's result chose. Default off, so this can ship and deploy before the Worker exists."
+    },
+    {
+      "id": "t7",
+      "summary": "irc-lens: standby mode, for approved users only with account changes and guest mode off",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "Files: src/irc_lens/config.py, a new web/standby.py, tests/test_standby.py, docs/deployment-cloudflare-access.md",
+        "With `standby.enabled`, a guest sign-in gets the outage message and no guest is created",
+        "Every route that writes accounts, grants, nicknames, consents or agent credentials refuses with a clear message; a test enumerates them",
+        "Approved users sign in and send messages normally, as the server-prefixed nick",
+        "The UI shows a banner that says agents and spark media are unavailable"
+      ],
+      "deps": [],
+      "covers": [
+        "c20",
+        "h14"
+      ],
+      "instruction": "List write routes from the stores in access_store.py and guest_store.py, and block at one middleware rather than per route, so a new route can't be missed silently."
+    },
+    {
+      "id": "t8",
+      "summary": "Worker: gate traffic, pin sessions, fail over on repeated /readyz failures, serve the outage page",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "Files: deploy/chat-edge/worker.js, deploy/chat-edge/outage.html, deploy/chat-edge/worker.test.mjs, deploy/chat-edge/README.md, all in irc-lens",
+        "Pure functions, unit tested with no network: pick origin, pin cookie, failure count",
+        "A session stays on one origin while it's healthy",
+        "Failover needs N consecutive failed checks, so a restart moves no one; returning to spark needs a deliberate config change",
+        "Both origins down returns the outage page with status 503",
+        "Handler does almost no CPU work: it never parses bodies, and streams SSE through unchanged"
+      ],
+      "deps": [
+        "t2"
+      ],
+      "covers": [
+        "c1",
+        "c5",
+        "h7",
+        "c7",
+        "h9",
+        "c30",
+        "h21"
+      ],
+      "instruction": "Keep pure logic separate from fetch so it can be tested with node. Store the active origin in KV, written by a cron check, so requests don't each probe. Deploy using cultureflare's scripts, dry-run first. Owner deploys."
+    },
+    {
+      "id": "t9",
+      "summary": "Provision a separate tunnel for spark2 and an origin hostname for each host",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "spark and spark2 connect through different tunnel UUIDs, shown by the Cloudflare API",
+        "Each origin hostname refuses a request lacking the Worker's credential once t6 is on",
+        "The existing chat.culture.dev tunnel route is untouched until t11's rollback path is proven"
+      ],
+      "deps": [
+        "t2"
+      ],
+      "covers": [
+        "c6",
+        "h8"
+      ],
+      "instruction": "Use cultureflare verbs where they exist. Tunnel tokens go in grant, never in a file in a repo."
+    },
+    {
+      "id": "t10",
+      "summary": "Copy accounts one way from spark to spark2 on a schedule, privately",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "Files: a new culture_core/cli/shared/console_replica.py and a `culture console replica` verb in culture, with tests",
+        "Uses sqlite's backup API, so the copy is consistent while the lens is running",
+        "Copy travels only over the tailnet or LAN, lands mode 0600 and is replaced atomically",
+        "A copy from a newer schema to an older lens is refused with a clear message",
+        "After a copy, an approved person signs in on spark2 with the same role and grants, in a test using two real stores",
+        "Retention on the copy matches the original: guest_mode.retention_days, or no guest rows copied"
+      ],
+      "deps": [
+        "t3"
+      ],
+      "covers": [
+        "c25",
+        "h17",
+        "c32",
+        "h23"
+      ],
+      "instruction": "Run on spark and push to spark2, so standby needs no way into spark. Guest mode is off on standby: prefer leaving guest and consent rows out, which shrinks the private data on spark2."
+    },
+    {
+      "id": "t11",
+      "summary": "Rollback: remove the Worker in one step and rehearse it",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "A documented single command removes the Worker route, and traffic returns through the direct tunnel",
+        "Rehearsal in production restores signed-in service in under 5 minutes, with the time measured",
+        "The runbook says who rotates the Worker's service token, and when it expires"
+      ],
+      "deps": [
+        "t8",
+        "t9"
+      ],
+      "covers": [
+        "c31",
+        "h22"
+      ],
+      "instruction": "Rehearse before any origin lockdown is enforced, so the direct path is known to work."
+    },
+    {
+      "id": "t12",
+      "summary": "Provision spark2 as standby with the supported install verbs",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "culture console install and culture server install produce running units on spark2",
+        "spark2's lens runs in standby mode, reachable only through its tunnel",
+        "spark2 has its own health check, or a documented reason it doesn't, and its secrets are in its own grant"
+      ],
+      "deps": [
+        "t3",
+        "t6",
+        "t7",
+        "t9",
+        "t10",
+        "t5"
+      ],
+      "covers": [
+        "c12",
+        "h11"
+      ],
+      "instruction": "Keep the same versions on both hosts. spark2's bind address stays on its tailnet or loopback."
+    },
+    {
+      "id": "t13",
+      "summary": "Failover drill in production: measure everything the spec promises",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "Stopping spark's IRCd alerts the owner within 10 minutes, with the time measured",
+        "Signed-in test account reaches spark2 within 5 minutes and sends a real message in a real browser",
+        "At least 2 hourly reminder emails arrive while the check is down",
+        "Stopping both origins shows the outage page",
+        "Restarting the console during a deploy moves no one",
+        "History gaps after failover are recorded as observed",
+        "Results are filed as evidence, including anything that failed"
+      ],
+      "deps": [
+        "t11",
+        "t12"
+      ],
+      "covers": [
+        "h3",
+        "c21",
+        "h15",
+        "c22",
+        "h16",
+        "c18",
+        "h12",
+        "h19",
+        "h20"
+      ],
+      "instruction": "Schedule with the owner, because this is a real interruption. Run it with real browser click-through on every path."
+    }
+  ],
+  "risks": [
+    {
+      "id": "r1",
+      "text": "History after failover may look incomplete, depending on whether remote-origin messages reach the local history.db",
+      "kind": "unknown_nonblocking",
+      "task_id": null,
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r2",
+      "text": "Turnstile through a Worker is unexamined; t13 must exercise a real sign-in with it",
+      "kind": "unknown_nonblocking",
+      "task_id": null,
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r3",
+      "text": "Same-zone route, Access on the same hostname, and Worker cron with KV on the Free plan are unverified; t2 and t8 must cover them",
+      "kind": "unknown_nonblocking",
+      "task_id": "t2",
+      "resolved": false,
+      "resolution": ""
+    },
+    {
+      "id": "r4",
+      "text": "Moving link secrets touches secret storage on all four hosts, so t5 needs owner sign-off on its approach",
+      "kind": "follow_up",
+      "task_id": "t5",
+      "resolved": false,
+      "resolution": ""
+    }
+  ],
+  "obligations": []
+}
