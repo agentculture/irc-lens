@@ -113,6 +113,8 @@ def _guest_identity(request: web.Request) -> Identity | None:
     """
     from irc_lens.web import csrf
 
+    if request.app["config"].standby_enabled:
+        return None
     store = request.app.get("guest_store")
     if store is None:
         return None
@@ -528,7 +530,7 @@ def build_cloudflare_middleware(config: LensConfig):
         aud=config.cf_aud,
         team_domain=config.cf_team_domain,
         allowed_emails=set(config.allowed_emails),
-        allowed_tokens=set(config.allowed_service_tokens),
+        allowed_tokens=set() if config.standby_enabled else set(config.allowed_service_tokens),
         server_name=config.server_name,
         guest_enabled=config.guest_enabled,
         access_enabled=config.access_enabled,

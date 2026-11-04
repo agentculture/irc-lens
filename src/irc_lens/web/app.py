@@ -29,6 +29,7 @@ from irc_lens.web import (
     retention,
     routes,
     setpw,
+    standby,
 )
 from irc_lens.web.auth import build_cloudflare_middleware
 from irc_lens.web.front import mount_agent_front
@@ -251,6 +252,7 @@ def make_app(
         client_max_size=config.media_max_file_bytes + _CLIENT_MAX_SIZE_MEDIA_HEADROOM,
         middlewares=[
             _security_headers_middleware,
+            standby.standby_middleware,
             csrf.csrf_middleware,
             middleware,
             # After the identity: an approved user with no chosen nickname
@@ -322,7 +324,8 @@ def make_app(
         bans.install(app, ban_sweep_interval_s)
         # d9: erase inactive guests and expire old tokens/attempts/bans,
         # at startup and hourly.
-        retention.install(app)
+        if not config.standby_enabled:
+            retention.install(app)
         # Guest-mode off: these paths do not exist (404), exactly as before.
         app.router.add_post("/sandbox/enter", routes.post_sandbox_enter)
         app.router.add_post("/sandbox/leave", routes.post_sandbox_leave)
