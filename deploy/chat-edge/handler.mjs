@@ -26,13 +26,32 @@ function outage(request, outageHtml) {
   return Response.json({ error: "temporarily unavailable" }, { status: 503, headers });
 }
 
+// Read as text, so a mistyped hand-written state is told apart from a KV failure: bad
+// content falls back to the default, and a KV failure still throws to the caller.
 async function readState(env) {
-  const stored = await env.STATE.get(STATE_KEY, "json");
-  return parseState(stored ?? DEFAULT_STATE);
+  const raw = await env.STATE.get(STATE_KEY);
+  if (raw === null) return { ...DEFAULT_STATE };
+  try {
+    return parseState(JSON.parse(raw));
+  } catch {
+    return { ...DEFAULT_STATE };
+  }
+}
+
+// Last state this isolate read, for serving through a KV failure.
+let lastKnownState = { ...DEFAULT_STATE };
+
+async function stateForRequest(env) {
+  try {
+    lastKnownState = await readState(env);
+  } catch {
+    // Keep serving: a KV failure must not take down a healthy origin.
+  }
+  return lastKnownState;
 }
 
 export async function handleRequest(request, env, { fetchImpl = fetch, outageHtml }) {
-  const state = await readState(env);
+  const state = await stateForRequest(env);
   const forwarded = new Request(request.url, {
     method: request.method,
     headers: originHeaders(request.headers, env),
@@ -55,9 +74,11 @@ async function ready(host, env, fetchImpl) {
   try {
     const response = await fetchImpl(`https://${host}/readyz`, {
       headers: { [EDGE_TOKEN_HEADER]: env.EDGE_TOKEN },
+      // A redirect isn't readiness, and following one would send the token elsewhere.
+      redirect: "manual",
       signal: AbortSignal.timeout(READY_TIMEOUT_MS),
     });
-    return response.ok;
+    return response.status === 200;
   } catch {
     return false;
   }
