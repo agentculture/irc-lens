@@ -136,5 +136,5 @@ An approved user on the mesh typing `/sandbox` (or using the header's
 amber banner switches back (`HX-Refresh` reloads the page).
 
 `GET /presence` returns the sandbox agent state fragment (`agent online` /
-`agent offline`, silent while the agent has never been seen) polled by htmx
+`agent is warming up`, silent while the agent has never been seen) polled by htmx
 every 15 s in guest and sandbox-preview sessions.

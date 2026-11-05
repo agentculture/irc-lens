@@ -408,9 +408,9 @@ shutdown):
   are removed;
 - bans older than 365 days are lifted.
 
-The agent state badge (`agent online` / `agent offline`) reflects whether the
+The agent state badge (`agent online` / `agent is warming up`) reflects whether the
 agent is in the session's room right now, read from the live member list. Each
 15-second badge poll re-reads the room with `WHO`: AgentIRC sends no `QUIT`
 for a client holding the `agentirc.io/bot` capability (as `sbx-ask` does) or
-for an abrupt disconnect, so a stopped agent shows `agent offline` on the next
+for an abrupt disconnect, so a stopped agent shows `agent is warming up` on the next
 poll rather than never.
