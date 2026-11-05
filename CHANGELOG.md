@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-11-05
+
+### Changed
+
+- The chat's agent state badge says `agent is warming up` instead of `agent offline`, and the edge Worker's outage page says the same.
+
+### Fixed
+
+- A guest whose sandbox IRC server is down gets a page that says the agent is warming up and reloads itself, instead of a 500.
+- A line sent while the guest's sandbox connection is down is refused with that message. It used to return success and vanish.
+
 ## [0.22.0] - 2026-11-04
 
 ### Added

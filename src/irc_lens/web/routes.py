@@ -404,6 +404,22 @@ def _connection_lost(message: str) -> web.Response:
     )
 
 
+def _warming_up() -> web.Response:
+    """The IRC server is restarting: the page reloads into the message."""
+    return _json_error(
+        503,
+        "warming up",
+        "Agent is warming up. Try again in a few minutes.",
+        headers={"HX-Redirect": "/"},
+    )
+
+
+def _session_lost(request: web.Request, message: str) -> web.Response:
+    """A lost sandbox session reopens on the next request; a mesh one doesn't."""
+    _, backend = _backend_for(request)
+    return _warming_up() if backend == BACKEND_SANDBOX else _connection_lost(message)
+
+
 def _origin_ok(request: web.Request) -> bool:
     """CSRF defense-in-depth: verify Origin matches its trusted target.
 
@@ -649,6 +665,10 @@ async def get_index(request: web.Request) -> web.Response:
         from irc_lens.web import entry
 
         return entry.busy_page(request.app[entry.ENTRY_STATE])
+    except ConnectionError:
+        from irc_lens.web import entry
+
+        return entry.warming_up_page(request.app[entry.ENTRY_STATE])
     # Apply revoked grants before anything renders: prune channels the
     # viewer may no longer list and clear an unreadable current channel,
     # so neither the sidebar nor the chat log can name or show them.
@@ -770,12 +790,14 @@ async def post_input(request: web.Request) -> web.Response:
             "The sandbox is busy. Try again in a few minutes.",
             headers={"HX-Redirect": "/"},
         )
+    except ConnectionError:
+        return _warming_up()
     # Health gate before parsing: once the AgentIRC pipe is gone, the
     # spec mandates 503 on subsequent input rather than silently
     # no-oping (which is what `IRCTransport.send_raw` would do — its
     # `_writer` is None after disconnect).
     if not session.healthy:
-        return _connection_lost("session unhealthy")
+        return _session_lost(request, "session unhealthy")
 
     text, err = await _extract_text(request)
     if err is not None:
@@ -795,7 +817,7 @@ async def post_input(request: web.Request) -> web.Response:
     try:
         await session.execute(parsed)
     except LensConnectionLost as exc:
-        return _connection_lost(str(exc))
+        return _session_lost(request, str(exc))
     # The input log (shared gate): the export task reads these back.
     input_gate.record(request.app, _input_actor(request), parsed, text)
     return web.Response(status=204)

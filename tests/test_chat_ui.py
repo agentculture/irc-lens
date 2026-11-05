@@ -276,7 +276,7 @@ async def test_agent_state_follows_room_membership(env: Env) -> None:
     env.sandbox.channel_members[room].discard("sbx-ask")  # stopped, no QUIT
     frag = await (await env.client.get("/presence", headers=h)).text()
     assert 'data-state="offline"' in frag
-    assert "agent offline" in frag
+    assert "agent is warming up" in frag
 
 
 async def test_mesh_view_has_no_agent_state(env: Env) -> None:

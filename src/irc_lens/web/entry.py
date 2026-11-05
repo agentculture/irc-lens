@@ -118,6 +118,8 @@ ERR_EXPIRED = "That took too long. Sign in again."
 _LOG_ENTRY_BLOCKED = "guest entry blocked: %s"
 #: Shown while guest_mode.max_guests guests are active (c24); exact wording.
 MSG_BUSY = "The sandbox is busy. Try again in a few minutes."
+MSG_WARMING_UP = "Agent is warming up. This page reloads by itself."
+WARMING_UP_REFRESH_S = 30
 
 TERMS_URL = "https://culture.dev/terms"
 PRIVACY_URL = "https://culture.dev/privacy"
@@ -369,6 +371,7 @@ def _page(
         turnstile_script=TURNSTILE_SCRIPT_URL,
         turnstile_field=TURNSTILE_FIELD,
         busy=MSG_BUSY,
+        warming_up=MSG_WARMING_UP,
         nick_prefix=NICK_PREFIX,
         nick_max=NICK_MAX,
         terms_url=TERMS_URL,
@@ -401,6 +404,13 @@ def busy_page(state: EntryState) -> web.Response:
     """
     metrics.get_metrics().guest_busy()
     return _page(state, "busy")
+
+
+def warming_up_page(state: EntryState) -> web.Response:
+    """Shown on ``/`` while a session's IRC server can't be reached."""
+    response = _page(state, "warming_up", status=503)
+    response.headers["Refresh"] = str(WARMING_UP_REFRESH_S)
+    return response
 
 
 def _guests_full(request: web.Request, email: str) -> bool:
