@@ -157,7 +157,7 @@ The owner confirmed evidence `e1`-`e27`, deltas `b1`-`b6`, obligations `o20`-`o2
 | `c30` — Clef validates guest lines; a blocked line never reaches the sandbox | medium | `e22`, `e23` (live, flag mode); block mode not live |
 | `c31` — pending seats capped per address | high | `e24`, test `tests/test_guest_limit.py::test_pending_reservations_are_capped_per_address` |
 | `c32` — shaped 503 instead of a bare 500 | high | `e25`, test `tests/test_guest_limit.py::test_unexpected_open_failure_is_a_shaped_503` |
-| `c33` — excluded audit items are tracked | high | agentirc#69, irc-lens#99, culture#508 comment |
+| `c33` — excluded audit items are tracked | medium (no evidence record; tracked by issue links) | agentirc#69, irc-lens#99, culture#508 comment |
 | `h29` — owner accepts the validator's measured rates before blocking | unverified | rates measured in `t16`, not yet accepted; not claimed done |
 | Turnstile live and `require_bot_check` on (part of `c22` and `t11`) | medium | `e27` (live, direct origin; filed against `o12`); not tested through the edge Worker |
 | Clef's threat verdict trusted beyond advisory | unverified | `docs/clef-threat-verdicts.md` records a missed mail-abuse window; it stays advisory |
