@@ -38,7 +38,9 @@ from irc_lens.web.entry import (
     ENTRY_PAGE_MARKER,
     ERR_CODE,
     TOKEN_VERIFY_WINDOW_S,
+    TOKEN_REQUEST_WINDOW_S,
     _norm_email,
+    _over_address_limits,
     _over_limit,
     _plausible_email,
     _state,
@@ -142,13 +144,15 @@ async def post_request(request: web.Request) -> web.Response:
     email = _norm_email(form.get("email"))
     ip = client_ip(request)
     store = state.get_store()
-    limited = _over_limit(
+    limited = _over_address_limits(
         store,
         "delete",
         email,
         ip,
-        limit=MAIL_ADDRESS_HOURLY_LIMIT,
-        window=MAIL_ADDRESS_WINDOW_S,
+        email_limit=MAIL_ADDRESS_HOURLY_LIMIT,
+        email_window=MAIL_ADDRESS_WINDOW_S,
+        ip_limit=state.config.guest_rate_entry_per_min,
+        ip_window=TOKEN_REQUEST_WINDOW_S,
     )
     if limited:
         metrics.get_metrics().rate_limited()

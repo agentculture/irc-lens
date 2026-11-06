@@ -158,9 +158,12 @@ unavailable, busy, or capped, the alert says `not assessed`.
 Every mail the console sends, from every path (guest codes, approved sign-in
 codes and notices, set-password links and deletion codes), passes one ceiling
 of `mail.total_daily_ceiling` per rolling day, set below the provider's
-100-a-day limit. It is counted in memory, so a restart starts it again; the
-guest budget below is the persistent limit. Set-password and deletion mail are
-also limited to 5 per address per hour.
+100-a-day limit. The last quarter of it is kept for approved users' sign-in
+codes and new-browser notices, so set-password, deletion and guest mail can
+never starve them. A refusal logs `mail send refused`, counts in
+`failed_sends` and raises a `ceiling` alert. It is counted in memory, so a
+restart starts it again; the guest budget below is the persistent limit. Set-password and deletion mail are
+also limited to 5 per address per hour, beside the usual per-IP limit.
 
 Guest code mail has a persistent global budget of `mail.daily_budget` per
 rolling 24 hours and `mail.hourly_budget` per rolling hour. One source IP may

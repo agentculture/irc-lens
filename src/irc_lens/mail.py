@@ -272,14 +272,20 @@ class SendCeiling:
         self._sent_at: deque[float] = deque()
         self._lock = threading.Lock()
 
-    def take(self) -> bool:
-        """Reserve one provider attempt, or return false when capped."""
+    def take(self, *, priority: bool = False) -> bool:
+        """Reserve one provider attempt, or return false when capped.
+
+        The last quarter of the ceiling is kept for *priority* mail (approved
+        users' sign-in codes and notices), so set-password, deletion and guest
+        mail that anyone can trigger can never starve them.
+        """
         now = self._clock()
         cutoff = now - self._window_s
+        limit = self._limit if priority else self._limit - self._limit // 4
         with self._lock:
             while self._sent_at and self._sent_at[0] <= cutoff:
                 self._sent_at.popleft()
-            if len(self._sent_at) >= self._limit:
+            if len(self._sent_at) >= limit:
                 return False
             self._sent_at.append(now)
             return True
@@ -439,15 +445,29 @@ def _unknown_provider(cfg: LensConfig) -> AfiError:
 
 
 def send_with_alert(
-    adapter: MailAdapter, alerter, to: str, subject: str, body: str
+    adapter: MailAdapter,
+    alerter,
+    to: str,
+    subject: str,
+    body: str,
+    *,
+    priority: bool = False,
 ) -> None:
     """``adapter.send`` plus a delivery alert on provider failure; re-raises.
 
-    Only :class:`MailSendError` (HTTP / network failure) alerts; the alert
-    text carries the status code only -- never *to*, the code, or the
-    provider's response.
+    Only :class:`MailSendError` (HTTP / network failure) and a ceiling refusal
+    alert; the alert text carries the status code only -- never *to*, the
+    code, or the provider's response. *priority* marks approved users'
+    sign-in mail, which may use the ceiling's reserved headroom.
     """
-    if not _ceiling_for(adapter).take():
+    if not _ceiling_for(adapter).take(priority=priority):
+        metrics.get_metrics().failed_send()
+        logger.warning("mail send refused: outgoing mail ceiling reached")
+        if alerter is not None:
+            alerter.failed_send()
+            from irc_lens.alerts import KIND_CEILING, message_for
+
+            alerter.notify(KIND_CEILING, message_for(KIND_CEILING, None))
         raise MailCeilingError(
             code=EXIT_ENV_ERROR,
             message="outgoing mail ceiling reached",

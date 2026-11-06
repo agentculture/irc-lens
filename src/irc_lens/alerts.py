@@ -32,6 +32,7 @@ KIND_FORBIDDEN = "forbidden"
 KIND_QUOTA = "quota"
 KIND_PROVIDER = "provider"
 KIND_NETWORK = "network"
+KIND_CEILING = "ceiling"
 KIND_RULE_BURST = "rule-burst"
 KIND_RULE_RESERVED_ADDRESS = "rule-reserved-address"
 KIND_RULE_FAILED_SEND = "rule-failed-send"
@@ -53,6 +54,13 @@ def _ignore_failed_send() -> None:
 
 def message_for(kind: str, status: int | None) -> str:
     """The fixed alert text for *kind* (no address, no code, no body)."""
+    if kind == KIND_CEILING:
+        return (
+            "The outgoing mail ceiling is reached: guest codes, set-password "
+            "links and deletion codes are paused, while approved users' sign-in "
+            "codes use the reserved headroom. Look for a flood in the threat "
+            "counters."
+        )
     if kind == KIND_QUOTA:
         # Resend answers 429 both for a used-up quota and for its short
         # per-second rate limit; the status alone can't tell them apart.

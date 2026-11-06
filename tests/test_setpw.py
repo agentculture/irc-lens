@@ -221,6 +221,15 @@ async def test_request_rate_limited_per_ip(env: Env) -> None:
     assert env.mail.sent == []
 
 
+async def test_per_address_limit_does_not_tighten_the_per_ip_limit(env: Env) -> None:
+    # One shared IP can still ask for links for several addresses: only the
+    # per-address limit is hourly (t4); the per-IP one is unchanged.
+    ip = {"CF-Connecting-IP": "10.9.9.10"}
+    for i in range(setpw.MAIL_ADDRESS_HOURLY_LIMIT + 2):
+        r = await env.request_link(f"w{i}@example.org", **ip)
+        assert r.status == 200
+
+
 # -- d2: link base from config, never from Host ------------------------------
 
 

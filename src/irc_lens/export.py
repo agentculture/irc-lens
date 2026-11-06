@@ -161,6 +161,9 @@ def _read(store: GuestStore) -> tuple[list[tuple[str, str, str]], list[tuple]]:
     return guests, inputs
 
 
+_REVIEW_KINDS = frozenset({"blocked", "flagged"})
+
+
 def export_redacted(store: GuestStore, *, fmt: str = "jsonl") -> str:
     """Return a redacted transcript of all recorded guest inputs."""
     if fmt not in ("jsonl", "md"):
@@ -168,7 +171,10 @@ def export_redacted(store: GuestStore, *, fmt: str = "jsonl") -> str:
     guests, all_inputs = _read(store)
     # d9: only guests whose latest consent opted in to training use.
     opted_in = store.training_emails()
-    inputs = [i for i in all_inputs if i[0] in opted_in]
+    # Lines Clef blocked or flagged (t15) are review records, not training data.
+    inputs = [
+        i for i in all_inputs if i[0] in opted_in and i[1] not in _REVIEW_KINDS
+    ]
     emails = {i[0] for i in inputs}
     order = sorted(emails)
     # CSPRNG (secrets.SystemRandom): pseudonym order must not be guessable.

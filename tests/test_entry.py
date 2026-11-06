@@ -591,6 +591,9 @@ async def test_consent_required(h):
         ("a@example.com.au", False),
         ("a@notexample.com", False),
         ("a@test.com", False),
+        ("a@example.com.", True),
+        ("a@foo.test.", True),
+        ("a@[127.0.0.1]", True),
     ],
 )
 def test_reserved_address(address, reserved):

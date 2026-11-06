@@ -11,6 +11,7 @@ import pytest
 
 from irc_lens import mail
 from irc_lens._errors import AfiError
+from irc_lens import metrics
 from irc_lens.config import LensConfig
 from helpers import DEV_CONFIG
 
@@ -102,13 +103,45 @@ def test_total_ceiling_cannot_be_raced() -> None:
 def test_default_total_ceiling_stays_below_provider_quota() -> None:
     adapter = mail.RecordingAdapter()
     assert mail.TOTAL_SEND_LIMIT < mail.RESEND_DAILY_QUOTA
-    for index in range(mail.TOTAL_SEND_LIMIT):
+    open_share = mail.TOTAL_SEND_LIMIT - mail.TOTAL_SEND_LIMIT // 4
+    for index in range(open_share):
         mail.send_with_alert(adapter, None, "a@x.test", "subject", str(index))
 
+    # Mail anyone can trigger stops at three quarters of the ceiling...
     with pytest.raises(mail.MailCeilingError):
         mail.send_with_alert(adapter, None, "a@x.test", "subject", "over")
+    # ...and approved sign-in mail can still use the reserved quarter.
+    for index in range(mail.TOTAL_SEND_LIMIT - open_share):
+        mail.send_with_alert(adapter, None, "o@x.test", "code", str(index), priority=True)
+    with pytest.raises(mail.MailCeilingError):
+        mail.send_with_alert(adapter, None, "o@x.test", "code", "over", priority=True)
 
     assert len(adapter.sent) == mail.TOTAL_SEND_LIMIT
+
+
+def test_ceiling_refusal_counts_and_alerts() -> None:
+    class Alerter:
+        def __init__(self) -> None:
+            self.kinds: list[str] = []
+            self.failed = 0
+
+        def failed_send(self) -> None:
+            self.failed += 1
+
+        def notify(self, kind: str, message: str) -> bool:
+            self.kinds.append(kind)
+            return True
+
+    adapter = mail.RecordingAdapter()
+    setattr(adapter, mail._CEILING_ATTR, mail.SendCeiling(limit=1))
+    alerter = Alerter()
+    mail.send_with_alert(adapter, alerter, "a@x.test", "subject", "first")
+    before = metrics.get_metrics().snapshot()["failed_sends"]
+    with pytest.raises(mail.MailCeilingError):
+        mail.send_with_alert(adapter, alerter, "a@x.test", "subject", "body")
+    assert alerter.kinds == ["ceiling"]
+    assert alerter.failed == 1
+    assert metrics.get_metrics().snapshot()["failed_sends"] == before + 1
 
 
 def test_configured_ceiling_rides_on_the_app_adapter() -> None:

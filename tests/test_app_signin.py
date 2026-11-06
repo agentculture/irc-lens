@@ -332,9 +332,12 @@ async def test_guest_budget_counts_before_background_send_runs(env: Env) -> None
     assert first.status == 200
     assert len(env.state.mail_tasks) == 1
 
+    # The budget is taken in the background task, before its send: the first
+    # task holds the only daily slot while its send is blocked, so the
+    # second sign-in's task finds the budget used up and sends nothing.
+    assert await asyncio.to_thread(gated.entered.wait, 5)
     second = await env.signin("other@example.org", WRONG_PW, ip="192.0.2.21")
     assert second.status == 200
-    assert len(env.state.mail_tasks) == 1
 
     gated.release.set()
     await env.drain()

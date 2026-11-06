@@ -46,12 +46,13 @@ responses that render the widget get a CSP widened to that one origin
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import secrets
 import time
 from dataclasses import dataclass, field
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Protocol
 
 import aiohttp
@@ -349,7 +350,10 @@ RESERVED_MAIL_TLDS = frozenset({"example", "test", "invalid", "localhost"})
 
 def _reserved_address(email: str) -> bool:
     """True for an address at a reserved domain or any subdomain of one."""
-    labels = email.rpartition("@")[2].split(".")
+    domain = email.rpartition("@")[2].rstrip(".")
+    if domain.startswith("["):
+        return True  # an address literal never gets guest mail
+    labels = domain.split(".")
     if labels[-1] in RESERVED_MAIL_TLDS:
         return True
     return ".".join(labels[-2:]) in RESERVED_MAIL_DOMAINS
@@ -387,6 +391,26 @@ def _over_limit(
         store.rate_limited(kind, key, limit=limit, window=window) for key in keys
     )
     for key in keys:
+        store.record_attempt(kind, key)
+    return limited
+
+
+def _over_address_limits(
+    store: GuestStore,
+    kind: str,
+    email: str,
+    ip: str,
+    *,
+    email_limit: int,
+    email_window: int,
+    ip_limit: int,
+    ip_window: int,
+) -> bool:
+    """An hourly per-address limit beside the usual per-IP one (t4)."""
+    limited = store.rate_limited(
+        kind, f"e:{email}", limit=email_limit, window=email_window
+    ) or store.rate_limited(kind, f"i:{ip}", limit=ip_limit, window=ip_window)
+    for key in (f"e:{email}", f"i:{ip}"):
         store.record_attempt(kind, key)
     return limited
 
@@ -644,7 +668,12 @@ async def _send_signin_code(state: EntryState, email: str, code: str) -> None:
     subject, body = render_token_email(code, purpose=PURPOSE_SIGNIN)
     try:
         await asyncio.to_thread(
-            send_with_alert, state.get_mailer(), state.alerter, email, subject, body
+            functools.partial(send_with_alert, priority=True),
+            state.get_mailer(),
+            state.alerter,
+            email,
+            subject,
+            body,
         )
     except Exception as exc:  # noqa: BLE001 -- the page was already the same
         logger.warning("signin code mail not sent: %s", type(exc).__name__)
@@ -658,8 +687,22 @@ def _schedule_signin_code(state: EntryState, email: str, code: str) -> None:
     task.add_done_callback(state.mail_tasks.discard)
 
 
-async def _send_guest_code(state: EntryState, email: str, code: str) -> None:
-    """Mail one guest code from sign-in (background, like the sign-in code)."""
+async def _send_guest_code(
+    state: EntryState, email: str, code: str, budget: Callable[[], Awaitable[bool]]
+) -> None:
+    """Mail one guest code from sign-in (background, like the sign-in code).
+
+    The guest mail budget is taken here, before the send, not on the request:
+    the request then does the same thread hand-offs for every address, so an
+    exhausted budget (or a store error) changes nothing the visitor can see.
+    """
+    try:
+        allowed = await budget()
+    except Exception as exc:  # noqa: BLE001 -- the page was already the same
+        logger.warning("guest mail budget unavailable: %s", type(exc).__name__)
+        return
+    if not allowed:
+        return
     subject, body = render_token_email(code)
     try:
         await asyncio.to_thread(
@@ -669,8 +712,10 @@ async def _send_guest_code(state: EntryState, email: str, code: str) -> None:
         logger.warning("guest code mail not sent: %s", type(exc).__name__)
 
 
-def _schedule_guest_code(state: EntryState, email: str, code: str) -> None:
-    task = asyncio.create_task(_send_guest_code(state, email, code))
+def _schedule_guest_code(
+    state: EntryState, email: str, code: str, budget: Callable[[], Awaitable[bool]]
+) -> None:
+    task = asyncio.create_task(_send_guest_code(state, email, code, budget))
     state.mail_tasks.add(task)
     task.add_done_callback(state.mail_tasks.discard)
 
@@ -682,7 +727,12 @@ async def _send_signin_notice(
     subject, body = render_signin_notice(ip=ip, user_agent=user_agent, when=when)
     try:
         await asyncio.to_thread(
-            send_with_alert, state.get_mailer(), state.alerter, email, subject, body
+            functools.partial(send_with_alert, priority=True),
+            state.get_mailer(),
+            state.alerter,
+            email,
+            subject,
+            body,
         )
     except Exception as exc:  # noqa: BLE001 -- the sign-in already succeeded
         logger.warning("sign-in notice mail not sent: %s", type(exc).__name__)
@@ -776,10 +826,15 @@ async def _post_signin_app(request: web.Request) -> web.Response:
         code = store.issue_token(email, purpose=SIGNIN_CODE_PURPOSE)
         store.bind_signin(pending, code)
         _schedule_signin_code(state, email, code)
-    elif guest and await _take_guest_mail_budget(request, state, ip):
+    elif guest:
         code = store.issue_token(email, purpose=TOKEN_PURPOSE)
         store.bind_signin(pending, code)
-        _schedule_guest_code(state, email, code)
+        _schedule_guest_code(
+            state,
+            email,
+            code,
+            functools.partial(_take_guest_mail_budget, request, state, ip),
+        )
     elif approved:
         metrics.get_metrics().failed_sign_in()
     if limited:
