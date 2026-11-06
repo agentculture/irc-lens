@@ -106,6 +106,11 @@ def _validated_verdict(
     return Verdict(choice, confidence, probabilities)
 
 
+#: Public names for other callers (the guest message validator, t15).
+http_post = _http_post
+validated_verdict = _validated_verdict
+
+
 class DeciderClient:
     """Run at most one five-second HTTP choice assessment in a daemon thread."""
 
