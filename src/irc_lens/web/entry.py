@@ -58,9 +58,10 @@ from aiohttp import web
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
-from irc_lens import legal, metrics
+from irc_lens import legal, metrics, threat
 from irc_lens.config import LensConfig, _default_guest_store_path
 from irc_lens.guest_store import SIGNIN_BUDGET_KIND, GuestStore
+from irc_lens.mail_budget import MailBudget
 from irc_lens.alerts import Alerter, make_alerter
 from irc_lens.mail import (
     PURPOSE_SIGNIN,
@@ -219,6 +220,7 @@ class EntryState:
     mailer: MailAdapter | None = None
     alerter: Alerter | None = None
     verifier: BotVerifier = field(default_factory=NoopVerifier)
+    mail_budget: MailBudget | None = None
     signin_floor_s: float = SIGNIN_FLOOR_S
     #: Background sign-in mail sends (kept referenced until done).
     mail_tasks: set = field(default_factory=set)
@@ -233,6 +235,16 @@ class EntryState:
         if self.mailer is None:
             self.mailer = make_adapter(self.config)
         return self.mailer
+
+    def get_mail_budget(self) -> MailBudget:
+        if self.mail_budget is None:
+            self.mail_budget = MailBudget(
+                self.get_store(),
+                daily_limit=self.config.guest_mail_daily_budget,
+                hourly_limit=self.config.guest_mail_hourly_budget,
+                ip_hourly_limit=self.config.guest_mail_ip_hourly_budget,
+            )
+        return self.mail_budget
 
 
 def install(app: web.Application, config: LensConfig) -> None:
@@ -275,6 +287,15 @@ def _state(request: web.Request) -> EntryState:
     if state is None or not state.config.guest_enabled:
         raise web.HTTPNotFound()
     return state
+
+
+async def _take_guest_mail_budget(
+    request: web.Request, state: EntryState, ip: str
+) -> bool:
+    allowed = await state.get_mail_budget().take(ip)
+    signal = threat.Signal.MAIL_SENDS if allowed else threat.Signal.BUDGET_HITS
+    request.app[threat.THREAT_COUNTERS].increment(signal)
+    return allowed
 
 
 # ---------------------------------------------------------------------------
@@ -695,7 +716,7 @@ async def _post_signin_app(request: web.Request) -> web.Response:
         code = store.issue_token(email, purpose=SIGNIN_CODE_PURPOSE)
         store.bind_signin(pending, code)
         _schedule_signin_code(state, email, code)
-    elif guest:
+    elif guest and await _take_guest_mail_budget(request, state, ip):
         code = store.issue_token(email, purpose=TOKEN_PURPOSE)
         store.bind_signin(pending, code)
         _schedule_guest_code(state, email, code)
@@ -1020,6 +1041,7 @@ async def post_guest_start(request: web.Request) -> web.Response:
         _plausible_email(email)
         and not _reserved_address(email)
         and not store.is_banned(email, ip)
+        and await _take_guest_mail_budget(request, state, ip)
     ):
         token = store.issue_token(email, purpose=TOKEN_PURPOSE)
         subject, body = render_token_email(token)

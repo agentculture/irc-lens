@@ -84,6 +84,9 @@ class LensConfig:
     guest_mail_provider: str = "none"
     guest_mail_from: str = ""
     guest_mail_api_key_env: str = "IRC_LENS_MAIL_API_KEY"
+    guest_mail_daily_budget: int = 50
+    guest_mail_hourly_budget: int = 20
+    guest_mail_ip_hourly_budget: int = 5
     # Delivery-alert webhook (https; http only for loopback) and the env var
     # holding its shared secret.
     guest_mail_alert_url: str | None = None
@@ -525,7 +528,18 @@ _GUEST_KEYS = frozenset(
 _GUEST_SANDBOX_KEYS = frozenset(
     {"name", "host", "port", "room_prefix", "flag_log"}
 )
-_GUEST_MAIL_KEYS = frozenset({"provider", "from", "api_key_env", "alert_url", "alert_secret_env"})
+_GUEST_MAIL_KEYS = frozenset(
+    {
+        "provider",
+        "from",
+        "api_key_env",
+        "alert_url",
+        "alert_secret_env",
+        "daily_budget",
+        "hourly_budget",
+        "ip_hourly_budget",
+    }
+)
 _GUEST_RATE_KEYS = frozenset(
     {"entry_per_min", "messages_per_min", "password_attempts_per_15min"}
 )
@@ -723,6 +737,15 @@ def _positive_int(value: object, where: str) -> int:
     return n
 
 
+def _nonnegative_int(value: object, where: str) -> int:
+    n = _coerce_int(value, where)
+    if n < 0:
+        raise _err(
+            f"{where} must be >= 0, got {n}", f"set `{where}:` to zero or more"
+        )
+    return n
+
+
 def _optional_path(value: object, where: str) -> str | None:
     if value is None:
         return None
@@ -801,6 +824,15 @@ def _validate_guest_mode_section(raw: dict) -> dict:
         "guest_mail_api_key_env": _coerce_str(
             mail.get("api_key_env", "IRC_LENS_MAIL_API_KEY"),
             "guest_mode.mail.api_key_env",
+        ),
+        "guest_mail_daily_budget": _nonnegative_int(
+            mail.get("daily_budget", 50), "guest_mode.mail.daily_budget"
+        ),
+        "guest_mail_hourly_budget": _nonnegative_int(
+            mail.get("hourly_budget", 20), "guest_mode.mail.hourly_budget"
+        ),
+        "guest_mail_ip_hourly_budget": _nonnegative_int(
+            mail.get("ip_hourly_budget", 5), "guest_mode.mail.ip_hourly_budget"
         ),
         "guest_mail_alert_url": _alert_url(mail.get("alert_url")),
         "guest_mail_alert_secret_env": _optional_str(

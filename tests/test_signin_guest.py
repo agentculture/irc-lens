@@ -263,6 +263,14 @@ async def test_guest_mail_reveals_nothing_about_approved_emails(env: Env) -> Non
 
 
 async def test_guest_mail_capped_per_minute(env: Env) -> None:
+    # The mail budgets (t3) would stop one address first: lift them here so
+    # this test measures the per-minute cap alone.
+    env.state.config = dataclasses.replace(
+        env.state.config,
+        guest_mail_daily_budget=1000,
+        guest_mail_hourly_budget=1000,
+        guest_mail_ip_hourly_budget=1000,
+    )
     limit = env.app["config"].guest_rate_entry_per_min
     for _ in range(limit + 3):
         resp = await env.signin(ANN)

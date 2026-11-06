@@ -18,6 +18,7 @@ Acceptance criteria / obligations covered:
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import secrets
 import statistics
@@ -185,6 +186,17 @@ async def _request_token(h: Harness, email=GUEST, nickname="maya", ip="203.0.113
         {"email": email, "nickname": nickname, "consent": "on"},
         ip=ip,
     )
+
+
+async def test_legacy_guest_code_respects_zero_mail_budget(h: Harness) -> None:
+    h.state.config = dataclasses.replace(
+        h.state.config,
+        guest_mail_daily_budget=0,
+        guest_mail_hourly_budget=0,
+    )
+    response = await _request_token(h)
+    assert response.status == 200
+    assert h.mail.sent == []
 
 
 # ---------------------------------------------------------------------------
