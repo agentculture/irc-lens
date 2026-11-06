@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-04T17:31:15Z",
-  "updated": "2026-11-06T16:22:45Z",
+  "updated": "2026-11-06T20:25:47Z",
   "claims": [
     {
       "id": "c1",
@@ -866,7 +866,7 @@
         "c17"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l2",
@@ -877,7 +877,7 @@
         "c18"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l3",
@@ -888,7 +888,7 @@
         "t15"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "l4",
@@ -899,7 +899,7 @@
         "t11"
       ],
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     }
   ],
   "obligations": [
@@ -1081,7 +1081,7 @@
       "behavior": "a line Clef blocks never reaches the sandbox in block mode; a hanging or failing Clef sends the line unchecked; approved and mesh lines never reach Clef",
       "source_text": "The message validator is a second Clef layer beside the counts-only detector in c18: it sends one guest line per call, takes its prompt and question from a config file outside the repo that the operator can change without a release, and turns the answer into allow or block only.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o21",
@@ -1090,7 +1090,7 @@
       "behavior": "one address past the pending-reservation cap gets the busy response while a second address still gets a seat",
       "source_text": "Red-team audit RT-01: a single address can't hold guest seats with pending reservations: a per-IP cap on open reservations, with the guest limit and message rate shown beside the other published limits (RT-08).",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     },
     {
       "id": "o22",
@@ -1099,7 +1099,7 @@
       "behavior": "an unexpected failure opening a guest session answers a shaped 503, never a bare 500",
       "source_text": "Red-team audit RT-14: any failure while opening or reopening a guest session answers with the shaped 503 warming-up or busy response, never a bare 500.",
       "origin": "llm",
-      "status": "proposed"
+      "status": "approved"
     }
   ]
 }
