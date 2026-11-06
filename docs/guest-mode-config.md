@@ -331,6 +331,51 @@ threat_rules:
 Alert kinds: `rule-budget-hit`, `rule-failed-send`, `rule-reserved-address`
 and `rule-burst` (refused responses or entry posts).
 
+## Message validation (Clef)
+
+With `guest_mode.sandbox.validator` set, each chat or `/me` line a guest types
+in the sandbox is sent to the Clef decider before the demo agents see it.
+Approved users' lines, mesh lines and a guest's personal-agent lines are never
+sent. Clef answers a fixed choice question whose only keys are `allow` and
+`block`, so a line that asks Clef to allow it, or to answer in prose, can only
+produce one of those two keys; any other answer counts as no verdict.
+
+```yaml
+guest_mode:
+  sandbox:
+    validator:
+      url: http://127.0.0.1:8001/v1/systemone
+      credential_env: CLEF_GATEWAY_KEY   # the env var holding the credential
+      prompt_file: ~/.config/irc-lens/clef-prompt.yaml
+      mode: flag                         # flag (default) or block
+      daily_cap: 500                     # calls per rolling day
+```
+
+`url`, `credential_env` and `prompt_file` are set together or not at all.
+The prompt file stays outside the repo and is never logged; edits take effect
+on the next line, with no restart. Its shape:
+
+```yaml
+state: <facts about the demo and what the agents may be asked>
+instructions: <the question Clef answers>
+criteria:
+  allow: <what an acceptable line looks like>
+  block: <what should never reach the agents>
+```
+
+The guest's line is appended to `state` as data. One call runs at a time per
+guest, with a 5-second timeout. When Clef errs, times out, the prompt file is
+missing or invalid, or `daily_cap` is used up, the line is sent and counted as
+unchecked (`messages_unchecked`).
+
+In `flag` mode, a `block` answer is recorded and counted (`messages_flagged`)
+but the line is still sent. In `block` mode the line is refused with "Message
+not sent" and never reaches the sandbox (`messages_blocked`). Flagged and
+blocked lines are stored with the guest's inputs, so deleting the guest
+erases them, and alerts carry counts only. Start in `flag` mode, measure the
+prompt on labelled lines (false blocks and misses), and switch to `block` only
+after the owner accepts the rates.
+
 ## Set or reset password
 
 With guest mode and app sign-in on, `src/irc_lens/web/setpw.py`

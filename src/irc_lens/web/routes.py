@@ -38,7 +38,7 @@ from collections.abc import AsyncIterator
 import aiohttp
 from aiohttp import web
 
-from irc_lens import metrics
+from irc_lens import metrics, threat
 from irc_lens.commands import (
     DELETE_PAGE,
     SANDBOX_COMMAND,
@@ -47,7 +47,7 @@ from irc_lens.commands import (
     parse_command,
 )
 from irc_lens.session import LensConnectionLost, Session
-from irc_lens.web import app_session, input_gate
+from irc_lens.web import app_session, input_gate, message_check
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import client_ip
 from irc_lens.web.events import format_sse
@@ -826,6 +826,9 @@ async def post_input(request: web.Request) -> web.Response:
     if _is_sandbox_enter(request, parsed, text):
         request.app["sandbox_toggle"].add(request["identity"].principal)
         return web.Response(status=204, headers={"HX-Refresh": "true"})
+    refused = await _check_guest_line(request, parsed, text)
+    if refused is not None:
+        return refused
     try:
         await session.execute(parsed)
     except LensConnectionLost as exc:
@@ -833,6 +836,51 @@ async def post_input(request: web.Request) -> web.Response:
     # The input log (shared gate): the export task reads these back.
     input_gate.record(request.app, _input_actor(request), parsed, text)
     return web.Response(status=204)
+
+
+#: Guest commands whose text the demo agents read (t15).
+_VALIDATED_TYPES = frozenset({CommandType.CHAT, CommandType.ME})
+_SIGNAL_FOR_OUTCOME = {
+    message_check.OUTCOME_BLOCK: threat.Signal.MESSAGES_BLOCKED,
+    message_check.OUTCOME_FLAG: threat.Signal.MESSAGES_FLAGGED,
+    message_check.OUTCOME_UNCHECKED: threat.Signal.MESSAGES_UNCHECKED,
+}
+_KIND_FOR_OUTCOME = {
+    message_check.OUTCOME_BLOCK: message_check.INPUT_KIND_BLOCKED,
+    message_check.OUTCOME_FLAG: message_check.INPUT_KIND_FLAGGED,
+}
+
+
+async def _check_guest_line(
+    request: web.Request, parsed: ParsedCommand, text: str
+) -> web.Response | None:
+    """Clef's verdict on a guest's chat line before the agents see it (t15).
+
+    Only a human guest's lines on the sandbox go to Clef (c27). A block is
+    stored with the guest's inputs, so deleting the guest erases it (h31);
+    the threat counters see counts only.
+    """
+    validator = message_check.validator_for(request.app)
+    actor = _input_actor(request)
+    if (
+        validator is None
+        or actor.tier != TIER_GUEST
+        or actor.backend != BACKEND_SANDBOX
+        or parsed.type not in _VALIDATED_TYPES
+    ):
+        return None
+    outcome = await validator.check(actor.email, parsed.text or text)
+    signal = _SIGNAL_FOR_OUTCOME.get(outcome)
+    if signal is not None:
+        request.app[threat.THREAT_COUNTERS].increment(signal)
+    kind = _KIND_FOR_OUTCOME.get(outcome)
+    if kind is not None:
+        request.app["guest_store"].record_input(actor.email, kind=kind, payload=text)
+    if outcome != message_check.OUTCOME_BLOCK:
+        return None
+    return _json_error(
+        403, "Message not sent", "This message was flagged and not sent."
+    )
 
 
 def _touch(request: web.Request) -> None:

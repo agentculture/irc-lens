@@ -26,6 +26,7 @@ from irc_lens.web import (
     csrf,
     deletion,
     entry,
+    message_check,
     nickname,
     retention,
     routes,
@@ -317,6 +318,7 @@ def make_app(
     # Guest-mode entry card (/entry, /entry/*): 404 while guest mode is off.
     entry.install(app, config)
     rules.install(app, app[entry.ENTRY_STATE].alerter, config)
+    message_check.install(app, config)
     if config.guest_enabled:
         deletion.install(app)
         if config.app_signin_enabled:

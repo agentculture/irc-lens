@@ -78,6 +78,15 @@ class LensConfig:
     # sbx-ask's flag log; guest deletion drops the guest's lines there (d7).
     # The sandbox IRCd itself runs memory-only (culture server --no-persist).
     guest_sandbox_flag_log: str | None = None
+    # Clef validation of guest chat lines (t15, decisions c27-c29). Off
+    # unless url, credential env and prompt file are all set. The prompt
+    # file lives outside the repo; "flag" logs Clef's blocks but still
+    # sends, "block" refuses them.
+    guest_validator_url: str | None = None
+    guest_validator_credential_env: str | None = None
+    guest_validator_prompt_file: str | None = None
+    guest_validator_mode: str = "flag"
+    guest_validator_daily_cap: int = 500
     # Close a sandbox session after this long with no open event stream.
     guest_idle_close_s: int = 900
     # Retention (d9): erase guests inactive this many days (hourly sweep).
@@ -544,8 +553,12 @@ _GUEST_KEYS = frozenset(
     }
 )
 _GUEST_SANDBOX_KEYS = frozenset(
-    {"name", "host", "port", "room_prefix", "flag_log"}
+    {"name", "host", "port", "room_prefix", "flag_log", "validator"}
 )
+_GUEST_VALIDATOR_KEYS = frozenset(
+    {"url", "credential_env", "prompt_file", "mode", "daily_cap"}
+)
+_VALIDATOR_MODES = ("flag", "block")
 _GUEST_MAIL_KEYS = frozenset(
     {
         "provider",
@@ -861,6 +874,7 @@ def _validate_guest_mode_section(raw: dict) -> dict:
         "guest_sandbox_flag_log": _optional_path(
             sandbox.get("flag_log"), "guest_mode.sandbox.flag_log"
         ),
+        **_validate_message_validator(sandbox.get("validator")),
         "guest_idle_close_s": _positive_int(
             guest.get("idle_close_s", 900), "guest_mode.idle_close_s"
         ),
@@ -907,6 +921,38 @@ def _validate_guest_mode_section(raw: dict) -> dict:
         "guest_rate_messages_per_min": rate("messages_per_min", 20),
         "guest_rate_password_attempts_per_15min": rate(
             "password_attempts_per_15min", 5
+        ),
+    }
+
+
+def _validate_message_validator(raw: object) -> dict[str, object]:
+    """``guest_mode.sandbox.validator``: all three of url, credential env and
+    prompt file, or none of them (validation off)."""
+    where = "guest_mode.sandbox.validator"
+    section = _optional_mapping(raw, where, _GUEST_VALIDATOR_KEYS)
+    url = _optional_service_url(section.get("url"), f"{where}.url")
+    credential_env = _optional_str(
+        section.get("credential_env"), f"{where}.credential_env"
+    )
+    prompt_file = _optional_path(section.get("prompt_file"), f"{where}.prompt_file")
+    if len({bool(url), bool(credential_env), bool(prompt_file)}) != 1:
+        raise _err(
+            f"{where} needs url, credential_env and prompt_file together",
+            f"set all three under `{where}:`, or remove the section",
+        )
+    mode = _coerce_str(section.get("mode", "flag"), f"{where}.mode")
+    if mode not in _VALIDATOR_MODES:
+        raise _err(
+            f"{where}.mode must be flag or block, got {mode!r}",
+            f"set `{where}.mode:` to flag (log only) or block",
+        )
+    return {
+        "guest_validator_url": url,
+        "guest_validator_credential_env": credential_env,
+        "guest_validator_prompt_file": prompt_file,
+        "guest_validator_mode": mode,
+        "guest_validator_daily_cap": _positive_int(
+            section.get("daily_cap", 500), f"{where}.daily_cap"
         ),
     }
 
