@@ -40,7 +40,9 @@ SESSION_MAX_S = 30 * 86400
 DEFAULT_INACTIVE_DAYS = 90
 _DAY_S = 86400
 TOKEN_RETENTION_S = _DAY_S
-ATTEMPT_RETENTION_S = _DAY_S
+# The longest attempts-table window is the guest-mail daily budget. Keep one
+# hourly-sweep interval beyond it so cleanup can never shorten that window.
+ATTEMPT_RETENTION_S = _DAY_S + 3600
 BAN_RETENTION_S = 365 * _DAY_S
 #: Trusted browsers (``lens_device``) last one year from the trusting sign-in.
 TRUSTED_DEVICE_S = 365 * _DAY_S
@@ -753,7 +755,8 @@ class GuestStore:
         * ``tokens`` issued more than a day ago (so used or expired
           guest, signin and setpw tokens are gone a day later).
         * ``sessions`` idle over 7 days or older than 30 days.
-        * ``attempts`` (rate-limit counters) older than a day.
+        * ``attempts`` (rate-limit counters) older than 25 hours (a one-hour
+          margin beyond the longest rolling window).
         * ``bans`` older than 365 days.
         * ``trusted_devices`` trusted more than 365 days ago.
         * ``signin_budget`` rows whose last block is over 24 hours old.

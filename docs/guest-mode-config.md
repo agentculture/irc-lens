@@ -23,6 +23,9 @@ guest_mode:
     provider: none
     from: "CULTURE.DEV <no-reply@culture.dev>"
     api_key_env: IRC_LENS_MAIL_API_KEY            # env var holding the provider key
+    daily_budget: 50          # guest code mail across all visitors per 24 hours
+    hourly_budget: 20         # guest code mail across all visitors per hour
+    ip_hourly_budget: 5       # guest code mail from one IP per hour
     alert_url: ""             # optional delivery-alert webhook (https; http only for 127.0.0.1/localhost)
     alert_secret_env: ""      # env var holding the alert webhook secret
   rate_limits:
@@ -47,6 +50,9 @@ guest_mode:
 | `mail.provider` | `guest_mail_provider` | `none` |
 | `mail.from` | `guest_mail_from` | `""` |
 | `mail.api_key_env` | `guest_mail_api_key_env` | `IRC_LENS_MAIL_API_KEY` |
+| `mail.daily_budget` | `guest_mail_daily_budget` | `50` |
+| `mail.hourly_budget` | `guest_mail_hourly_budget` | `20` |
+| `mail.ip_hourly_budget` | `guest_mail_ip_hourly_budget` | `5` |
 | `mail.alert_url` | `guest_mail_alert_url` | unset (alerts off) |
 | `mail.alert_secret_env` | `guest_mail_alert_secret_env` | unset |
 | `rate_limits.entry_per_min` | `guest_rate_entry_per_min` | `10` |
@@ -56,10 +62,31 @@ guest_mode:
 Validation: every sub-section must be a mapping; unknown keys anywhere in the
 section are rejected (typo guard); `enabled` must be a boolean, ports go
 through the shared port check, `legal_version_url` must be an `http(s)` URL
-with a host, rate limits must be integers, and `idle_close_s` and
+with a host, mail budgets must be non-negative integers, rate limits must be
+integers, and `idle_close_s` and
 `retention_days` must be positive integers, as must `max_guests`.
 `mail.alert_url`, when set, must be an `https` URL (plain `http` is accepted
 only for `127.0.0.1` / `localhost`).
+
+### Guest mail budget and rollback
+
+Guest code mail has a persistent global budget of `mail.daily_budget` per
+rolling 24 hours and `mail.hourly_budget` per rolling hour. One source IP may
+use at most `mail.ip_hourly_budget` of those per hour, and never more than one
+less than the hourly budget, so a slot always remains for another guest; an
+hourly budget of one therefore permits no source to send guest code mail.
+Counts are stored in the guest database before a send is scheduled, so they
+survive restarts and cannot be bypassed by slow background sends. Approved
+sign-in codes, new-browser notices and set-password mail do not use this guest
+budget. Setting either budget to `0` stops guest code mail while approved mail
+continues.
+
+To restore guest mail after a budget was deliberately lowered or exhausted,
+raise `guest_mode.mail.daily_budget` and/or
+`guest_mode.mail.hourly_budget` in the private config, then restart
+`irc-lens serve`. The existing rolling counts remain in the guest database;
+the newly loaded limits take effect immediately after that restart. Keep live
+deployment values in the private config rather than in this public document.
 
 ## App sign-in switch
 
@@ -419,8 +446,8 @@ shutdown):
   their consents) is older than `retention_days` (default 90) are erased by
   the same path as a self-service deletion — store rows, uploads and
   flag-log lines — and logged by hash;
-- tokens issued more than a day ago and rate-limit attempts older than a day
-  are removed;
+- tokens issued more than a day ago are removed; rate-limit attempts are kept
+  for 25 hours, giving the 24-hour guest-mail window a one-hour sweep margin;
 - bans older than 365 days are lifted.
 
 The agent state badge (`agent online` / `agent is warming up`) reflects whether the

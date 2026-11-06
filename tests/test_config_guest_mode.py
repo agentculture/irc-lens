@@ -41,6 +41,8 @@ def test_guest_mode_absent_uses_defaults(tmp_path: Path) -> None:
     assert cfg.guest_mail_provider == "none"
     assert cfg.guest_mail_from == ""
     assert cfg.guest_mail_api_key_env == "IRC_LENS_MAIL_API_KEY"
+    assert cfg.guest_mail_daily_budget == 50
+    assert cfg.guest_mail_hourly_budget == 20
     assert cfg.guest_rate_entry_per_min == 10
     assert cfg.guest_rate_messages_per_min == 20
     assert cfg.guest_rate_password_attempts_per_15min == 5
@@ -64,6 +66,8 @@ guest_mode:
     provider: none
     from: ""
     api_key_env: IRC_LENS_MAIL_API_KEY
+    daily_budget: 75
+    hourly_budget: 25
   rate_limits:
     entry_per_min: 10
     messages_per_min: 20
@@ -80,6 +84,8 @@ guest_mode:
     assert cfg.guest_mail_provider == "none"
     assert cfg.guest_mail_from == ""
     assert cfg.guest_mail_api_key_env == "IRC_LENS_MAIL_API_KEY"
+    assert cfg.guest_mail_daily_budget == 75
+    assert cfg.guest_mail_hourly_budget == 25
     assert cfg.guest_rate_entry_per_min == 10
     assert cfg.guest_rate_messages_per_min == 20
     assert cfg.guest_rate_password_attempts_per_15min == 5
