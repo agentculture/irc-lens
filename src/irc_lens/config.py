@@ -66,6 +66,9 @@ class LensConfig:
     # Standby serves approved users while freezing account changes.
     standby_enabled: bool = False
     guest_enabled: bool = False
+    # Refuse guest codes while no bot check is configured (t5). Off until the
+    # bot check is proven through the edge; turning it on is a rollout step.
+    guest_require_bot_check: bool = False
     guest_sandbox_name: str = "sbx"
     guest_sandbox_host: str = "127.0.0.1"
     guest_sandbox_port: int = 6668
@@ -523,6 +526,7 @@ _GUEST_KEYS = frozenset(
         "idle_close_s",
         "retention_days",
         "max_guests",
+        "require_bot_check",
     }
 )
 _GUEST_SANDBOX_KEYS = frozenset(
@@ -792,6 +796,9 @@ def _validate_guest_mode_section(raw: dict) -> dict:
     return {
         "guest_enabled": _coerce_bool(
             guest.get("enabled", False), "guest_mode.enabled"
+        ),
+        "guest_require_bot_check": _coerce_bool(
+            guest.get("require_bot_check", False), "guest_mode.require_bot_check"
         ),
         "guest_sandbox_name": _coerce_str(
             sandbox.get("name", "sbx"), "guest_mode.sandbox.name"

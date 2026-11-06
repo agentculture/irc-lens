@@ -51,6 +51,7 @@ import os
 import secrets
 import time
 from dataclasses import dataclass, field
+from collections.abc import Mapping
 from typing import Protocol
 
 import aiohttp
@@ -196,14 +197,33 @@ class TurnstileVerifier:
         return isinstance(result, dict) and result.get("success") is True
 
 
-def make_bot_verifier(env: dict[str, str] | None = None) -> BotVerifier:
+#: Startup warning and doctor finding when guests face no bot check (c6).
+NO_BOT_CHECK_WARNING = (
+    f"guest mode is on with no bot check: set {TURNSTILE_SITE_KEY_ENV} and "
+    f"{TURNSTILE_SECRET_ENV} to turn on Turnstile (docs/guest-mode-config.md)"
+)
+
+
+def bot_check_configured(env: Mapping[str, str] | None = None) -> bool:
+    """True when both Turnstile keys are present."""
+    env = os.environ if env is None else env
+    return bool(env.get(TURNSTILE_SITE_KEY_ENV) and env.get(TURNSTILE_SECRET_ENV))
+
+
+def make_bot_verifier(env: Mapping[str, str] | None = None) -> BotVerifier:
     """Turnstile when both env keys are set, otherwise a no-op."""
     env = os.environ if env is None else env
-    site_key = env.get(TURNSTILE_SITE_KEY_ENV, "")
-    secret = env.get(TURNSTILE_SECRET_ENV, "")
-    if site_key and secret:
-        return TurnstileVerifier(site_key, secret)
+    if bot_check_configured(env):
+        return TurnstileVerifier(env[TURNSTILE_SITE_KEY_ENV], env[TURNSTILE_SECRET_ENV])
     return NoopVerifier()
+
+
+def _guest_bot_ok(state: "EntryState") -> bool:
+    """With ``require_bot_check`` on, guests need a real bot check (c6).
+
+    Approved sign-in never depends on this: with no keys its verify passes.
+    """
+    return not (state.config.guest_require_bot_check and state.verifier.site_key is None)
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +278,8 @@ def install(app: web.Application, config: LensConfig) -> None:
         alerter=make_alerter(config),
         verifier=make_bot_verifier(),
     )
+    if config.guest_enabled and app[ENTRY_STATE].verifier.site_key is None:
+        logger.warning(NO_BOT_CHECK_WARNING)
     app.router.add_get("/entry", get_entry)
     # Post-SSO landing: Cloudflare Access forwards the user back here.
     app.router.add_get("/login", get_login)
@@ -695,6 +717,11 @@ async def _post_signin_app(request: web.Request) -> web.Response:
     else:
         human = await state.verifier.verify(str(form.get(TURNSTILE_FIELD) or ""), ip)
         if approved:
+            # c26: a browser trusted for this email skips the bot check, so a
+            # failing or missing widget never locks its owner out.
+            human = human or store.is_trusted_device(
+                app_session.read_device_cookie(request), email
+            )
             pw_ok = await asyncio.to_thread(store.check_password, email, password)
         else:
             # A guest has no password: whatever was typed is ignored, and
@@ -704,6 +731,7 @@ async def _post_signin_app(request: web.Request) -> web.Response:
             pw_ok = False
             guest = (
                 human
+                and _guest_bot_ok(state)
                 and not guest_capped
                 and _plausible_email(email)
                 and not _reserved_address(email)
@@ -1024,7 +1052,9 @@ async def post_guest_start(request: web.Request) -> web.Response:
         return again(ERR_NICK_INVALID)
     if _nick_taken(store, email, nick):
         return again(ERR_NICK_TAKEN)
-    if not await state.verifier.verify(str(form.get(TURNSTILE_FIELD) or ""), ip):
+    if not _guest_bot_ok(state) or not await state.verifier.verify(
+        str(form.get(TURNSTILE_FIELD) or ""), ip
+    ):
         return again(ERR_BOT)
 
     limited = _over_limit(
