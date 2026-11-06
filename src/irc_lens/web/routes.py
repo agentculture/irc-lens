@@ -669,6 +669,13 @@ async def get_index(request: web.Request) -> web.Response:
         from irc_lens.web import entry
 
         return entry.warming_up_page(request.app[entry.ENTRY_STATE])
+    except web.HTTPException:
+        raise
+    except Exception:  # noqa: BLE001 — shaped, never a bare 500 (RT-14)
+        logger.exception("opening the session for GET / failed")
+        from irc_lens.web import entry
+
+        return entry.warming_up_page(request.app[entry.ENTRY_STATE])
     # Apply revoked grants before anything renders: prune channels the
     # viewer may no longer list and clear an unreadable current channel,
     # so neither the sidebar nor the chat log can name or show them.
@@ -791,6 +798,11 @@ async def post_input(request: web.Request) -> web.Response:
             headers={"HX-Redirect": "/"},
         )
     except ConnectionError:
+        return _warming_up()
+    except web.HTTPException:
+        raise
+    except Exception:  # noqa: BLE001 — shaped, never a bare 500 (RT-14)
+        logger.exception("opening the session for /input failed")
         return _warming_up()
     # Health gate before parsing: once the AgentIRC pipe is gone, the
     # spec mandates 503 on subsequent input rather than silently
@@ -1021,6 +1033,13 @@ async def get_events(request: web.Request) -> web.StreamResponse:
         session = await _resolve_session(request, may_open_guest=False)
     except (GuestBusy, GuestSignedOff):
         return web.Response(status=204)
+    except ConnectionError:
+        return _warming_up()
+    except web.HTTPException:
+        raise
+    except Exception:  # noqa: BLE001 — shaped, never a bare 500 (RT-14)
+        logger.exception("opening the session for the event stream failed")
+        return _warming_up()
     sub = session.event_bus.subscribe()
     # Re-send the member list once this stream is live: a roster update
     # published before the browser connected (e.g. the agent joining a

@@ -431,3 +431,29 @@ async def test_guest_sees_warming_up_until_sandbox_returns(env: Env) -> None:
     back = await env.client.get("/", headers=env.guest_headers(ANN))
     assert back.status == 200
     assert WARMING_UP not in await back.text()
+
+
+async def test_unexpected_open_failure_is_a_shaped_503(env: Env, monkeypatch, caplog) -> None:
+    """RT-14: a failure other than busy or a dead server never becomes a bare 500."""
+    await env.enter(ANN, "ann")
+    await env.registry.close(f"guest:{ANN}", "sandbox")
+
+    async def broken(*_args, **_kwargs):
+        raise RuntimeError("store busy")
+
+    monkeypatch.setattr(env.registry, "get_or_open", broken)
+
+    page = await env.client.get("/", headers=env.guest_headers(ANN))
+    assert page.status == 503
+    assert WARMING_UP in await page.text()
+
+    sent = await env.say(ANN)
+    assert sent.status == 503
+    assert sent.headers["HX-Redirect"] == "/"
+
+    logged = [r for r in caplog.records if r.getMessage().startswith("opening the session")]
+    assert {r.getMessage() for r in logged} == {
+        "opening the session for GET / failed",
+        "opening the session for /input failed",
+    }
+    assert all(r.exc_info and r.exc_info[0] is RuntimeError for r in logged)
