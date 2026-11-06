@@ -483,6 +483,25 @@ def warming_up_page(state: EntryState) -> web.Response:
     return response
 
 
+def _seat_free(registry, cfg: LensConfig, principal: str, ip: str) -> bool:
+    """The guest limit and the per-address pending cap (t12) both leave room."""
+    return registry.guest_slot_free(
+        principal,
+        cfg.guest_max_guests,
+        address=ip,
+        max_pending_per_address=cfg.guest_max_pending_per_address,
+    )
+
+
+def _reserve_seat(registry, cfg: LensConfig, principal: str, ip: str) -> bool:
+    return registry.try_reserve_guest(
+        principal,
+        cfg.guest_max_guests,
+        address=ip,
+        max_pending_per_address=cfg.guest_max_pending_per_address,
+    )
+
+
 def _guests_full(request: web.Request, email: str) -> bool:
     """True iff max_guests guests are active and *email* is not one of them.
 
@@ -888,12 +907,12 @@ async def _post_code_guest(
     # post_verify); the time floor is waited out after it is released.
     async with registry.guest_lock:
         outcome = "ok"
-        if not registry.guest_slot_free(principal, cfg.guest_max_guests):
+        if not _seat_free(registry, cfg, principal, ip):
             outcome = "busy"
         elif not store.verify_signin_token(email, code, pending, purpose=TOKEN_PURPOSE):
             outcome = "wrong"
         elif returning:
-            registry.try_reserve_guest(principal, cfg.guest_max_guests)
+            _reserve_seat(registry, cfg, principal, ip)
     if outcome == "busy":
         await _pad(started, state.signin_floor_s)
         return busy_page(state)
@@ -977,11 +996,11 @@ async def post_welcome(request: web.Request) -> web.Response:
         # Seat taken while the form was filled in: the form comes back with
         # the busy message and its token unused, so "Enter" works again once
         # the seat frees (the mailed code is already spent).
-        busy = not registry.guest_slot_free(principal, cfg.guest_max_guests)
+        busy = not _seat_free(registry, cfg, principal, ip)
         if not busy:
             if store.consume_token(token, purpose=WELCOME_PURPOSE) != email:
                 return expired()
-            registry.try_reserve_guest(principal, cfg.guest_max_guests)
+            _reserve_seat(registry, cfg, principal, ip)
     if busy:
         metrics.get_metrics().guest_busy()
         return again(MSG_BUSY, 503)
@@ -1167,11 +1186,11 @@ async def post_verify(request: web.Request) -> web.Response:
     registry = request.app["registry"]
     principal = GUEST_PRINCIPAL_PREFIX + email
     async with registry.guest_lock:
-        if not registry.guest_slot_free(principal, cfg.guest_max_guests):
+        if not _seat_free(registry, cfg, principal, ip):
             return busy_page(state)
         if not store.verify_token(email, code, purpose=TOKEN_PURPOSE):
             return wrong(401)
-        registry.try_reserve_guest(principal, cfg.guest_max_guests)
+        _reserve_seat(registry, cfg, principal, ip)
 
     store.record_guest(email, NICK_PREFIX + nick, ip)
     store.record_consent(

@@ -46,6 +46,7 @@ def test_guest_mode_absent_uses_defaults(tmp_path: Path) -> None:
     assert cfg.guest_rate_entry_per_min == 10
     assert cfg.guest_rate_messages_per_min == 20
     assert cfg.guest_rate_password_attempts_per_15min == 5
+    assert cfg.guest_max_pending_per_address == 1
     assert cfg.threat_refused_responses_threshold == 50
     assert cfg.threat_entry_posts_threshold == 10
     assert cfg.threat_reserved_addresses_threshold == 1
@@ -82,6 +83,7 @@ def test_guest_mode_with_all_fields(tmp_path: Path) -> None:
             _base("""
 guest_mode:
   enabled: true
+  max_pending_per_address: 2
   sandbox:
     name: sbx
     host: 127.0.0.1
@@ -115,6 +117,7 @@ guest_mode:
     assert cfg.guest_rate_entry_per_min == 10
     assert cfg.guest_rate_messages_per_min == 20
     assert cfg.guest_rate_password_attempts_per_15min == 5
+    assert cfg.guest_max_pending_per_address == 2
 
 
 def test_guest_mode_partial_merges_defaults(tmp_path: Path) -> None:

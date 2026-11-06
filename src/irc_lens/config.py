@@ -98,6 +98,8 @@ class LensConfig:
     guest_mail_alert_secret_env: str | None = None
     # Concurrent guest sessions allowed on the sandbox.
     guest_max_guests: int = 1
+    # Unopened guest-seat reservations one client address may hold.
+    guest_max_pending_per_address: int = 1
     # auth.app_signin.enabled: False restores password -> /login behavior.
     app_signin_enabled: bool = True
     # auth.app_signin.base_url: public base of set-password links (https;
@@ -534,6 +536,7 @@ _GUEST_KEYS = frozenset(
         "idle_close_s",
         "retention_days",
         "max_guests",
+        "max_pending_per_address",
         "require_bot_check",
     }
 )
@@ -868,6 +871,10 @@ def _validate_guest_mode_section(raw: dict) -> dict:
         ),
         "guest_max_guests": _positive_int(
             guest.get("max_guests", 1), "guest_mode.max_guests"
+        ),
+        "guest_max_pending_per_address": _positive_int(
+            guest.get("max_pending_per_address", 1),
+            "guest_mode.max_pending_per_address",
         ),
         "guest_rate_entry_per_min": rate("entry_per_min", 10),
         "guest_rate_messages_per_min": rate("messages_per_min", 20),
