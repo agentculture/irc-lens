@@ -21,7 +21,9 @@ default: a route that forgets the marker stays approved-only.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
+import os
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -49,6 +51,8 @@ logger = logging.getLogger(__name__)
 
 _JWKS_PATH = "/cdn-cgi/access/certs"
 _KID_MISS_FLOOD_WINDOW_SECONDS = 5.0
+EDGE_TOKEN_HEADER = "X-Lens-Edge-Token"
+EDGE_CLIENT_IP_HEADER = "X-Lens-Edge-Client-IP"
 
 
 def _http_error(status: int, error: str, hint: str) -> web.Response:
@@ -99,9 +103,44 @@ def _route_allows_anonymous(request: web.Request) -> bool:
     return bool(getattr(route_handler, _ALLOWS_ANONYMOUS_ATTR, False))
 
 
+def edge_credential_valid(
+    request: web.Request, config: LensConfig | None = None
+) -> bool:
+    """Whether the request proves it came from the edge Worker.
+
+    YAML contains only the environment-variable name. Missing configuration,
+    a missing runtime secret, and a missing header all fail closed. The token
+    is deliberately never included in a log message.
+    """
+    if config is None:
+        config = request.app.get("config")
+    env_name = getattr(config, "edge_credential_env", None)
+    if not env_name:
+        return False
+    expected = os.environ.get(env_name, "")
+    provided = request.headers.get(EDGE_TOKEN_HEADER, "")
+    return bool(expected and provided) and hmac.compare_digest(
+        provided.encode("utf-8", "surrogateescape"),
+        expected.encode("utf-8", "surrogateescape"),
+    )
+
+
+def trusted_edge_client_ip(request: web.Request) -> str | None:
+    """Return the Worker's visitor IP only when its credential verifies."""
+    edge_ip = request.headers.get(EDGE_CLIENT_IP_HEADER, "").strip()
+    if edge_ip and edge_credential_valid(request):
+        return edge_ip
+    return None
+
+
 def client_ip(request: web.Request) -> str:
-    """Best-effort client address (Cloudflare header first, then the peer)."""
-    return request.headers.get("CF-Connecting-IP") or request.remote or ""
+    """Best-effort client address, trusting the Worker only after proof."""
+    return (
+        trusted_edge_client_ip(request)
+        or request.headers.get("CF-Connecting-IP")
+        or request.remote
+        or ""
+    )
 
 
 def _guest_identity(request: web.Request) -> Identity | None:
@@ -516,6 +555,14 @@ def _missing_identity() -> web.Response:
     )
 
 
+def _missing_edge_credential() -> web.Response:
+    return _http_error(
+        403,
+        "edge credential required",
+        "send this request through the configured edge Worker",
+    )
+
+
 def build_cloudflare_middleware(config: LensConfig):
     """Build the @web.middleware coroutine for cloudflare-access mode.
 
@@ -538,6 +585,13 @@ def build_cloudflare_middleware(config: LensConfig):
 
     @web.middleware
     async def middleware(request: web.Request, handler):
+        # Gate every origin path, including health/readiness and capability
+        # URLs, before considering the normal identity exemptions. This is
+        # default-off so the lens can deploy before the Worker exists.
+        if config.require_edge_credential and not edge_credential_valid(
+            request, config
+        ):
+            return _missing_edge_credential()
         # Static assets never require identity (browser fetches them
         # before the SSO redirect lands on every page load). `/healthz`
         # and `/readyz` are also unauthenticated: process and IRC TCP

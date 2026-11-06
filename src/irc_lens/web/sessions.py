@@ -562,10 +562,15 @@ class SessionRegistry:
             await self.retire(*key)
             existing = None
         if existing is not None:
-            if backend == BACKEND_MESH or getattr(existing, "healthy", True):
+            if backend == BACKEND_MESH or (
+                getattr(existing, "healthy", True)
+                and getattr(existing, "connected", True)
+            ):
                 return existing
             # A dead sandbox connection is evicted (and the active-guest
-            # gauge decremented) so the next request reconnects.
+            # gauge decremented) so the next request reconnects. Writing to
+            # a closed socket raises nothing, so "healthy" alone would let a
+            # guest's lines vanish while the server is away.
             await self.close(*key)
         async with self._locks[key]:
             if key in self._sessions:  # double-check

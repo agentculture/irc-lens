@@ -76,7 +76,10 @@ from irc_lens.nickname import (  # shared with approved users' nicknames
     sanitize_nickname,
 )
 from irc_lens.web import app_session, csrf
-from irc_lens.web.auth import allows_anonymous
+from irc_lens.web.auth import (
+    allows_anonymous,
+    trusted_edge_client_ip,
+)
 from irc_lens.web.render import render_fragment, static_url
 from irc_lens.web.identity import TIER_GUEST
 from irc_lens.web.sessions import BACKEND_SANDBOX, GUEST_PRINCIPAL_PREFIX
@@ -115,6 +118,8 @@ ERR_EXPIRED = "That took too long. Sign in again."
 _LOG_ENTRY_BLOCKED = "guest entry blocked: %s"
 #: Shown while guest_mode.max_guests guests are active (c24); exact wording.
 MSG_BUSY = "The sandbox is busy. Try again in a few minutes."
+MSG_WARMING_UP = "Agent is warming up. This page reloads by itself."
+WARMING_UP_REFRESH_S = 30
 
 TERMS_URL = "https://culture.dev/terms"
 PRIVACY_URL = "https://culture.dev/privacy"
@@ -289,13 +294,15 @@ def _plausible_email(email: str) -> bool:
 
 
 def client_ip(request: web.Request) -> str:
-    """Visitor IP: ``CF-Connecting-IP`` (cloudflared), else the peer.
+    """Visitor IP from a proven Worker, cloudflared, or the peer.
 
-    The lens binds loopback behind cloudflared, so every peer address is
-    the tunnel's; Cloudflare's header is the only per-visitor signal.
+    ``X-Lens-Edge-Client-IP`` is attacker-controlled unless the request also
+    presents the configured Worker credential. Without that proof, ignore it
+    and retain the existing ``CF-Connecting-IP``/peer behavior.
     """
     return (
-        request.headers.get("CF-Connecting-IP", "").strip()
+        trusted_edge_client_ip(request)
+        or request.headers.get("CF-Connecting-IP", "").strip()
         or request.remote
         or "unknown"
     )
@@ -364,6 +371,7 @@ def _page(
         turnstile_script=TURNSTILE_SCRIPT_URL,
         turnstile_field=TURNSTILE_FIELD,
         busy=MSG_BUSY,
+        warming_up=MSG_WARMING_UP,
         nick_prefix=NICK_PREFIX,
         nick_max=NICK_MAX,
         terms_url=TERMS_URL,
@@ -396,6 +404,13 @@ def busy_page(state: EntryState) -> web.Response:
     """
     metrics.get_metrics().guest_busy()
     return _page(state, "busy")
+
+
+def warming_up_page(state: EntryState) -> web.Response:
+    """Shown on ``/`` while a session's IRC server can't be reached."""
+    response = _page(state, "warming_up", status=503)
+    response.headers["Refresh"] = str(WARMING_UP_REFRESH_S)
+    return response
 
 
 def _guests_full(request: web.Request, email: str) -> bool:

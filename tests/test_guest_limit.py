@@ -390,3 +390,44 @@ async def test_approved_guest_view_keeps_the_open_tab_rule(env: Env) -> None:
     await env.reap()
     env.clock.now += IDLE_S * 3
     assert await env.reap() == []
+
+
+WARMING_UP = "Agent is warming up."
+
+
+async def test_guest_sees_warming_up_until_sandbox_returns(env: Env) -> None:
+    await env.enter(ANN, "ann")
+    port = env.sandbox.port
+    session = env.registry.peek(f"guest:{ANN}", "sandbox")
+    await env.sandbox.stop()
+    for _ in range(100):
+        if not session.connected:
+            break
+        await asyncio.sleep(0.02)
+    assert not session.connected
+
+    # The first send isn't silently lost: the page reloads into the message.
+    sent = await env.say(ANN)
+    assert sent.status == 503
+    assert sent.headers["HX-Redirect"] == "/"
+    assert WARMING_UP in (await sent.json())["hint"]
+
+    # The reload can't reopen the session, so it shows the message.
+    page = await env.client.get("/", headers=env.guest_headers(ANN))
+    assert page.status == 503
+    assert page.headers["Refresh"] == str(entry.WARMING_UP_REFRESH_S)
+    assert WARMING_UP in await page.text()
+    assert env.registry.active_guest_count() == 0
+
+    # Input from a tab still open gets the same answer, not a 500.
+    again = await env.say(ANN)
+    assert again.status == 503
+    assert again.headers["HX-Redirect"] == "/"
+
+    # When the server is back on its port, the same reload gets the chat.
+    env.sandbox._server = await asyncio.start_server(
+        env.sandbox._handle, host=env.sandbox.host, port=port
+    )
+    back = await env.client.get("/", headers=env.guest_headers(ANN))
+    assert back.status == 200
+    assert WARMING_UP not in await back.text()

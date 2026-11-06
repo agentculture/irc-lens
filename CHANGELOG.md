@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-11-05
+
+### Changed
+
+- The chat's agent state badge says `agent is warming up` instead of `agent offline`, and the edge Worker's outage page says the same.
+
+### Fixed
+
+- A guest whose sandbox IRC server is down gets a page that says the agent is warming up and reloads itself, instead of a 500.
+- A line sent while the guest's sandbox connection is down is refused with that message. It used to return success and vanish.
+
+## [0.22.0] - 2026-11-04
+
+### Added
+
+- Edge Worker trust, off by default: `auth.public_origin`, `auth.require_edge_credential`
+  and `auth.edge_credential_env`. A request's `X-Lens-Edge-Client-IP` is honored only
+  with a valid `X-Lens-Edge-Token`, compared in constant time.
+
+## [0.21.1] - 2026-11-04
+
+### Fixed
+
+- Chat edge Worker, before its first deploy: a KV failure or mistyped state no longer takes down a healthy origin, the lens's own 503 responses pass through, a redirect no longer counts as ready or carries the token to another host, and a long outage stops writing to KV. The outage page's text now stacks.
+
+## [0.21.0] - 2026-11-04
+
+### Added
+
+- `deploy/chat-edge/`: a Cloudflare Worker for the console's edge, not deployed by this change. It sends traffic to one active origin, fails over after repeated `/readyz` failures, and shows an outage page when origins are unreachable. Returning to the primary is a deliberate step.
+
 ## [0.20.0] - 2026-11-04
 
 ### Added

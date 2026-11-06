@@ -168,6 +168,11 @@
           </div>
         </form>
 
+        {% elif step == "warming_up" %}
+        <div class="entry-form">
+          <p class="entry-note" role="status">{{ warming_up }}</p>
+        </div>
+
         {% elif step == "busy" %}
         <div class="entry-form">
           <p class="entry-note" role="status">{{ busy }}</p>
