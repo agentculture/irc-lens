@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.23.0] - 2026-11-06
+
+Harden public sign-in (irc-lens#94) and add Clef message validation. Spec and
+plan: `docs/specs/2026-11-04-harden-public-sign-in.md`,
+`docs/plans/2026-11-04-harden-public-sign-in.md`.
+
+### Added
+
+- A persistent guest mail budget (`guest_mode.mail.daily_budget`,
+  `hourly_budget`, `ip_hourly_budget`; 50 a day, 20 an hour, 5 an hour from one
+  address), counted before each send. Approved users' mail stays outside it.
+- One ceiling on all mail (`guest_mode.mail.total_daily_ceiling`, default 90 a
+  day), and set-password and deletion mail limited to 5 per address per hour.
+- In-memory threat counters (15-minute windows, counts and hashed sources only)
+  and fixed alert rules (`threat_rules:`), checked off the request path.
+- An optional, advisory Clef verdict on rule alerts
+  (`threat_rules.decider_url`), counts only, at most once per window and 24
+  times a day. `scripts/clef_windows.py` evaluates it on labelled windows
+  (`docs/clef-threat-verdicts.md`).
+- Clef validation of guest chat lines (`guest_mode.sandbox.validator`), with
+  the prompt in an operator file outside the repo, flag mode by default and
+  block mode after the owner accepts measured rates (`scripts/clef_lines.py`).
+- `guest_mode.require_bot_check`, a startup warning and a doctor check when
+  guest mode runs with no bot check; trusted browsers skip the widget on
+  approved sign-in.
+- `guest_mode.max_pending_per_address`: one address can't hold every guest
+  seat with pending reservations.
+- `/owner/metrics` reports the threat window and the bot-check state.
+
+### Changed
+
+- Delivery alerts fire only for outages (401, 403, 429, 5xx, network) under
+  their own kinds; recipient errors log their status, count in
+  `failed_sends`, and don't alert.
+- Guest paths refuse reserved test domains before any send.
+- Any unexpected failure opening a guest session answers with a shaped 503,
+  never a bare 500.
+
 ## [0.22.1] - 2026-11-05
 
 ### Changed
