@@ -1,0 +1,609 @@
+{
+  "plan_slug": "harden-public-sign-in",
+  "schema_version": 2,
+  "created": "2026-11-06T16:21:56Z",
+  "updated": "2026-11-06T19:19:30Z",
+  "deviations": [],
+  "evidence": [
+    {
+      "id": "e1",
+      "obligation_ref": "o1",
+      "test_ref": "tests/test_mail_budget.py::test_budget_persists_and_lift_after_restart_restores_mail",
+      "behavior_text": "a used-up guest budget refuses the next guest mail, and a new MailBudget over the same store (a restart) still refuses it",
+      "contract_text": "once the hourly or daily guest budget is reached, no further guest code reaches the mail adapter, and the count survives a console restart",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 1
+    },
+    {
+      "id": "e2",
+      "obligation_ref": "o2",
+      "test_ref": "tests/test_app_signin.py::test_exhausted_guest_budget_blocks_adapter_but_not_approved_mail",
+      "behavior_text": "with the guest budget at 0, no guest code reaches the adapter while the approved sign-in code does",
+      "contract_text": "with the guest budget at 0, a correct password still sends the approved sign-in code",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 2
+    },
+    {
+      "id": "e3",
+      "obligation_ref": "o3",
+      "test_ref": "tests/test_setpw.py::test_request_rate_limited_per_email",
+      "behavior_text": "set-password requests for one address stop reaching the adapter at the hourly per-address limit (deletion: tests/test_delete_ux.py::test_deletion_request_is_limited_per_address_for_an_hour, also green)",
+      "contract_text": "repeat requests for one address stop reaching the mail adapter at the hourly per-address limit",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 3
+    },
+    {
+      "id": "e4",
+      "obligation_ref": "o4",
+      "test_ref": "tests/test_mail.py::test_total_ceiling_counts_every_mail_path_before_adapter",
+      "behavior_text": "sends through every mail path share one ceiling counted before the adapter; tests/test_mail.py::test_default_total_ceiling_stays_below_provider_quota also green",
+      "contract_text": "total sends in a window never exceed the mail ceiling, whichever path sent them",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 4
+    },
+    {
+      "id": "e5",
+      "obligation_ref": "o5",
+      "test_ref": "tests/test_app_signin.py::test_one_ip_leaves_an_hourly_guest_mail_slot_for_another",
+      "behavior_text": "one IP stops below the hourly guest budget while a second IP still gets a code",
+      "contract_text": "one IP alone can't use the whole hourly guest budget; other IPs still get codes",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 5
+    },
+    {
+      "id": "e6",
+      "obligation_ref": "o6",
+      "test_ref": "tests/test_rules.py::test_budget_hit_warns_that_real_guests_may_get_no_mail",
+      "behavior_text": "a budget-hit window raises an alert whose text says real guests may be getting no mail",
+      "contract_text": "a budget-hit alert fires and says real guests may be getting no mail",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 6
+    },
+    {
+      "id": "e7",
+      "obligation_ref": "o7",
+      "test_ref": "tests/test_signin_guest.py::test_reserved_address_gets_the_code_page_and_no_mail",
+      "behavior_text": "reserved-domain sign-ins get status 200 and the same code page, and nothing reaches the mail adapter; status, body and send checked, cookie and timing floor not asserted",
+      "contract_text": "a reserved-domain address never reaches the mail adapter, and status, body apart from the echoed address, cookie presence and timing floor match a normal guest submission",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 7
+    },
+    {
+      "id": "e8",
+      "obligation_ref": "o8",
+      "test_ref": "tests/test_alerts.py::test_recipient_error_does_not_alert_or_take_outage_slot",
+      "behavior_text": "a 422 raises no alert and leaves the hourly slot free, so a following 500 alerts",
+      "contract_text": "a recipient error raises no alert and doesn't use up the alert slot; a 5xx or network failure alerts",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 8
+    },
+    {
+      "id": "e9",
+      "obligation_ref": "o9",
+      "test_ref": "tests/test_alerts.py::test_recipient_error_does_not_alert_or_take_outage_slot",
+      "behavior_text": "the failed-send log lines read 'mail send failed: HTTP 422' and 'HTTP 500' and contain no recipient, code or provider body",
+      "contract_text": "the line includes the HTTP status and never the address, code or provider body",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 9
+    },
+    {
+      "id": "e10",
+      "obligation_ref": "o10",
+      "test_ref": "tests/test_bot_check.py::test_startup_warns_once_without_keys",
+      "behavior_text": "guest mode with no Turnstile keys logs the warning once at startup; with keys or guest mode off it doesn't (doctor: tests/test_bot_check.py::test_doctor_warns_only_for_guest_mode_without_keys, also green)",
+      "contract_text": "guest mode on with no Turnstile keys gives one startup warning and a doctor finding; with keys set, neither",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 10
+    },
+    {
+      "id": "e11",
+      "obligation_ref": "o11",
+      "test_ref": "tests/test_bot_check.py::test_trusted_browser_signs_in_with_the_bot_check_failing",
+      "behavior_text": "with verify failing, a browser trusted for the approved email gets its code and an untrusted browser does not",
+      "contract_text": "a trusted browser signs in while verify is failing; an untrusted browser doesn't",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 11
+    },
+    {
+      "id": "e12",
+      "obligation_ref": "o12",
+      "test_ref": "tests/test_mail_budget.py::test_budget_persists_and_lift_after_restart_restores_mail",
+      "behavior_text": "raising the budget in config and building a new budget over the same store restores guest mail with no code change; the require_bot_check lift is shown by tests/test_bot_check.py::test_required_bot_check_without_keys_refuses_guests_only with the setting on and the rest of the suite with it off",
+      "contract_text": "changing config and restarting lifts the budget and required bot check, restoring guest mail with no code change",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 12
+    },
+    {
+      "id": "e13",
+      "obligation_ref": "o13",
+      "test_ref": "tests/test_app_signin.py",
+      "behavior_text": "the whole approved app sign-in test file passes at the merge commit",
+      "contract_text": "the existing approved sign-in tests pass unchanged",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 13
+    },
+    {
+      "id": "e14",
+      "obligation_ref": "o14",
+      "test_ref": "tests/test_rules.py::test_each_trigger_alerts_once_with_counts",
+      "behavior_text": "each trigger crossing a window raises one alert carrying the window counts; tests/test_rules.py::test_rule_alert_has_labelled_advisory_verdict shows the verdict is only an advisory label",
+      "contract_text": "a window crossing a trigger raises an alert with its counts, whatever Clef answers",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 14
+    },
+    {
+      "id": "e15",
+      "obligation_ref": "o15",
+      "test_ref": "tests/test_decider.py::test_threat_request_contains_only_fixed_questions_and_derived_counts",
+      "behavior_text": "the decider request equals a fixed counts-only body and contains none of the visitor email, IP, user agent or path values",
+      "contract_text": "the request body holds derived counts only: no address, IP, user agent or path text",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 15
+    },
+    {
+      "id": "e16",
+      "obligation_ref": "o16",
+      "test_ref": "tests/test_rules.py::test_hanging_decider_does_not_block_and_timeout_alerts_not_assessed",
+      "behavior_text": "with the decider hanging, the rule check returns without blocking and the alert goes out marked not assessed",
+      "contract_text": "sign-in behaves the same, and the alert still goes out marked not assessed",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 16
+    },
+    {
+      "id": "e17",
+      "obligation_ref": "o17",
+      "test_ref": "tests/test_threat.py::test_ten_thousand_requests_keep_fixed_bounded_state",
+      "behavior_text": "10000 requests in a window keep the counter state at its fixed bound with no database or network call; tests/test_decider.py::test_threat_caller_caps_one_per_window_and_24_per_rolling_day caps decider calls at 1 per window",
+      "contract_text": "10000 requests in a window cause at most 1 decider call, fixed-size counter state and no added database writes",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 17
+    },
+    {
+      "id": "e18",
+      "obligation_ref": "o18",
+      "test_ref": "tests/test_rules.py::test_each_trigger_alerts_once_with_counts",
+      "behavior_text": "with no decider configured, rules still alert, marked not assessed; the full suite (2079 passed, the one failure is pre-existing #89) runs with no decider configured",
+      "contract_text": "startup is clean and every other layer works",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 18
+    },
+    {
+      "id": "e19",
+      "obligation_ref": "o19",
+      "test_ref": "tests/test_threat.py::test_unrouted_401_is_a_probe_but_real_route_401_is_not",
+      "behavior_text": "an unrouted path counts as a probe and a 401 on a real route does not",
+      "contract_text": "an unrouted path counts as a probe, and a 401 on a real route doesn't",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 19
+    },
+    {
+      "id": "e20",
+      "obligation_ref": "o7",
+      "test_ref": "live: POST https://chat.culture.dev/entry/signin email=probe@example.com after the 0.23.0 rollout",
+      "behavior_text": "status 200 with the code page, and no mail line or send in the console log after it",
+      "contract_text": "a reserved-domain address never reaches the mail adapter",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "observed on the live console after the restart; before the upgrade the same request made a failing send",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:22:13",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 20
+    },
+    {
+      "id": "e21",
+      "obligation_ref": "o10",
+      "test_ref": "live: culture-console-spark journal after the 0.23.0 restart",
+      "behavior_text": "one 'guest mode is on with no bot check' warning at startup; doctor's bot check reports warn",
+      "contract_text": "guest mode on with no Turnstile keys gives one startup warning and a doctor finding",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "observed on the live console and live config",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:22:13",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 21
+    },
+    {
+      "id": "e22",
+      "obligation_ref": "o20",
+      "test_ref": "tests/test_message_check.py::test_blocked_line_never_reaches_the_sandbox",
+      "behavior_text": "in block mode a blocked line answers 422 and no PRIVMSG with it reaches the real sandbox test server; test_hanging_clef_sends_the_line_marked_unchecked and test_approved_lines_never_reach_clef in the same file are green",
+      "contract_text": "a line Clef blocks never reaches the sandbox in block mode; a hanging or failing Clef sends the line unchecked; approved and mesh lines never reach Clef",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named tests ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 22
+    },
+    {
+      "id": "e23",
+      "obligation_ref": "o20",
+      "test_ref": "live: validator built from the live config and the grant key after the rollout",
+      "behavior_text": "flag mode; 'how do agents link between machines?' -> allow, a developer-mode injection line -> flag",
+      "contract_text": "a line Clef blocks never reaches the sandbox in block mode; a hanging or failing Clef sends the line unchecked; approved and mesh lines never reach Clef",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "run on spark against the live Clef gateway; block mode itself is not live (owner acceptance pending)",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:22:27",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 23
+    },
+    {
+      "id": "e24",
+      "obligation_ref": "o21",
+      "test_ref": "tests/test_guest_limit.py::test_pending_reservations_are_capped_per_address",
+      "behavior_text": "one address past the pending cap gets the busy page while a second address still gets a seat; tests/test_session_registry.py::test_pending_guest_reservations_are_capped_per_address also green",
+      "contract_text": "one address past the pending-reservation cap gets the busy response while a second address still gets a seat",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named tests ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 24
+    },
+    {
+      "id": "e25",
+      "obligation_ref": "o22",
+      "test_ref": "tests/test_guest_limit.py::test_unexpected_open_failure_is_a_shaped_503",
+      "behavior_text": "with session opening raising RuntimeError, GET / and POST /input answer a shaped 503 and the error is logged with its traceback",
+      "contract_text": "an unexpected failure opening a guest session answers a shaped 503, never a bare 500",
+      "evidence_type": "automated",
+      "strength": "execution",
+      "strength_basis": "named test ran green against the merged commit",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T16:20:36",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 25
+    },
+    {
+      "id": "e26",
+      "obligation_ref": "o10",
+      "test_ref": "live: console restarted with Turnstile keys from grant (2026-11-06)",
+      "behavior_text": "no 'no bot check' warning at startup once both keys are injected; the password step renders the Turnstile widget",
+      "contract_text": "guest mode on with no Turnstile keys gives one startup warning and a doctor finding; with keys set, neither",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "observed on the live console after the keys were wired in",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T19:19:30",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 26
+    },
+    {
+      "id": "e27",
+      "obligation_ref": "o12",
+      "test_ref": "live: real browser sign-in for livetest@culture.dev with the widget, then require_bot_check: true and a restart",
+      "behavior_text": "the widget passed in a real browser, server-side verify passed (a guest-mail budget slot was taken), and turning require_bot_check on was a config change and restart with no code change",
+      "contract_text": "changing config and restarting lifts the budget and required bot check, restoring guest mail with no code change",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "observed on the live console; checked through the direct origin only, since the edge Worker isn't deployed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T19:19:30",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 27
+    }
+  ],
+  "deltas": [
+    {
+      "id": "b1",
+      "kind": "amended",
+      "behavior_text": "The guest mail budget is taken in the background send task just before the send, not on the request before scheduling it (independent review: equal request-path work for every address). A code whose mail the budget refused, or whose send failed, is revoked at once.",
+      "caused_by": [
+        "c2"
+      ],
+      "evidence_refs": [
+        "e1"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b2",
+      "kind": "added",
+      "behavior_text": "The all-mail ceiling keeps its last quarter for approved users' sign-in codes and notices, and a ceiling refusal counts in failed_sends and raises a 'ceiling' alert. The ceiling is per process and resets on restart; the guest budget is the persistent limit.",
+      "caused_by": [
+        "c20"
+      ],
+      "evidence_refs": [
+        "e4"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b3",
+      "kind": "amended",
+      "behavior_text": "Only outage failures (classified kinds) feed the failed_sends threat rule; recipient errors and ceiling refusals do not, so a bad address never raises a rule alert either.",
+      "caused_by": [
+        "c5"
+      ],
+      "evidence_refs": [
+        "e8"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b4",
+      "kind": "added",
+      "behavior_text": "Each guest may use at most a tenth of the validator's daily cap; validator calls run in their own two-thread pool and a call past its timeout blocks that guest's next calls (unchecked) until it ends; a blocked line answers 422 so the refused-responses rule doesn't count it; a flagged line is stored once as a review record and kept out of the training export.",
+      "caused_by": [
+        "c30"
+      ],
+      "evidence_refs": [
+        "e22"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b5",
+      "kind": "amended",
+      "behavior_text": "Live rollout sets threat_rules.entry_posts to 20 instead of the plan's starting 10, because one guest's sign-in is about 4 entry posts and 10 would alert on three ordinary sign-ins.",
+      "caused_by": [
+        "c18"
+      ],
+      "evidence_refs": [
+        "e14"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    },
+    {
+      "id": "b6",
+      "kind": "added",
+      "behavior_text": "The reserved-domain check also refuses a trailing-dot domain and address literals such as a@[127.0.0.1].",
+      "caused_by": [
+        "c4"
+      ],
+      "evidence_refs": [
+        "e7"
+      ],
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false
+    }
+  ],
+  "supersessions": []
+}

@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-04T17:31:15Z",
-  "updated": "2026-11-06T12:48:24Z",
+  "updated": "2026-11-06T16:22:45Z",
   "claims": [
     {
       "id": "c1",
@@ -878,6 +878,28 @@
       ],
       "origin": "llm",
       "status": "proposed"
+    },
+    {
+      "id": "l3",
+      "code": "control-absent",
+      "what": "Merged t15 and t9 into the integration branch before reading t15's full-suite result, which showed a t8 test broken by t15's new signals; the merge gate caught it afterwards",
+      "skipped_check": "read each task's full-suite result before merging it",
+      "refs": [
+        "t15"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l4",
+      "code": "assumption-for-measurement",
+      "what": "Live baseline before the rollout posted a reserved-address sign-in to the still-0.22.1 console, which made a real failing send and likely a false send_failed alert to the owner",
+      "skipped_check": "check what the running version does with a test input before sending it to production",
+      "refs": [
+        "t11"
+      ],
+      "origin": "llm",
+      "status": "proposed"
     }
   ],
   "obligations": [
@@ -1051,6 +1073,33 @@
       "source_text": "Probe counting uses route matching in middleware, not status codes: anonymous requests to real and nonexistent paths both get 401, because auth runs first (auth.py:97 reads match_info), so status can't separate a probe from a mistake.",
       "origin": "llm",
       "status": "approved"
+    },
+    {
+      "id": "o20",
+      "claim_id": "c30",
+      "seam": "POST /input, guest on the sandbox",
+      "behavior": "a line Clef blocks never reaches the sandbox in block mode; a hanging or failing Clef sends the line unchecked; approved and mesh lines never reach Clef",
+      "source_text": "The message validator is a second Clef layer beside the counts-only detector in c18: it sends one guest line per call, takes its prompt and question from a config file outside the repo that the operator can change without a release, and turns the answer into allow or block only.",
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "o21",
+      "claim_id": "c31",
+      "seam": "guest seat reservation",
+      "behavior": "one address past the pending-reservation cap gets the busy response while a second address still gets a seat",
+      "source_text": "Red-team audit RT-01: a single address can't hold guest seats with pending reservations: a per-IP cap on open reservations, with the guest limit and message rate shown beside the other published limits (RT-08).",
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "o22",
+      "claim_id": "c32",
+      "seam": "guest session open",
+      "behavior": "an unexpected failure opening a guest session answers a shaped 503, never a bare 500",
+      "source_text": "Red-team audit RT-14: any failure while opening or reopening a guest session answers with the shaped 503 warming-up or busy response, never a bare 500.",
+      "origin": "llm",
+      "status": "proposed"
     }
   ]
 }
