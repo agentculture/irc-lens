@@ -700,8 +700,9 @@ async def _send_guest_code(
         allowed = await budget()
     except Exception as exc:  # noqa: BLE001 -- the page was already the same
         logger.warning("guest mail budget unavailable: %s", type(exc).__name__)
-        return
+        allowed = False
     if not allowed:
+        await _revoke_unmailed(state, code)
         return
     subject, body = render_token_email(code)
     try:
@@ -710,6 +711,12 @@ async def _send_guest_code(
         )
     except Exception as exc:  # noqa: BLE001 -- the page was already the same
         logger.warning("guest code mail not sent: %s", type(exc).__name__)
+        await _revoke_unmailed(state, code)
+
+
+async def _revoke_unmailed(state: EntryState, code: str) -> None:
+    """A code that was never mailed can't stay usable until it expires."""
+    await asyncio.to_thread(state.get_store().consume_token, code, purpose=TOKEN_PURPOSE)
 
 
 def _schedule_guest_code(
@@ -1166,6 +1173,7 @@ async def post_guest_start(request: web.Request) -> web.Response:
             await asyncio.to_thread(send_with_alert, state.get_mailer(), state.alerter, email, subject, body)
         except Exception as exc:  # noqa: BLE001 -- same page either way (o4/o5)
             logger.warning("guest token mail not sent: %s", type(exc).__name__)
+            await _revoke_unmailed(state, token)
     return _page(
         state,
         "code",

@@ -328,3 +328,31 @@ def test_incomplete_or_bad_validator_config_is_refused(tmp_path, validator) -> N
     path = _config_file(tmp_path, validator)
     with pytest.raises(AfiError):
         load_config(path)
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        {"choice": ["allow"], "confidence": 0.9, "probabilities": {"allow": 0.9, "block": 0.1}},
+        {"choice": "allow", "confidence": 10**400, "probabilities": {"allow": 0.9, "block": 0.1}},
+        {"choice": "allow", "confidence": 0.9, "probabilities": {"allow": 10**400, "block": 0.1}},
+    ],
+    ids=["choice_is_a_list", "huge_confidence", "huge_probability"],
+)
+async def test_malformed_answers_fail_open(prompt_path, answer) -> None:
+    payload = {"answers": {message_check.QUESTION_KEY: {"type": "choice", **answer}}}
+    validator = _validator(prompt_path, FakeClef(payload))
+    assert await validator.check("guest:a@b.c", "hi") == OUTCOME_UNCHECKED
+
+
+async def test_a_call_past_its_timeout_never_overlaps_the_next(prompt_path) -> None:
+    clef = FakeClef(_answer("allow"), delay=0.5)
+    validator = _validator(prompt_path, clef, timeout=0.1)
+    assert await validator.check("guest:a@b.c", "one") == OUTCOME_UNCHECKED
+    # The first call is still running in its thread: no second call starts.
+    assert await validator.check("guest:a@b.c", "two") == OUTCOME_UNCHECKED
+    assert len(clef.requests) == 1
+    await asyncio.sleep(0.6)
+    assert await validator.check("guest:a@b.c", "three") == OUTCOME_UNCHECKED
+    assert len(clef.requests) == 2
+    assert clef.max_active == 1

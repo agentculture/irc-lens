@@ -409,7 +409,7 @@ guest_mode:
     validator:
       url: http://127.0.0.1:8001/v1/systemone
       credential_env: CLEF_GATEWAY_KEY   # the env var holding the credential
-      prompt_file: ~/.config/irc-lens/clef-prompt.yaml
+      prompt_file: /path/outside/the/repo/clef-prompt.yaml
       mode: flag                         # flag (default) or block
       daily_cap: 500                     # calls per rolling day
 ```

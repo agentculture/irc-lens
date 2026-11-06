@@ -769,6 +769,27 @@ async def _extract_text(request: web.Request) -> tuple[str | None, web.Response 
     return str(form.get("text", "")), None
 
 
+async def _input_session(request: web.Request):
+    """The sender's session, or the shaped response when it can't open."""
+    try:
+        return await _resolve_session(request), None
+    except GuestBusy:
+        # The page reloads into the busy message (c35).
+        return None, _json_error(
+            503,
+            "sandbox busy",
+            "The sandbox is busy. Try again in a few minutes.",
+            headers={"HX-Redirect": "/"},
+        )
+    except ConnectionError:
+        return None, _warming_up()
+    except web.HTTPException:
+        raise
+    except Exception:  # noqa: BLE001 -- shaped 503 instead of a bare 500 (RT-14)
+        logger.exception("opening the session for /input failed")
+        return None, _warming_up()
+
+
 @allows_anonymous
 async def post_input(request: web.Request) -> web.Response:
     """Parse one user input line and dispatch it through the session."""
@@ -787,23 +808,9 @@ async def post_input(request: web.Request) -> web.Response:
     if gated is not None:
         return gated
 
-    try:
-        session = await _resolve_session(request)
-    except GuestBusy:
-        # The page reloads into the busy message (c35).
-        return _json_error(
-            503,
-            "sandbox busy",
-            "The sandbox is busy. Try again in a few minutes.",
-            headers={"HX-Redirect": "/"},
-        )
-    except ConnectionError:
-        return _warming_up()
-    except web.HTTPException:
-        raise
-    except Exception:  # noqa: BLE001 -- shaped 503 instead of a bare 500 (RT-14)
-        logger.exception("opening the session for /input failed")
-        return _warming_up()
+    session, refusal = await _input_session(request)
+    if refusal is not None:
+        return refusal
     # Health gate before parsing: once the AgentIRC pipe is gone, the
     # spec mandates 503 on subsequent input rather than silently
     # no-oping (which is what `IRCTransport.send_raw` would do — its

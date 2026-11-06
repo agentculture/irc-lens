@@ -7,6 +7,7 @@ threat-specific caller separately owns its per-window and rolling-day caps.
 from __future__ import annotations
 
 import json
+import math
 import logging
 import os
 import threading
@@ -73,8 +74,11 @@ def _http_post(url: str, credential: str, payload: dict, timeout: float) -> obje
 def _number(value: object) -> float | None:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    number = float(value)
-    return number if 0.0 <= number <= 1.0 else None
+    try:
+        number = float(value)
+    except (OverflowError, ValueError):
+        return None
+    return number if math.isfinite(number) and 0.0 <= number <= 1.0 else None
 
 
 def _validated_verdict(
@@ -87,6 +91,8 @@ def _validated_verdict(
     if not isinstance(answer, dict) or answer.get("type", "choice") != "choice":
         return None
     choice = answer.get("choice")
+    if not isinstance(choice, str):
+        return None
     confidence = _number(answer.get("confidence"))
     raw_probabilities = answer.get("probabilities")
     if (

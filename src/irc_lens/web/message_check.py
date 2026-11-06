@@ -165,6 +165,9 @@ class MessageValidator:
         self._clock = clock
         self._calls: collections.deque[float] = collections.deque()
         self._guest_calls: dict[str, collections.deque[float]] = {}
+        # A call that outlived its timeout keeps running in its thread; until
+        # it ends, that guest's next lines go through unchecked (no overlap).
+        self._running: dict[str, concurrent.futures.Future] = {}
         self._guest_cap = max(1, int(daily_cap * GUEST_SHARE))
         self._pool = concurrent.futures.ThreadPoolExecutor(
             max_workers=POOL_WORKERS, thread_name_prefix="clef-validator"
@@ -181,9 +184,9 @@ class MessageValidator:
         self._guest_locks[principal] = (lock, users + 1)
         try:
             async with lock:
-                if not self._take_call(principal):
+                if self._still_running(principal) or not self._take_call(principal):
                     return OUTCOME_UNCHECKED
-                verdict = await self._ask(build_request(prompt, line))
+                verdict = await self._ask(principal, build_request(prompt, line))
         finally:
             users = self._guest_locks[principal][1] - 1
             if users:
@@ -208,24 +211,26 @@ class MessageValidator:
         mine.append(now)
         return True
 
-    async def _ask(self, request: dict) -> decider.Verdict | None:
+    def _still_running(self, principal: str) -> bool:
+        running = self._running.get(principal)
+        if running is not None and running.done():
+            del self._running[principal]
+            running = None
+        return running is not None
+
+    async def _ask(self, principal: str, request: dict) -> decider.Verdict | None:
+        call = self._pool.submit(
+            self._poster, self._url, self._credential, request, self._timeout
+        )
+        self._running[principal] = call
         try:
-            loop = asyncio.get_running_loop()
             payload = await asyncio.wait_for(
-                loop.run_in_executor(
-                    self._pool,
-                    self._poster,
-                    self._url,
-                    self._credential,
-                    request,
-                    self._timeout,
-                ),
-                self._timeout,
+                asyncio.shield(asyncio.wrap_future(call)), self._timeout
             )
+            return decider.validated_verdict(payload, QUESTION_KEY, CHOICES)
         except Exception as exc:  # noqa: BLE001 -- fail open (c29) and never log the line
             logger.warning("message validator call failed: %s", type(exc).__name__)
             return None
-        return decider.validated_verdict(payload, QUESTION_KEY, CHOICES)
 
 
 MESSAGE_VALIDATOR = web.AppKey("message_validator", MessageValidator)

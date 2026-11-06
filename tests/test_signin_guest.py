@@ -605,3 +605,16 @@ async def test_legal_outage_is_not_a_failed_sign_in(env: Env, monkeypatch) -> No
     assert resp.status == 503
     assert entry.ERR_LATER in await resp.text()
     assert metrics.get_metrics().snapshot()["failed_sign_ins"] == before
+
+
+async def test_an_unmailed_guest_code_is_revoked(env: Env) -> None:
+    env.state.config = dataclasses.replace(env.state.config, guest_mail_daily_budget=0)
+    resp = await env.signin("nobody@culture-guest.net")
+    pending = resp.cookies[app_session.SIGNIN_COOKIE_NAME].value
+    assert env.mail.sent == []
+    # The budget refused the mail, so the code issued for it no longer works.
+    rows = env.store._connect().execute(
+        "SELECT used FROM tokens WHERE purpose=?", (entry.TOKEN_PURPOSE,)
+    ).fetchall()
+    assert rows and all(used == 1 for (used,) in rows)
+    assert pending

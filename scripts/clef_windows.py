@@ -40,6 +40,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from aiohttp import web
+
 from irc_lens import decider, threat
 
 ABUSE_LABELS = frozenset({"abusive", "mail_abuse"})
@@ -101,7 +103,11 @@ def from_access_log(lines, min_requests: int, config_path: str | None) -> list[d
         key = (method, path)
         if key not in resolved:
             info = loop.run_until_complete(router.resolve(mocked(method, path)))
-            resolved[key] = isinstance(getattr(info, "http_exception", None), Exception)
+            # Not found only, like the live middleware: a wrong method on a
+            # real route is not a probe.
+            resolved[key] = isinstance(
+                getattr(info, "http_exception", None), web.HTTPNotFound
+            )
         counts = windows[_window_start(when)]
         counts[threat.Signal.REQUESTS.value] += 1
         counts[threat.Signal.PROBES.value] += int(resolved[key] and method != "OPTIONS")
