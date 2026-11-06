@@ -39,6 +39,9 @@ class Signal(StrEnum):
     RESERVED_ADDRESSES = "reserved_addresses"
     FAILED_SENDS = "failed_sends"
     BUDGET_HITS = "budget_hits"
+    MESSAGES_BLOCKED = "messages_blocked"
+    MESSAGES_FLAGGED = "messages_flagged"
+    MESSAGES_UNCHECKED = "messages_unchecked"
 
 
 @dataclass(frozen=True)
