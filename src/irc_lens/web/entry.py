@@ -293,6 +293,20 @@ def _plausible_email(email: str) -> bool:
     return bool(sep and local and "." in domain and " " not in email and ":" not in email)
 
 
+#: Domains reserved for documentation and tests (RFC 2606, RFC 6761): mail to
+#: them can never arrive, so the guest paths refuse them before any send (t2).
+RESERVED_MAIL_DOMAINS = frozenset({"example.com", "example.net", "example.org"})
+RESERVED_MAIL_TLDS = frozenset({"example", "test", "invalid", "localhost"})
+
+
+def _reserved_address(email: str) -> bool:
+    """True for an address at a reserved domain or any subdomain of one."""
+    labels = email.rpartition("@")[2].split(".")
+    if labels[-1] in RESERVED_MAIL_TLDS:
+        return True
+    return ".".join(labels[-2:]) in RESERVED_MAIL_DOMAINS
+
+
 def client_ip(request: web.Request) -> str:
     """Visitor IP from a proven Worker, cloudflared, or the peer.
 
@@ -671,6 +685,7 @@ async def _post_signin_app(request: web.Request) -> web.Response:
                 human
                 and not guest_capped
                 and _plausible_email(email)
+                and not _reserved_address(email)
                 and not store.is_banned(email, ip)
             )
         correct = human and pw_ok
@@ -1001,7 +1016,11 @@ async def post_guest_start(request: web.Request) -> web.Response:
     )
     if limited:
         metrics.get_metrics().rate_limited()
-    elif _plausible_email(email) and not store.is_banned(email, ip):
+    elif (
+        _plausible_email(email)
+        and not _reserved_address(email)
+        and not store.is_banned(email, ip)
+    ):
         token = store.issue_token(email, purpose=TOKEN_PURPOSE)
         subject, body = render_token_email(token)
         try:
