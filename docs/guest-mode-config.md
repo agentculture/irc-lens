@@ -218,18 +218,32 @@ flow (`/entry/guest*`, `/entry/verify`) again.
 
 ## Delivery alerts
 
-When the Resend adapter fails to send (any HTTP error, including 429 quota
-exhaustion, or a network error) and `guest_mode.mail.alert_url` is set, the
-lens posts `{"kind": "quota" | "send_failed", "message": ...}` as JSON to that
-URL with `Authorization: Bearer <secret>`, the secret read from the env var
-named by `guest_mode.mail.alert_secret_env`. The receiver is a small
-Cloudflare email Worker that mails the approved users; the message says
-sign-in and guest codes are not being delivered and that approved users can
-still sign in at `/login`. At most one alert per kind per hour; the post runs
-on a daemon thread and any failure is logged and swallowed. The payload never
-contains a recipient address, a code or the provider's response. With
-`alert_url` unset (default) alerts are off. Each alert increments
-`delivery_alerts`.
+When a send fails in a way that means mail isn't flowing, and
+`guest_mode.mail.alert_url` is set, the lens posts `{"kind": ..., "message": ...}`
+as JSON to that URL with `Authorization: Bearer <secret>`, the secret read from
+the env var named by `guest_mode.mail.alert_secret_env`. The kinds:
+
+| Kind | Cause |
+| --- | --- |
+| `authentication` | HTTP 401: the API key is wrong or revoked |
+| `forbidden` | HTTP 403: the sender is rejected, or Cloudflare blocked the lens's requests |
+| `quota` | HTTP 429: the quota is used up, or the short per-second rate limit |
+| `provider` | HTTP 5xx from the provider |
+| `network` | No HTTP answer |
+
+Other statuses, such as 400, 404 and 422, are about one recipient. They don't
+alert and don't use up a kind's hourly slot, so a bad address can't hide a real
+outage. The receiver is a small Cloudflare email Worker that mails the approved
+users. The message says which mail isn't being delivered (guest and sign-in
+codes, sign-in notices, set-password links and deletion codes) and that
+approved users can still sign in at `/login`. At most one alert per kind per
+hour; the post runs on a daemon thread and any failure is logged and swallowed.
+The payload never contains a recipient address, a code or the provider's
+response. With `alert_url` unset (default) alerts are off.
+
+Every failed send logs `mail send failed: HTTP <status>` (or `network error`)
+and nothing else about the send, and increments `failed_sends`. Each alert
+posted increments `delivery_alerts`.
 
 ## Set or reset password
 
@@ -255,7 +269,8 @@ replaces `/password/<token>` with `/password/[redacted]`.
 
 `/owner/metrics` also reports `signin_codes_sent` (app sign-in codes mailed),
 `sessions_started` / `sessions_ended` (app sessions), `guest_busy` (busy
-pages shown) and `delivery_alerts` (alerts posted). Counts only: no code,
+pages shown), `delivery_alerts` (alerts posted) and `failed_sends` (every
+failed send, alerted or not). Counts only: no code,
 session id, token or password is ever logged (`tests/test_log_hygiene.py`
 runs the sign-in, set-password, guest and deletion flows and checks every log
 record).
