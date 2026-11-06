@@ -57,10 +57,53 @@ item is a yes/no.
       cross-machine viewers to fetch blobs. Leave empty for same-host
       only (defaults to `http://<web.bind>:<web.port>`).
 
+## Public guest sign-in
+
+- [ ] `guest_mode.mail.total_daily_ceiling` is below the provider's daily
+      allowance and leaves headroom for operational mail.
+- [ ] Guest `daily_budget`, `hourly_budget`, and `ip_hourly_budget` match the
+      traffic you are prepared to fund. One IP can never consume the final
+      hourly guest slot; approved sign-in codes do not consume this guest
+      budget.
+- [ ] The alert URL and secret are configured and a test provider outage
+      reaches the operators. Recipient-specific HTTP 400/404/422 failures
+      must log and count, but must not alert.
+- [ ] Both `IRC_LENS_TURNSTILE_SITE_KEY` and
+      `IRC_LENS_TURNSTILE_SECRET` are injected into the service. A real guest
+      sign-in works through each public ingress before
+      `guest_mode.require_bot_check` is changed to `true`.
+- [ ] `irc-lens doctor` has no "guest mode is on with no bot check" warning.
+      If the check is intentionally off, the warning is recorded in the
+      deployment's accepted-risk notes.
+- [ ] Reserved documentation domains (`example.com`, `example.net`,
+      `example.org`, and the reserved TLDs) never reach the mail provider.
+- [ ] The guest store and its parent directory are writable only by the
+      irc-lens service account. Operators use the supported metrics and CLI
+      surfaces rather than querying `guests.db` during incidents.
+
+## Guest-mode observability
+
+- [ ] An approved operator (an admin when email-keyed permissions are enabled)
+      can open `GET /owner/metrics`; an anonymous or guest request is denied.
+- [ ] `/owner/metrics.bot_check` agrees with the deployed Turnstile keys and
+      `guest_mode.require_bot_check`. `off` and `missing` include the startup
+      warning text; investigate either state on a public console.
+- [ ] `/owner/metrics.threat` shows the current 15-minute fixed-name counts
+      and source cardinality only. Confirm it contains no email, address,
+      path, user agent, or source hash.
+- [ ] Service logs are persisted and searchable for `no bot check`,
+      `mail send failed`, and `fixed threat rule`. Every failed provider call
+      includes its HTTP status or `network error`, but no recipient or code.
+- [ ] During a budget test, `budget_hits` rises, provider attempts stay at or
+      below the configured budget, reserved-address attempts remain zero,
+      and an approved user's correct-password code still reaches the mail
+      adapter when both guest budgets are zero.
+
 ## Operational
 
 - [ ] Logs are persisted somewhere auditable (systemd journal is
-      fine). Review `auth=denied` lines after each test session.
+      fine). Review `auth=denied` and the guest-mode status lines above after
+      each test session.
 - [ ] `GET /healthz` returns `{"ok": true}` and nothing else; the
       response does not reveal whether any user has a live session.
 - [ ] Public `GET /readyz` returns only `{"ok": true}` (200) or

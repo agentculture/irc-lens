@@ -17,6 +17,7 @@ guest_mode:
   idle_close_s: 900         # sign off a guest after this long with no action
   max_guests: 1             # concurrent guests allowed (Guest view never counts)
   max_pending_per_address: 1 # unopened seat reservations per client address
+  require_bot_check: false  # set true only after both Turnstile keys are live
   retention_days: 90        # erase guests inactive this many days
   store_path: ~/.local/share/irc-lens/guests.db   # default: $XDG_DATA_HOME/irc-lens/guests.db
   legal_version_url: https://culture.dev/legal/version.json
@@ -73,6 +74,64 @@ integers, and `idle_close_s` and
 integers.
 `mail.alert_url`, when set, must be an `https` URL (plain `http` is accepted
 only for `127.0.0.1` / `localhost`).
+
+## Bot check: enable, verify, then require
+
+Guest mode starts without a bot check unless both
+`IRC_LENS_TURNSTILE_SITE_KEY` and `IRC_LENS_TURNSTILE_SECRET` are present in
+the service environment. With either key missing, startup logs this warning:
+
+```text
+guest mode is on with no bot check: set IRC_LENS_TURNSTILE_SITE_KEY and IRC_LENS_TURNSTILE_SECRET to turn on Turnstile (docs/guest-mode-config.md)
+```
+
+Leave `require_bot_check: false` while first deploying the keys. Verify a real
+guest sign-in through every public ingress, run `irc-lens doctor`, then set the
+switch to `true` and restart. If the switch is true but the keys are absent,
+guest mail is refused; approved sign-in remains available. For rollback, set
+the switch back to false and restart. Removing the keys also disables the
+widget, but it is not the preferred rollback because it makes the deployment
+state less explicit.
+
+## Operator view and logs
+
+An approved operator can open `GET /owner/metrics` (an admin when email-keyed
+permissions are enabled); anonymous and guest users cannot. The existing
+`counters`, `access`, and `agent` objects are unchanged.
+Two additional objects expose the hardening state without reading
+`guests.db`:
+
+- `bot_check` has `configured`, `required`, `status`, and `warning`. Status is
+  `disabled`, `off`, `optional`, `required`, or `missing` (required but not
+  configured). When guest mode is enabled with no check configured, `warning`
+  is the same text emitted at startup.
+- `threat` is the current 15-minute window. It contains only fixed-name
+  integer `counts`, `distinct_sources`, `source_count_capped`, and
+  `window_seconds`. It contains no address, path, user agent, email, or source
+  hash. The counter window resets in memory; this is operational telemetry,
+  not an audit log.
+
+The threat count names are `requests`, `probes`, `refused_responses`,
+`entry_posts`, `mail_sends`, `reserved_addresses`, `failed_sends`,
+`budget_hits`, `messages_blocked`, `messages_flagged`, and
+`messages_unchecked`. `budget_hits` means a guest request reached a mail
+budget with no slot left; `mail_sends` means a guest slot was reserved before
+the background adapter call, not that the provider delivered it.
+
+Process counters such as `delivery_alerts` and `failed_sends` reset on
+restart. Guest budget attempts remain persistent in the configured guest
+store. A provider failure logs `mail send failed: HTTP <status>` (or
+`network error`) without logging the recipient, code, provider response, or
+remediation. Recipient-specific 400/404/422 failures increment
+`failed_sends` but do not send delivery alerts. Review service logs with the
+deployment's normal journal tooling, for example:
+
+```sh
+journalctl -u irc-lens --since today | grep -E 'no bot check|mail send failed|fixed threat rule'
+```
+
+Opening the database is neither required nor recommended during incident
+triage: use the startup/doctor warning, service logs, and `/owner/metrics`.
 
 ## Advisory threat verdicts
 

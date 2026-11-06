@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import dataclasses
 import threading
 from collections.abc import AsyncIterator
+from types import SimpleNamespace
 
 import pytest
 import pytest_asyncio
@@ -11,9 +13,9 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from _jwks_server import FakeJWKS
-from irc_lens import metrics as metrics_mod
+from irc_lens import metrics as metrics_mod, threat
 from irc_lens.metrics import AGENT_OFFLINE_AFTER_S, AgentPresence, Metrics
-from irc_lens.web import make_app
+from irc_lens.web import entry, make_app
 from irc_lens.web.identity import TIER_GUEST, Identity
 from test_auth_tiers import _APPROVED, _boom_factory, _config
 
@@ -147,6 +149,7 @@ async def test_route_approved_gets_snapshot_and_agent(
     guest_app: TestClient, jwks: FakeJWKS
 ) -> None:
     metrics_mod.get_metrics().entry()
+    guest_app.app[threat.THREAT_COUNTERS].increment(threat.Signal.BUDGET_HITS, 2)
     token = jwks.mint(aud="aud-test", claims={"email": _APPROVED, "sub": "s"})
     resp = await guest_app.get(
         "/owner/metrics", headers={"Cf-Access-Jwt-Assertion": token}
@@ -171,6 +174,71 @@ async def test_route_approved_gets_snapshot_and_agent(
     # (online/offline: test_chat_ui::test_owner_metrics_agent_state_*).
     assert body["agent"]["state"] == "unknown"
     assert body["agent"]["nick"] == "sbx-ask"
+    assert body["threat"] == {
+        "window_seconds": threat.WINDOW_SECONDS,
+        "counts": {
+            signal.value: (2 if signal is threat.Signal.BUDGET_HITS else 0)
+            for signal in threat.Signal
+        },
+        "distinct_sources": 0,
+        "source_count_capped": False,
+    }
+    assert body["bot_check"] == {
+        "configured": False,
+        "required": False,
+        "status": "off",
+        "warning": entry.NO_BOT_CHECK_WARNING,
+    }
+    assert "window_started_at" not in body["threat"]
+    # Counts only: every value is a number, never a visitor string.
+    assert all(isinstance(value, int) for value in body["threat"]["counts"].values())
+
+
+async def test_route_reports_required_bot_check(
+    guest_app: TestClient, jwks: FakeJWKS
+) -> None:
+    state = guest_app.app[entry.ENTRY_STATE]
+    state.config = dataclasses.replace(state.config, guest_require_bot_check=True)
+    state.verifier.site_key = "configured"
+    token = jwks.mint(aud="aud-test", claims={"email": _APPROVED, "sub": "s"})
+    response = await guest_app.get(
+        "/owner/metrics", headers={"Cf-Access-Jwt-Assertion": token}
+    )
+    body = await response.json()
+    assert body["bot_check"] == {
+        "configured": True,
+        "required": True,
+        "status": "required",
+        "warning": None,
+    }
+
+
+def test_owner_metrics_state_exposes_counts_without_identifiers() -> None:
+    from irc_lens.web.routes import _owner_operational_state
+
+    config = SimpleNamespace(
+        access_enabled=False, guest_enabled=True, guest_require_bot_check=False
+    )
+    counters = threat.ThreatCounters(clock=lambda: 1000.0, hash_key=b"x" * 32)
+    counters.increment(threat.Signal.RESERVED_ADDRESSES, 3)
+
+    app = {
+        "config": config,
+        entry.ENTRY_STATE: SimpleNamespace(
+            config=config, verifier=SimpleNamespace(site_key=None)
+        ),
+        threat.THREAT_COUNTERS: counters,
+    }
+    state = _owner_operational_state(app)
+    assert state["threat"]["counts"]["reserved_addresses"] == 3
+    assert state["threat"]["distinct_sources"] == 0
+    assert state["bot_check"]["status"] == "off"
+    assert state["bot_check"]["warning"] == entry.NO_BOT_CHECK_WARNING
+
+    config.guest_enabled = False
+    state = _owner_operational_state(app)
+    assert state["bot_check"]["status"] == "disabled"
+    assert state["bot_check"]["warning"] is None
 
 
 async def test_route_anonymous_denied(guest_app: TestClient) -> None:
