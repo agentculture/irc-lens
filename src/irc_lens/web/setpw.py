@@ -34,16 +34,22 @@ from aiohttp import web
 
 from irc_lens import metrics
 from irc_lens.guest_store import TOKEN_TTLS
-from irc_lens.mail import is_allowed_base_url, render_link_email, send_with_alert
+from irc_lens.mail import (
+    MAIL_ADDRESS_HOURLY_LIMIT,
+    MAIL_ADDRESS_WINDOW_S,
+    is_allowed_base_url,
+    render_link_email,
+    send_with_alert,
+)
 from irc_lens.web.app_session import can_sign_in, end_sessions_for_email
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import (
     ENTRY_PAGE_MARKER,
     ERR_LATER,
-    TOKEN_REQUEST_WINDOW_S,
     TOKEN_VERIFY_WINDOW_S,
+    TOKEN_REQUEST_WINDOW_S,
     _norm_email,
-    _over_limit,
+    _over_address_limits,
     _plausible_email,
     _state,
     client_ip,
@@ -179,17 +185,18 @@ async def get_password(request: web.Request) -> web.Response:  # NOSONAR S7503
 async def post_password(request: web.Request) -> web.Response:
     """Same page for every address; only an approved one gets a link."""
     state = _state(request)
-    cfg = state.config
     form = await request.post()
     email = _norm_email(form.get("email"))
     store = state.get_store()
-    limited = _over_limit(
+    limited = _over_address_limits(
         store,
         "setpw",
         email,
         client_ip(request),
-        limit=cfg.guest_rate_entry_per_min,
-        window=TOKEN_REQUEST_WINDOW_S,
+        email_limit=MAIL_ADDRESS_HOURLY_LIMIT,
+        email_window=MAIL_ADDRESS_WINDOW_S,
+        ip_limit=state.config.guest_rate_entry_per_min,
+        ip_window=TOKEN_REQUEST_WINDOW_S,
     )
     if limited:
         metrics.get_metrics().rate_limited()

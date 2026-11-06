@@ -66,6 +66,9 @@ class LensConfig:
     # Standby serves approved users while freezing account changes.
     standby_enabled: bool = False
     guest_enabled: bool = False
+    # Refuse guest codes while no bot check is configured (t5). Off until the
+    # bot check is proven through the edge; turning it on is a rollout step.
+    guest_require_bot_check: bool = False
     guest_sandbox_name: str = "sbx"
     guest_sandbox_host: str = "127.0.0.1"
     guest_sandbox_port: int = 6668
@@ -75,6 +78,15 @@ class LensConfig:
     # sbx-ask's flag log; guest deletion drops the guest's lines there (d7).
     # The sandbox IRCd itself runs memory-only (culture server --no-persist).
     guest_sandbox_flag_log: str | None = None
+    # Clef validation of guest chat lines (t15, decisions c27-c29). Off
+    # unless url, credential env and prompt file are all set. The prompt
+    # file lives outside the repo; "flag" logs Clef's blocks but still
+    # sends, "block" refuses them.
+    guest_validator_url: str | None = None
+    guest_validator_credential_env: str | None = None
+    guest_validator_prompt_file: str | None = None
+    guest_validator_mode: str = "flag"
+    guest_validator_daily_cap: int = 500
     # Close a sandbox session after this long with no open event stream.
     guest_idle_close_s: int = 900
     # Retention (d9): erase guests inactive this many days (hourly sweep).
@@ -84,12 +96,19 @@ class LensConfig:
     guest_mail_provider: str = "none"
     guest_mail_from: str = ""
     guest_mail_api_key_env: str = "IRC_LENS_MAIL_API_KEY"
+    guest_mail_daily_budget: int = 50
+    guest_mail_hourly_budget: int = 20
+    guest_mail_ip_hourly_budget: int = 5
+    # All mail, every path: below the provider's 100-a-day limit (t4).
+    guest_mail_total_daily_ceiling: int = 90
     # Delivery-alert webhook (https; http only for loopback) and the env var
     # holding its shared secret.
     guest_mail_alert_url: str | None = None
     guest_mail_alert_secret_env: str | None = None
     # Concurrent guest sessions allowed on the sandbox.
     guest_max_guests: int = 1
+    # Unopened guest-seat reservations one client address may hold.
+    guest_max_pending_per_address: int = 1
     # auth.app_signin.enabled: False restores password -> /login behavior.
     app_signin_enabled: bool = True
     # auth.app_signin.base_url: public base of set-password links (https;
@@ -113,6 +132,15 @@ class LensConfig:
     guest_rate_entry_per_min: int = 10
     guest_rate_messages_per_min: int = 20
     guest_rate_password_attempts_per_15min: int = 5
+    # Counts-only fixed alert rules, evaluated against each 15-minute window.
+    threat_refused_responses_threshold: int = 50
+    threat_entry_posts_threshold: int = 10
+    threat_reserved_addresses_threshold: int = 1
+    threat_failed_sends_threshold: int = 1
+    threat_budget_hits_threshold: int = 1
+    # Optional counts-only Clef verdict. The credential itself stays in env.
+    threat_decider_url: str | None = None
+    threat_decider_credential_env: str | None = None
     # web.mcp_path: where the remote MCP endpoint is mounted (web/mcp_http.py).
     mcp_path: str = "/mcp"
     # Worker-to-origin gate. The config stores only the environment-variable
@@ -520,14 +548,43 @@ _GUEST_KEYS = frozenset(
         "idle_close_s",
         "retention_days",
         "max_guests",
+        "max_pending_per_address",
+        "require_bot_check",
     }
 )
 _GUEST_SANDBOX_KEYS = frozenset(
-    {"name", "host", "port", "room_prefix", "flag_log"}
+    {"name", "host", "port", "room_prefix", "flag_log", "validator"}
 )
-_GUEST_MAIL_KEYS = frozenset({"provider", "from", "api_key_env", "alert_url", "alert_secret_env"})
+_GUEST_VALIDATOR_KEYS = frozenset(
+    {"url", "credential_env", "prompt_file", "mode", "daily_cap"}
+)
+_VALIDATOR_MODES = ("flag", "block")
+_GUEST_MAIL_KEYS = frozenset(
+    {
+        "provider",
+        "from",
+        "api_key_env",
+        "alert_url",
+        "alert_secret_env",
+        "daily_budget",
+        "hourly_budget",
+        "ip_hourly_budget",
+        "total_daily_ceiling",
+    }
+)
 _GUEST_RATE_KEYS = frozenset(
     {"entry_per_min", "messages_per_min", "password_attempts_per_15min"}
+)
+_THREAT_RULE_KEYS = frozenset(
+    {
+        "refused_responses",
+        "entry_posts",
+        "reserved_addresses",
+        "failed_sends",
+        "budget_hits",
+        "decider_url",
+        "decider_credential_env",
+    }
 )
 
 
@@ -683,6 +740,28 @@ def _alert_url(value: object) -> str | None:
     return url
 
 
+def _optional_service_url(value: object, where: str) -> str | None:
+    if value is None:
+        return None
+    url = _coerce_str(value, where)
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+    except ValueError:
+        parsed, host = None, None
+    valid = bool(host) and (
+        parsed.scheme == "https"
+        or (parsed.scheme == "http" and host in _LOOPBACK_HOSTS)
+    )
+    if not valid:
+        raise _err(
+            f"{where} must be an https:// URL "
+            f"(http:// only for 127.0.0.1/localhost), got {url!r}",
+            f"set `{where}:` to the full Clef gateway URL, or remove it",
+        )
+    return url
+
+
 def _optional_str(value: object, where: str) -> str | None:
     return None if value is None else _coerce_str(value, where)
 
@@ -720,6 +799,15 @@ def _positive_int(value: object, where: str) -> int:
     n = _coerce_int(value, where)
     if n <= 0:
         raise _err(f"{where} must be > 0, got {n}", f"set `{where}:` to a positive number")
+    return n
+
+
+def _nonnegative_int(value: object, where: str) -> int:
+    n = _coerce_int(value, where)
+    if n < 0:
+        raise _err(
+            f"{where} must be >= 0, got {n}", f"set `{where}:` to zero or more"
+        )
     return n
 
 
@@ -770,6 +858,9 @@ def _validate_guest_mode_section(raw: dict) -> dict:
         "guest_enabled": _coerce_bool(
             guest.get("enabled", False), "guest_mode.enabled"
         ),
+        "guest_require_bot_check": _coerce_bool(
+            guest.get("require_bot_check", False), "guest_mode.require_bot_check"
+        ),
         "guest_sandbox_name": _coerce_str(
             sandbox.get("name", "sbx"), "guest_mode.sandbox.name"
         ),
@@ -783,6 +874,7 @@ def _validate_guest_mode_section(raw: dict) -> dict:
         "guest_sandbox_flag_log": _optional_path(
             sandbox.get("flag_log"), "guest_mode.sandbox.flag_log"
         ),
+        **_validate_message_validator(sandbox.get("validator")),
         "guest_idle_close_s": _positive_int(
             guest.get("idle_close_s", 900), "guest_mode.idle_close_s"
         ),
@@ -802,6 +894,18 @@ def _validate_guest_mode_section(raw: dict) -> dict:
             mail.get("api_key_env", "IRC_LENS_MAIL_API_KEY"),
             "guest_mode.mail.api_key_env",
         ),
+        "guest_mail_daily_budget": _nonnegative_int(
+            mail.get("daily_budget", 50), "guest_mode.mail.daily_budget"
+        ),
+        "guest_mail_hourly_budget": _nonnegative_int(
+            mail.get("hourly_budget", 20), "guest_mode.mail.hourly_budget"
+        ),
+        "guest_mail_ip_hourly_budget": _nonnegative_int(
+            mail.get("ip_hourly_budget", 5), "guest_mode.mail.ip_hourly_budget"
+        ),
+        "guest_mail_total_daily_ceiling": _nonnegative_int(
+            mail.get("total_daily_ceiling", 90), "guest_mode.mail.total_daily_ceiling"
+        ),
         "guest_mail_alert_url": _alert_url(mail.get("alert_url")),
         "guest_mail_alert_secret_env": _optional_str(
             mail.get("alert_secret_env"), "guest_mode.mail.alert_secret_env"
@@ -809,11 +913,78 @@ def _validate_guest_mode_section(raw: dict) -> dict:
         "guest_max_guests": _positive_int(
             guest.get("max_guests", 1), "guest_mode.max_guests"
         ),
+        "guest_max_pending_per_address": _positive_int(
+            guest.get("max_pending_per_address", 1),
+            "guest_mode.max_pending_per_address",
+        ),
         "guest_rate_entry_per_min": rate("entry_per_min", 10),
         "guest_rate_messages_per_min": rate("messages_per_min", 20),
         "guest_rate_password_attempts_per_15min": rate(
             "password_attempts_per_15min", 5
         ),
+    }
+
+
+def _validate_message_validator(raw: object) -> dict[str, object]:
+    """``guest_mode.sandbox.validator``: all three of url, credential env and
+    prompt file, or none of them (validation off)."""
+    where = "guest_mode.sandbox.validator"
+    section = _optional_mapping(raw, where, _GUEST_VALIDATOR_KEYS)
+    url = _optional_service_url(section.get("url"), f"{where}.url")
+    credential_env = _optional_str(
+        section.get("credential_env"), f"{where}.credential_env"
+    )
+    prompt_file = _optional_path(section.get("prompt_file"), f"{where}.prompt_file")
+    if len({bool(url), bool(credential_env), bool(prompt_file)}) != 1:
+        raise _err(
+            f"{where} needs url, credential_env and prompt_file together",
+            f"set all three under `{where}:`, or remove the section",
+        )
+    mode = _coerce_str(section.get("mode", "flag"), f"{where}.mode")
+    if mode not in _VALIDATOR_MODES:
+        raise _err(
+            f"{where}.mode must be flag or block, got {mode!r}",
+            f"set `{where}.mode:` to flag (log only) or block",
+        )
+    return {
+        "guest_validator_url": url,
+        "guest_validator_credential_env": credential_env,
+        "guest_validator_prompt_file": prompt_file,
+        "guest_validator_mode": mode,
+        "guest_validator_daily_cap": _positive_int(
+            section.get("daily_cap", 500), f"{where}.daily_cap"
+        ),
+    }
+
+
+def _validate_threat_rules(raw: dict) -> dict[str, object]:
+    """Load positive trigger counts for the fixed 15-minute rules."""
+    section = _optional_mapping(
+        raw.get("threat_rules"), "threat_rules", _THREAT_RULE_KEYS
+    )
+
+    def threshold(name: str, default: int) -> int:
+        return _positive_int(section.get(name, default), f"threat_rules.{name}")
+
+    url = _optional_service_url(section.get("decider_url"), "threat_rules.decider_url")
+    credential_env = _optional_str(
+        section.get("decider_credential_env"),
+        "threat_rules.decider_credential_env",
+    )
+    if bool(url) != bool(credential_env and credential_env.strip()):
+        raise _err(
+            "threat_rules.decider_url and decider_credential_env must be set together",
+            "set both threat_rules decider keys, or remove both to disable Clef",
+        )
+
+    return {
+        "threat_refused_responses_threshold": threshold("refused_responses", 50),
+        "threat_entry_posts_threshold": threshold("entry_posts", 10),
+        "threat_reserved_addresses_threshold": threshold("reserved_addresses", 1),
+        "threat_failed_sends_threshold": threshold("failed_sends", 1),
+        "threat_budget_hits_threshold": threshold("budget_hits", 1),
+        "threat_decider_url": url,
+        "threat_decider_credential_env": credential_env,
     }
 
 
@@ -936,6 +1107,7 @@ def load_config(path: Path) -> LensConfig:
     ) = _validate_media_section(raw)
     culture_residents_url, culture_overview_name = _validate_culture_section(raw)
     guest_fields = _validate_guest_mode_section(raw)
+    threat_rule_fields = _validate_threat_rules(raw)
     app_signin_enabled = _validate_app_signin(auth)
     if guest_fields.get("guest_mail_provider", "none") == "none":
         # Codes can't be mailed: keep the 0.12.2 path (303 /login) instead of
@@ -980,6 +1152,7 @@ def load_config(path: Path) -> LensConfig:
         require_edge_credential=require_edge_credential,
         edge_credential_env=edge_credential_env,
         **guest_fields,
+        **threat_rule_fields,
     )
 
 

@@ -25,6 +25,10 @@ Coverage map (frame claims):
   (``test_guest_logout_frees_the_seat``).
 * s9  -- the Enter key submits the forward button, not Back
   (``test_enter_key_default_is_the_forward_button``).
+* t10/c13/h6 -- 200 rotating addresses drive the real SQLite guest store,
+  request limits and persistent budgets under a fake clock; reserved mail,
+  recipient alerts, and an approved sign-in at zero guest budget are checked
+  together (``test_200_rotating_addresses_cannot_spend_guest_mail_or_block_approved``).
 """
 
 from __future__ import annotations
@@ -34,16 +38,20 @@ import re
 from collections.abc import AsyncIterator
 
 import aiohttp
+import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
 
 from _agentirc_server import AgentIRCTestServer
 from _jwks_server import FakeJWKS
-from irc_lens.mail import RecordingAdapter
+from irc_lens import metrics, threat
+from irc_lens._errors import EXIT_ENV_ERROR
+from irc_lens.mail import MailSendError, RecordingAdapter
 from irc_lens.session import Session
 from irc_lens.web import app_session, csrf, entry, make_app
 
-from test_entry import FakeVerifier, legal_server  # noqa: F401 -- fixture
+from helpers import DEV_CONFIG
+from test_entry import legal_server  # noqa: F401 -- fixture
 from test_guest_limit import APPROVED, BUSY, FakeClock, _config
 
 ANN = "ann+test@example.org"
@@ -77,16 +85,29 @@ class Env:
         for task in list(self.state.mail_tasks):
             await task
 
-    async def post(self, path: str, data: dict, cookie: str = ""):
+    async def post(
+        self,
+        path: str,
+        data: dict,
+        cookie: str = "",
+        extra_headers: dict | None = None,
+    ):
         headers = dict(_SAME_ORIGIN)
+        headers.update(extra_headers or {})
         if cookie:
             headers["Cookie"] = cookie
         return await self.client.post(
             path, data=data, headers=headers, allow_redirects=False
         )
 
-    async def signin(self, email: str, password: str = ""):
-        resp = await self.post("/entry/signin", {"email": email, "password": password})
+    async def signin(
+        self, email: str, password: str = "", headers: dict | None = None
+    ):
+        resp = await self.post(
+            "/entry/signin",
+            {"email": email, "password": password},
+            extra_headers=headers,
+        )
         await self.drain()
         return resp
 
@@ -159,7 +180,6 @@ async def env(
     app = make_app(config, mesh_factory)
     state = app[entry.ENTRY_STATE]
     state.mailer = RecordingAdapter()
-    state.verifier = FakeVerifier()
     state.signin_floor_s = 0.0
     clock = FakeClock()
     app["registry"]._clock = clock
@@ -173,6 +193,50 @@ async def env(
         await client.close()
         await mesh.stop()
         await sandbox.stop()
+
+
+@pytest_asyncio.fixture
+async def hardening_env(tmp_path, monkeypatch) -> AsyncIterator[Env]:
+    """The t10 stack: real app/store/limits; fake mail and Clef boundaries."""
+
+    class FakeThreatDecider:
+        def assess(self, _snapshot, _callback) -> bool:
+            return False
+
+    config = dataclasses.replace(
+        DEV_CONFIG,
+        allowed_emails=(APPROVED,),
+        media_dir=str(tmp_path / "media"),
+        guest_enabled=True,
+        guest_store_path=str(tmp_path / "guests.db"),
+        guest_sandbox_flag_log=str(tmp_path / "flags.jsonl"),
+        app_signin_enabled=True,
+        threat_refused_responses_threshold=10_000,
+        threat_entry_posts_threshold=10_000,
+        threat_reserved_addresses_threshold=10_000,
+        threat_failed_sends_threshold=10_000,
+        threat_budget_hits_threshold=10_000,
+    )
+    fake_decider = FakeThreatDecider()
+    monkeypatch.setenv("IRC_LENS_GUEST_COOKIE_SECRET", "s" * 32)
+    monkeypatch.setattr(
+        "irc_lens.decider.make_threat_verdict_caller", lambda _cfg: fake_decider
+    )
+
+    def unopened_session(_nick: str) -> Session:
+        raise AssertionError("sign-in mail must not open an IRC session")
+
+    app = make_app(config, unopened_session)
+    state = app[entry.ENTRY_STATE]
+    state.signin_floor_s = 0.0
+    clock = FakeClock()
+    app["registry"]._clock = clock
+    client = TestClient(TestServer(app), cookie_jar=aiohttp.DummyCookieJar())
+    try:
+        await client.start_server()
+        yield Env(client, app, clock)
+    finally:
+        await client.close()
 
 
 # -- c9: Sign in is the only entry ---------------------------------------------
@@ -189,6 +253,98 @@ async def test_unknown_email_gets_a_guest_code_whatever_the_password(env: Env) -
         assert [(to, s) for to, s, _ in env.mail.sent if to == email] == [
             (email, _GUEST_SUBJECT)
         ]
+
+
+@pytest.mark.reserved_domains
+async def test_reserved_address_gets_the_code_page_and_no_mail(env: Env) -> None:
+    """The 2026-11-04 scenario: a scripted sign-in with a reserved address
+    reaches neither the mail adapter nor the alerter, and looks the same."""
+    for email in ("probe@example.com", "probe@mail.example.org", "probe@host.test"):
+        resp = await env.signin(email)
+        assert resp.status == 200
+        assert 'action="/entry/code"' in await resp.text()
+    assert env.mail.sent == []
+    counts = env.app[threat.THREAT_COUNTERS].snapshot().counts
+    assert counts[threat.Signal.RESERVED_ADDRESSES] == 3
+
+
+@pytest.mark.reserved_domains
+async def test_200_rotating_addresses_cannot_spend_guest_mail_or_block_approved(
+    hardening_env: Env, caplog
+) -> None:
+    """The t10 whole-stack proof: real store, limiter and fake clock.
+
+    Only the external mail adapter and advisory decider are replaced. Every
+    adapter attempt returns the recipient-specific 422 used by the real
+    provider, so the same run also proves that those failures never alert.
+    """
+
+    class RecipientErrorAdapter:
+        def __init__(self) -> None:
+            self.attempts: list[tuple[str, str, str]] = []
+
+        def send(self, to: str, subject: str, body: str) -> None:
+            self.attempts.append((to, subject, body))
+            raise MailSendError(
+                code=EXIT_ENV_ERROR,
+                message="recipient refused",
+                remediation="use a deliverable recipient",
+                status=422,
+            )
+
+    hourly_budget = 11
+    source_budget = 10
+    env = hardening_env
+    state = env.state
+    state.config = dataclasses.replace(
+        state.config,
+        guest_rate_entry_per_min=500,
+        guest_mail_daily_budget=hourly_budget,
+        guest_mail_hourly_budget=hourly_budget,
+        guest_mail_ip_hourly_budget=source_budget,
+        guest_mail_total_daily_ceiling=250,
+    )
+    state.mail_budget = None
+    adapter = RecipientErrorAdapter()
+    state.mailer = adapter
+    env.store._clock = env.clock
+    source = {"CF-Connecting-IP": "198.51.100.44"}
+    before_alerts = metrics.get_metrics().snapshot()["delivery_alerts"]
+
+    reserved = [f"probe{i}@example.com" for i in range(50)]
+    regular = [f"guest{i}@mail{i}.com" for i in range(150)]
+    for email in [*reserved, *regular]:
+        response = await env.signin(email, headers=source)
+        assert response.status == 200
+
+    guest_attempts = [
+        attempt for attempt in adapter.attempts if attempt[0] != APPROVED
+    ]
+    assert len(guest_attempts) == source_budget
+    assert len(guest_attempts) <= hourly_budget
+    assert set(reserved).isdisjoint(to for to, _subject, _body in guest_attempts)
+    threat_counts = env.app[threat.THREAT_COUNTERS].snapshot().counts
+    assert threat_counts[threat.Signal.RESERVED_ADDRESSES] == len(reserved)
+    assert threat_counts[threat.Signal.MAIL_SENDS] == source_budget
+    assert threat_counts[threat.Signal.BUDGET_HITS] == len(regular) - source_budget
+    assert metrics.get_metrics().snapshot()["delivery_alerts"] == before_alerts
+    assert state.alerter._warned_disabled is False
+    assert "mail send failed: HTTP 422" in caplog.text
+
+    state.config = dataclasses.replace(
+        state.config, guest_mail_daily_budget=0, guest_mail_hourly_budget=0
+    )
+    state.mail_budget = None
+    password = "approved-password-for-t10"
+    env.store.set_password(APPROVED, password)
+    response = await env.signin(APPROVED, password, headers=source)
+
+    assert response.status == 200
+    assert any(
+        to == APPROVED and subject == "Your chat.culture.dev sign-in code"
+        for to, subject, _body in adapter.attempts
+    )
+    assert metrics.get_metrics().snapshot()["delivery_alerts"] == before_alerts
 
 
 async def test_approved_wrong_password_and_banned_email_get_no_mail(env: Env) -> None:
@@ -251,6 +407,14 @@ async def test_guest_mail_reveals_nothing_about_approved_emails(env: Env) -> Non
 
 
 async def test_guest_mail_capped_per_minute(env: Env) -> None:
+    # The mail budgets (t3) would stop one address first: lift them here so
+    # this test measures the per-minute cap alone.
+    env.state.config = dataclasses.replace(
+        env.state.config,
+        guest_mail_daily_budget=1000,
+        guest_mail_hourly_budget=1000,
+        guest_mail_ip_hourly_budget=1000,
+    )
     limit = env.app["config"].guest_rate_entry_per_min
     for _ in range(limit + 3):
         resp = await env.signin(ANN)
@@ -441,3 +605,17 @@ async def test_legal_outage_is_not_a_failed_sign_in(env: Env, monkeypatch) -> No
     assert resp.status == 503
     assert entry.ERR_LATER in await resp.text()
     assert metrics.get_metrics().snapshot()["failed_sign_ins"] == before
+
+
+async def test_an_unmailed_guest_code_is_revoked(env: Env) -> None:
+    env.state.config = dataclasses.replace(env.state.config, guest_mail_daily_budget=0)
+    resp = await env.signin("nobody@culture-guest.net")
+    pending = resp.cookies[app_session.SIGNIN_COOKIE_NAME].value
+    assert env.mail.sent == []
+    # The budget refused the mail, so the code issued for it no longer works.
+    rows = env.store._connect().execute(
+        "SELECT used FROM tokens WHERE purpose=?", (entry.TOKEN_PURPOSE,)
+    ).fetchall()
+    assert rows
+    assert all(used == 1 for (used,) in rows)
+    assert pending

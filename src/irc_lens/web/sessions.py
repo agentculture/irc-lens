@@ -157,10 +157,10 @@ class SessionRegistry:
         # is the one the ban sweeper passes to reap_idle (monotonic).
         self._clock = clock
         self._last_action: dict[tuple[str, str], float] = {}
-        # Guest principal -> expiry of a slot held for a browser that has
-        # passed code verification (or a guest about to reopen) but has
-        # not opened its session yet.
-        self._reserved: dict[str, float] = {}
+        # Guest principal -> (expiry, client address) for a slot held by a
+        # browser that passed code verification (or a guest about to reopen)
+        # but has not opened its session yet.
+        self._reserved: dict[str, tuple[float, str | None]] = {}
         #: Held across "count + reserve" so concurrent verifies/reopens can
         #: never admit more than max_guests guests.
         self.guest_lock = asyncio.Lock()
@@ -256,10 +256,19 @@ class SessionRegistry:
     # -- guest limit (c24/h16) ----------------------------------------------
 
     def _live_reservations(self, now: float) -> set[str]:
-        for principal, expires in tuple(self._reserved.items()):  # snapshot: deleting below
+        for principal, (expires, _address) in tuple(
+            self._reserved.items()
+        ):  # snapshot: deleting below
             if expires <= now:
                 del self._reserved[principal]
         return set(self._reserved)
+
+    def _pending_from_address(self, address: str, now: float) -> int:
+        self._live_reservations(now)
+        return sum(
+            reserved_address == address
+            for _expires, reserved_address in self._reserved.values()
+        )
 
     def active_guests(self, now: float | None = None) -> set[str]:
         """Guest principals holding a slot: an open guest sandbox session or
@@ -276,30 +285,54 @@ class SessionRegistry:
         return principal in self.active_guests(now)
 
     def guest_slot_free(
-        self, principal: str, max_guests: int, now: float | None = None
+        self,
+        principal: str,
+        max_guests: int,
+        now: float | None = None,
+        *,
+        address: str | None = None,
+        max_pending_per_address: int = 1,
     ) -> bool:
-        """True iff *principal* already holds a slot or one is free."""
+        """True iff the global and pending-per-address limits leave a slot."""
+        now = self._clock() if now is None else now
         active = self.active_guests(now)
-        return principal in active or len(active) < max_guests
+        if principal in active:
+            return True
+        if len(active) >= max_guests:
+            return False
+        return (
+            address is None
+            or self._pending_from_address(address, now) < max_pending_per_address
+        )
 
     def try_reserve_guest(
         self,
         principal: str,
         max_guests: int,
         *,
+        address: str | None = None,
+        max_pending_per_address: int = 1,
         now: float | None = None,
         ttl: float = GUEST_RESERVATION_S,
     ) -> bool:
         """Count + reserve in one step; call with :attr:`guest_lock` held.
 
         A guest that already holds a slot keeps it (its reservation is only
-        refreshed when it has no open session). Returns False when full.
+        refreshed when it has no open session). Returns False when the global
+        guest limit or the pending-reservations-per-address cap is full.
         """
         now = self._clock() if now is None else now
-        if not self.guest_slot_free(principal, max_guests, now):
+        if not self.guest_slot_free(
+            principal,
+            max_guests,
+            now,
+            address=address,
+            max_pending_per_address=max_pending_per_address,
+        ):
             return False
         if not self.has(principal, BACKEND_SANDBOX):
-            self._reserved[principal] = now + ttl
+            reserved_address = self._reserved.get(principal, (0.0, address))[1]
+            self._reserved[principal] = (now + ttl, reserved_address)
         return True
 
     def release_guest(self, principal: str) -> None:

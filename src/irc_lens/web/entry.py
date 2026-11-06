@@ -46,11 +46,13 @@ responses that render the widget get a CSP widened to that one origin
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import secrets
 import time
 from dataclasses import dataclass, field
+from collections.abc import Awaitable, Callable, Mapping
 from typing import Protocol
 
 import aiohttp
@@ -58,9 +60,10 @@ from aiohttp import web
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
-from irc_lens import legal, metrics
+from irc_lens import legal, metrics, threat
 from irc_lens.config import LensConfig, _default_guest_store_path
 from irc_lens.guest_store import SIGNIN_BUDGET_KIND, GuestStore
+from irc_lens.mail_budget import MailBudget
 from irc_lens.alerts import Alerter, make_alerter
 from irc_lens.mail import (
     PURPOSE_SIGNIN,
@@ -195,14 +198,33 @@ class TurnstileVerifier:
         return isinstance(result, dict) and result.get("success") is True
 
 
-def make_bot_verifier(env: dict[str, str] | None = None) -> BotVerifier:
+#: Startup warning and doctor finding when guests face no bot check (c6).
+NO_BOT_CHECK_WARNING = (
+    f"guest mode is on with no bot check: set {TURNSTILE_SITE_KEY_ENV} and "
+    f"{TURNSTILE_SECRET_ENV} to turn on Turnstile (docs/guest-mode-config.md)"
+)
+
+
+def bot_check_configured(env: Mapping[str, str] | None = None) -> bool:
+    """True when both Turnstile keys are present."""
+    env = os.environ if env is None else env
+    return bool(env.get(TURNSTILE_SITE_KEY_ENV) and env.get(TURNSTILE_SECRET_ENV))
+
+
+def make_bot_verifier(env: Mapping[str, str] | None = None) -> BotVerifier:
     """Turnstile when both env keys are set, otherwise a no-op."""
     env = os.environ if env is None else env
-    site_key = env.get(TURNSTILE_SITE_KEY_ENV, "")
-    secret = env.get(TURNSTILE_SECRET_ENV, "")
-    if site_key and secret:
-        return TurnstileVerifier(site_key, secret)
+    if bot_check_configured(env):
+        return TurnstileVerifier(env[TURNSTILE_SITE_KEY_ENV], env[TURNSTILE_SECRET_ENV])
     return NoopVerifier()
+
+
+def _guest_bot_ok(state: "EntryState") -> bool:
+    """With ``require_bot_check`` on, guests need a real bot check (c6).
+
+    Approved sign-in never depends on this: with no keys its verify passes.
+    """
+    return not (state.config.guest_require_bot_check and state.verifier.site_key is None)
 
 
 # ---------------------------------------------------------------------------
@@ -219,6 +241,7 @@ class EntryState:
     mailer: MailAdapter | None = None
     alerter: Alerter | None = None
     verifier: BotVerifier = field(default_factory=NoopVerifier)
+    mail_budget: MailBudget | None = None
     signin_floor_s: float = SIGNIN_FLOOR_S
     #: Background sign-in mail sends (kept referenced until done).
     mail_tasks: set = field(default_factory=set)
@@ -234,6 +257,16 @@ class EntryState:
             self.mailer = make_adapter(self.config)
         return self.mailer
 
+    def get_mail_budget(self) -> MailBudget:
+        if self.mail_budget is None:
+            self.mail_budget = MailBudget(
+                self.get_store(),
+                daily_limit=self.config.guest_mail_daily_budget,
+                hourly_limit=self.config.guest_mail_hourly_budget,
+                ip_hourly_limit=self.config.guest_mail_ip_hourly_budget,
+            )
+        return self.mail_budget
+
 
 def install(app: web.Application, config: LensConfig) -> None:
     """Register state and the entry routes on *app*."""
@@ -243,9 +276,16 @@ def install(app: web.Application, config: LensConfig) -> None:
     app[ENTRY_STATE] = EntryState(
         config=config,
         store=app.get("guest_store"),
-        alerter=make_alerter(config),
+        alerter=make_alerter(
+            config,
+            failed_send_counter=lambda: app[threat.THREAT_COUNTERS].increment(
+                threat.Signal.FAILED_SENDS
+            ),
+        ),
         verifier=make_bot_verifier(),
     )
+    if config.guest_enabled and app[ENTRY_STATE].verifier.site_key is None:
+        logger.warning(NO_BOT_CHECK_WARNING)
     app.router.add_get("/entry", get_entry)
     # Post-SSO landing: Cloudflare Access forwards the user back here.
     app.router.add_get("/login", get_login)
@@ -277,6 +317,15 @@ def _state(request: web.Request) -> EntryState:
     return state
 
 
+async def _take_guest_mail_budget(
+    request: web.Request, state: EntryState, ip: str
+) -> bool:
+    allowed = await state.get_mail_budget().take(ip)
+    signal = threat.Signal.MAIL_SENDS if allowed else threat.Signal.BUDGET_HITS
+    request.app[threat.THREAT_COUNTERS].increment(signal)
+    return allowed
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -291,6 +340,31 @@ def _plausible_email(email: str) -> bool:
     # ':' never appears in a real unquoted address, and 'guest:<email>' is the
     # guest credential key, so a lookalike is refused outright.
     return bool(sep and local and "." in domain and " " not in email and ":" not in email)
+
+
+#: Domains reserved for documentation and tests (RFC 2606, RFC 6761): mail to
+#: them can never arrive, so the guest paths refuse them before any send (t2).
+RESERVED_MAIL_DOMAINS = frozenset({"example.com", "example.net", "example.org"})
+RESERVED_MAIL_TLDS = frozenset({"example", "test", "invalid", "localhost"})
+
+
+def _reserved_address(email: str) -> bool:
+    """True for an address at a reserved domain or any subdomain of one."""
+    domain = email.rpartition("@")[2].rstrip(".")
+    if domain.startswith("["):
+        return True  # an address literal never gets guest mail
+    labels = domain.split(".")
+    if labels[-1] in RESERVED_MAIL_TLDS:
+        return True
+    return ".".join(labels[-2:]) in RESERVED_MAIL_DOMAINS
+
+
+def _reserved_address_refused(request: web.Request, email: str) -> bool:
+    """Count a guest-path reserved-address refusal without retaining it."""
+    reserved = _reserved_address(email)
+    if reserved:
+        request.app[threat.THREAT_COUNTERS].increment(threat.Signal.RESERVED_ADDRESSES)
+    return reserved
 
 
 def client_ip(request: web.Request) -> str:
@@ -317,6 +391,26 @@ def _over_limit(
         store.rate_limited(kind, key, limit=limit, window=window) for key in keys
     )
     for key in keys:
+        store.record_attempt(kind, key)
+    return limited
+
+
+def _over_address_limits(
+    store: GuestStore,
+    kind: str,
+    email: str,
+    ip: str,
+    *,
+    email_limit: int,
+    email_window: int,
+    ip_limit: int,
+    ip_window: int,
+) -> bool:
+    """An hourly per-address limit beside the usual per-IP one (t4)."""
+    limited = store.rate_limited(
+        kind, f"e:{email}", limit=email_limit, window=email_window
+    ) or store.rate_limited(kind, f"i:{ip}", limit=ip_limit, window=ip_window)
+    for key in (f"e:{email}", f"i:{ip}"):
         store.record_attempt(kind, key)
     return limited
 
@@ -411,6 +505,25 @@ def warming_up_page(state: EntryState) -> web.Response:
     response = _page(state, "warming_up", status=503)
     response.headers["Refresh"] = str(WARMING_UP_REFRESH_S)
     return response
+
+
+def _seat_free(registry, cfg: LensConfig, principal: str, ip: str) -> bool:
+    """The guest limit and the per-address pending cap (t12) both leave room."""
+    return registry.guest_slot_free(
+        principal,
+        cfg.guest_max_guests,
+        address=ip,
+        max_pending_per_address=cfg.guest_max_pending_per_address,
+    )
+
+
+def _reserve_seat(registry, cfg: LensConfig, principal: str, ip: str) -> bool:
+    return registry.try_reserve_guest(
+        principal,
+        cfg.guest_max_guests,
+        address=ip,
+        max_pending_per_address=cfg.guest_max_pending_per_address,
+    )
 
 
 def _guests_full(request: web.Request, email: str) -> bool:
@@ -555,7 +668,12 @@ async def _send_signin_code(state: EntryState, email: str, code: str) -> None:
     subject, body = render_token_email(code, purpose=PURPOSE_SIGNIN)
     try:
         await asyncio.to_thread(
-            send_with_alert, state.get_mailer(), state.alerter, email, subject, body
+            functools.partial(send_with_alert, priority=True),
+            state.get_mailer(),
+            state.alerter,
+            email,
+            subject,
+            body,
         )
     except Exception as exc:  # noqa: BLE001 -- the page was already the same
         logger.warning("signin code mail not sent: %s", type(exc).__name__)
@@ -569,8 +687,23 @@ def _schedule_signin_code(state: EntryState, email: str, code: str) -> None:
     task.add_done_callback(state.mail_tasks.discard)
 
 
-async def _send_guest_code(state: EntryState, email: str, code: str) -> None:
-    """Mail one guest code from sign-in (background, like the sign-in code)."""
+async def _send_guest_code(
+    state: EntryState, email: str, code: str, budget: Callable[[], Awaitable[bool]]
+) -> None:
+    """Mail one guest code from sign-in (background, like the sign-in code).
+
+    The guest mail budget is taken here, before the send, not on the request:
+    the request then does the same thread hand-offs for every address, so an
+    exhausted budget (or a store error) changes nothing the visitor can see.
+    """
+    try:
+        allowed = await budget()
+    except Exception as exc:  # noqa: BLE001 -- the page was already the same
+        logger.warning("guest mail budget unavailable: %s", type(exc).__name__)
+        allowed = False
+    if not allowed:
+        await _revoke_unmailed(state, code)
+        return
     subject, body = render_token_email(code)
     try:
         await asyncio.to_thread(
@@ -578,10 +711,18 @@ async def _send_guest_code(state: EntryState, email: str, code: str) -> None:
         )
     except Exception as exc:  # noqa: BLE001 -- the page was already the same
         logger.warning("guest code mail not sent: %s", type(exc).__name__)
+        await _revoke_unmailed(state, code)
 
 
-def _schedule_guest_code(state: EntryState, email: str, code: str) -> None:
-    task = asyncio.create_task(_send_guest_code(state, email, code))
+async def _revoke_unmailed(state: EntryState, code: str) -> None:
+    """A code that was never mailed can't stay usable until it expires."""
+    await asyncio.to_thread(state.get_store().consume_token, code, purpose=TOKEN_PURPOSE)
+
+
+def _schedule_guest_code(
+    state: EntryState, email: str, code: str, budget: Callable[[], Awaitable[bool]]
+) -> None:
+    task = asyncio.create_task(_send_guest_code(state, email, code, budget))
     state.mail_tasks.add(task)
     task.add_done_callback(state.mail_tasks.discard)
 
@@ -593,7 +734,12 @@ async def _send_signin_notice(
     subject, body = render_signin_notice(ip=ip, user_agent=user_agent, when=when)
     try:
         await asyncio.to_thread(
-            send_with_alert, state.get_mailer(), state.alerter, email, subject, body
+            functools.partial(send_with_alert, priority=True),
+            state.get_mailer(),
+            state.alerter,
+            email,
+            subject,
+            body,
         )
     except Exception as exc:  # noqa: BLE001 -- the sign-in already succeeded
         logger.warning("sign-in notice mail not sent: %s", type(exc).__name__)
@@ -660,6 +806,11 @@ async def _post_signin_app(request: web.Request) -> web.Response:
     else:
         human = await state.verifier.verify(str(form.get(TURNSTILE_FIELD) or ""), ip)
         if approved:
+            # c26: a browser trusted for this email skips the bot check, so a
+            # failing or missing widget never locks its owner out.
+            human = human or store.is_trusted_device(
+                app_session.read_device_cookie(request), email
+            )
             pw_ok = await asyncio.to_thread(store.check_password, email, password)
         else:
             # A guest has no password: whatever was typed is ignored, and
@@ -669,8 +820,10 @@ async def _post_signin_app(request: web.Request) -> web.Response:
             pw_ok = False
             guest = (
                 human
+                and _guest_bot_ok(state)
                 and not guest_capped
                 and _plausible_email(email)
+                and not _reserved_address_refused(request, email)
                 and not store.is_banned(email, ip)
             )
         correct = human and pw_ok
@@ -683,7 +836,12 @@ async def _post_signin_app(request: web.Request) -> web.Response:
     elif guest:
         code = store.issue_token(email, purpose=TOKEN_PURPOSE)
         store.bind_signin(pending, code)
-        _schedule_guest_code(state, email, code)
+        _schedule_guest_code(
+            state,
+            email,
+            code,
+            functools.partial(_take_guest_mail_budget, request, state, ip),
+        )
     elif approved:
         metrics.get_metrics().failed_sign_in()
     if limited:
@@ -811,12 +969,12 @@ async def _post_code_guest(
     # post_verify); the time floor is waited out after it is released.
     async with registry.guest_lock:
         outcome = "ok"
-        if not registry.guest_slot_free(principal, cfg.guest_max_guests):
+        if not _seat_free(registry, cfg, principal, ip):
             outcome = "busy"
         elif not store.verify_signin_token(email, code, pending, purpose=TOKEN_PURPOSE):
             outcome = "wrong"
         elif returning:
-            registry.try_reserve_guest(principal, cfg.guest_max_guests)
+            _reserve_seat(registry, cfg, principal, ip)
     if outcome == "busy":
         await _pad(started, state.signin_floor_s)
         return busy_page(state)
@@ -900,11 +1058,11 @@ async def post_welcome(request: web.Request) -> web.Response:
         # Seat taken while the form was filled in: the form comes back with
         # the busy message and its token unused, so "Enter" works again once
         # the seat frees (the mailed code is already spent).
-        busy = not registry.guest_slot_free(principal, cfg.guest_max_guests)
+        busy = not _seat_free(registry, cfg, principal, ip)
         if not busy:
             if store.consume_token(token, purpose=WELCOME_PURPOSE) != email:
                 return expired()
-            registry.try_reserve_guest(principal, cfg.guest_max_guests)
+            _reserve_seat(registry, cfg, principal, ip)
     if busy:
         metrics.get_metrics().guest_busy()
         return again(MSG_BUSY, 503)
@@ -988,7 +1146,9 @@ async def post_guest_start(request: web.Request) -> web.Response:
         return again(ERR_NICK_INVALID)
     if _nick_taken(store, email, nick):
         return again(ERR_NICK_TAKEN)
-    if not await state.verifier.verify(str(form.get(TURNSTILE_FIELD) or ""), ip):
+    if not _guest_bot_ok(state) or not await state.verifier.verify(
+        str(form.get(TURNSTILE_FIELD) or ""), ip
+    ):
         return again(ERR_BOT)
 
     limited = _over_limit(
@@ -1001,13 +1161,19 @@ async def post_guest_start(request: web.Request) -> web.Response:
     )
     if limited:
         metrics.get_metrics().rate_limited()
-    elif _plausible_email(email) and not store.is_banned(email, ip):
+    elif (
+        _plausible_email(email)
+        and not _reserved_address_refused(request, email)
+        and not store.is_banned(email, ip)
+        and await _take_guest_mail_budget(request, state, ip)
+    ):
         token = store.issue_token(email, purpose=TOKEN_PURPOSE)
         subject, body = render_token_email(token)
         try:
             await asyncio.to_thread(send_with_alert, state.get_mailer(), state.alerter, email, subject, body)
         except Exception as exc:  # noqa: BLE001 -- same page either way (o4/o5)
             logger.warning("guest token mail not sent: %s", type(exc).__name__)
+            await _revoke_unmailed(state, token)
     return _page(
         state,
         "code",
@@ -1083,11 +1249,11 @@ async def post_verify(request: web.Request) -> web.Response:
     registry = request.app["registry"]
     principal = GUEST_PRINCIPAL_PREFIX + email
     async with registry.guest_lock:
-        if not registry.guest_slot_free(principal, cfg.guest_max_guests):
+        if not _seat_free(registry, cfg, principal, ip):
             return busy_page(state)
         if not store.verify_token(email, code, purpose=TOKEN_PURPOSE):
             return wrong(401)
-        registry.try_reserve_guest(principal, cfg.guest_max_guests)
+        _reserve_seat(registry, cfg, principal, ip)
 
     store.record_guest(email, NICK_PREFIX + nick, ip)
     store.record_consent(

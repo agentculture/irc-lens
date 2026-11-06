@@ -22,18 +22,23 @@ stored on the adapter, and neither the key nor the token is ever logged.
 from __future__ import annotations
 
 import json
+import logging
 import os
+import threading
 import time
 import urllib.error
 import urllib.request
+from collections import deque
+from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
-from dataclasses import dataclass
-
-from irc_lens import __version__
+from irc_lens import __version__, metrics
 from irc_lens._errors import EXIT_ENV_ERROR, AfiError
 from irc_lens.config import LensConfig
 from irc_lens.guest_store import DEFAULT_TOKEN_TTL
+
+logger = logging.getLogger(__name__)
 
 #: POST target of Resend's transactional email API.
 RESEND_API_URL = "https://api.resend.com/emails"
@@ -56,6 +61,17 @@ _SETPW_SUBJECT = "Set your chat.culture.dev password"
 #: Default lifetime of a sign-in code (10 minutes) and a set-password link.
 SIGNIN_TOKEN_TTL = 600
 SETPW_LINK_TTL = 1800
+
+# Resend's provider allowance is 100 messages a day. Keep headroom for
+# provider-side accounting differences while bounding every mail path here.
+RESEND_DAILY_QUOTA = 100
+TOTAL_SEND_LIMIT = 90
+TOTAL_SEND_WINDOW_S = 24 * 60 * 60
+
+# Password-link and deletion-code requests do not use the guest budget, so
+# each known inbox gets its own slower abuse bound.
+MAIL_ADDRESS_HOURLY_LIMIT = 5
+MAIL_ADDRESS_WINDOW_S = 60 * 60
 
 
 def _human_duration(seconds: int) -> str:
@@ -236,6 +252,66 @@ class MailSendError(AfiError):
     status: int | None = None
 
 
+class MailCeilingError(AfiError):
+    """The local all-mail ceiling was reached before a provider call."""
+
+
+class SendCeiling:
+    """Thread-safe rolling-window ceiling shared by every outgoing mail."""
+
+    def __init__(
+        self,
+        *,
+        limit: int = TOTAL_SEND_LIMIT,
+        window_s: int = TOTAL_SEND_WINDOW_S,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._limit = limit
+        self._window_s = window_s
+        self._clock = clock
+        self._sent_at: deque[float] = deque()
+        self._lock = threading.Lock()
+
+    def take(self, *, priority: bool = False) -> bool:
+        """Reserve one provider attempt, or return false when capped.
+
+        The last quarter of the ceiling is kept for *priority* mail (approved
+        users' sign-in codes and notices), so set-password, deletion and guest
+        mail that anyone can trigger can never starve them.
+        """
+        now = self._clock()
+        cutoff = now - self._window_s
+        limit = self._limit if priority else self._limit - self._limit // 4
+        with self._lock:
+            while self._sent_at and self._sent_at[0] <= cutoff:
+                self._sent_at.popleft()
+            if len(self._sent_at) >= limit:
+                return False
+            self._sent_at.append(now)
+            return True
+
+
+_TOTAL_SEND_CEILING = SendCeiling()
+_CEILING_ATTR = "_irc_lens_send_ceiling"
+_CEILING_INSTALL_LOCK = threading.Lock()
+
+
+def _ceiling_for(adapter: MailAdapter) -> SendCeiling:
+    """Return the ceiling shared by every path through one app mailer."""
+    ceiling = getattr(adapter, _CEILING_ATTR, None)
+    if ceiling is not None:
+        return ceiling
+    with _CEILING_INSTALL_LOCK:
+        ceiling = getattr(adapter, _CEILING_ATTR, None)
+        if ceiling is None:
+            ceiling = SendCeiling()
+            try:
+                setattr(adapter, _CEILING_ATTR, ceiling)
+            except (AttributeError, TypeError):
+                return _TOTAL_SEND_CEILING
+        return ceiling
+
+
 @runtime_checkable
 class MailAdapter(Protocol):
     """A provider that delivers one plain-text email."""
@@ -344,13 +420,24 @@ class ResendAdapter:
 
 
 def make_adapter(cfg: LensConfig) -> MailAdapter:
-    """Select the provider adapter from ``cfg.guest_mail_provider``."""
+    """Select the provider adapter from ``cfg.guest_mail_provider``.
+
+    The adapter carries the all-mail ceiling from
+    ``guest_mode.mail.total_daily_ceiling``, shared by every send path.
+    """
     provider = cfg.guest_mail_provider.lower()
     if provider == "none":
-        return NoneAdapter()
-    if provider == "resend":
-        return ResendAdapter(cfg.guest_mail_from, cfg.guest_mail_api_key_env)
-    raise AfiError(
+        adapter: MailAdapter = NoneAdapter()
+    elif provider == "resend":
+        adapter = ResendAdapter(cfg.guest_mail_from, cfg.guest_mail_api_key_env)
+    else:
+        raise _unknown_provider(cfg)
+    setattr(adapter, _CEILING_ATTR, SendCeiling(limit=cfg.guest_mail_total_daily_ceiling))
+    return adapter
+
+
+def _unknown_provider(cfg: LensConfig) -> AfiError:
+    return AfiError(
         code=EXIT_ENV_ERROR,
         message=f"unknown guest mail provider {cfg.guest_mail_provider!r}",
         remediation=("set `guest_mode.mail.provider:` to one of: none, resend"),
@@ -358,20 +445,45 @@ def make_adapter(cfg: LensConfig) -> MailAdapter:
 
 
 def send_with_alert(
-    adapter: MailAdapter, alerter, to: str, subject: str, body: str
+    adapter: MailAdapter,
+    alerter,
+    to: str,
+    subject: str,
+    body: str,
+    *,
+    priority: bool = False,
 ) -> None:
     """``adapter.send`` plus a delivery alert on provider failure; re-raises.
 
-    Only :class:`MailSendError` (HTTP / network failure) alerts; the alert
-    text carries the status code only -- never *to*, the code, or the
-    provider's response.
+    Only :class:`MailSendError` (HTTP / network failure) and a ceiling refusal
+    alert; the alert text carries the status code only -- never *to*, the
+    code, or the provider's response. *priority* marks approved users'
+    sign-in mail, which may use the ceiling's reserved headroom.
     """
+    if not _ceiling_for(adapter).take(priority=priority):
+        metrics.get_metrics().failed_send()
+        logger.warning("mail send refused: outgoing mail ceiling reached")
+        if alerter is not None:
+            from irc_lens.alerts import KIND_CEILING, message_for
+
+            alerter.notify(KIND_CEILING, message_for(KIND_CEILING, None))
+        raise MailCeilingError(
+            code=EXIT_ENV_ERROR,
+            message="outgoing mail ceiling reached",
+            remediation="wait for the rolling mail window to reopen",
+        )
     try:
         adapter.send(to, subject, body)
     except MailSendError as exc:
+        metrics.get_metrics().failed_send()
+        status = f"HTTP {exc.status}" if exc.status is not None else "network error"
+        logger.warning("mail send failed: %s", status)
         if alerter is not None:
             from irc_lens.alerts import classify, message_for
 
             kind = classify(exc.status)
-            alerter.notify(kind, message_for(kind, exc.status))
+            if kind is not None:
+                # Only outages feed the threat rule: a bad recipient never alerts.
+                alerter.failed_send()
+                alerter.notify(kind, message_for(kind, exc.status))
         raise

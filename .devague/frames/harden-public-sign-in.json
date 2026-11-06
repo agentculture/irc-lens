@@ -1,0 +1,1056 @@
+{
+  "slug": "harden-public-sign-in",
+  "title": "Harden public sign-in",
+  "schema_version": 6,
+  "status": "exported",
+  "created": "2026-11-04T17:31:15Z",
+  "updated": "2026-11-06T12:48:24Z",
+  "claims": [
+    {
+      "id": "c1",
+      "kind": "announcement",
+      "text": "The chat console's public sign-in can't be used to burn the mail quota, mail strangers or raise false alarms, and it warns when its bot check is off",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h1",
+          "text": "All five behaviours in the announcement's after-state are shown by automated tests against a real guest store, with only the mail adapter faked.",
+          "status": "rejected",
+          "instruction": ""
+        },
+        {
+          "id": "h13",
+          "text": "Every behaviour in c10 is shown by automated tests against a real guest store, with only the mail adapter faked.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "chat.culture.dev's public sign-in can't be used to burn the mail quota, mail strangers or raise false alarms, and it warns when its bot check is off",
+          "kind": "announcement",
+          "reason": "tests/test_no_host_literals.py forbids public hostnames in docs/specs"
+        }
+      ]
+    },
+    {
+      "id": "c2",
+      "kind": "requirement",
+      "text": "A persistent global budget caps guest code mail per hour and per day, counted before the send is scheduled because sends run in background tasks (web/entry.py:552,569), covering the guest-code paths at entry.py:668 and :989. It reuses the attempts table helpers (guest_store.py:565-592); retention there is one day (ATTEMPT_RETENTION_S), so a daily window needs margin added.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h7",
+          "text": "The budget survives a restart, is counted before the send is scheduled, and its daily window can't lapse early from attempts-table retention.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c3",
+      "kind": "boundary",
+      "text": "Approved users' sign-in code, new-browser notice and set-password mail stay outside the budget (entry.py:663,732; setpw.py:196-205), so guests can never lock an owner out of signing in.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h8",
+          "text": "No approved-mail path checks or increments the guest budget, and a test proves it with the budget exhausted.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c4",
+      "kind": "requirement",
+      "text": "Reserved domains are refused before any provider call, keeping the same status, page, pending cookie, pad floor, attempt counting and dummy verify as a normal submission (entry.py:653-678), so a refusal reveals nothing.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h9",
+          "text": "Status, page, cookie and pad floor match a normal guest submission, and the attempt is still counted, shown by a test comparing the two responses.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c5",
+      "kind": "requirement",
+      "text": "Provider failures are classified so recipient errors don't alert, each failure logs its HTTP status but never the address or body, and failed sends are counted in metrics. classify (alerts.py:48) separates only 429 today; MailSendError.status exists; failures log the type alone (entry.py:549,571).",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h10",
+          "text": "No log line or alert contains an address, code or provider body, and a real outage's alert isn't suppressed by an earlier recipient error.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c6",
+      "kind": "requirement",
+      "text": "With guest mode on and no bot check configured, the console warns at startup and in doctor, and a setting can refuse guest codes in that state. make_bot_verifier silently returns NoopVerifier (entry.py:193-200), and doctor (cli/_meta.py:317) has no such check.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h11",
+          "text": "With guest mode on and keys absent, startup logs one warning and doctor reports it; with keys set, neither does; and approved sign-in works in every mode.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c7",
+      "kind": "non_goal",
+      "text": "No IP bans or blocklists: carrier NAT makes them blunt, per irc-lens#59.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c8",
+      "kind": "boundary",
+      "text": "No change to the approved sign-in flow or its alerts; irc-lens#69 owns those.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h12",
+          "text": "The approved sign-in code path has no behaviour change apart from budget exemption, shown by the existing sign-in tests passing unchanged.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c9",
+      "kind": "audience",
+      "text": "The operators of a public irc-lens console, who get the delivery alerts and pay for the mail quota, and the guests and approved users who rely on sign-in mail arriving.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h2",
+          "text": "Operators can read the new warning, status logs and counters without reading guests.db.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c10",
+      "kind": "after_state",
+      "text": "Scripted traffic can't spend more guest mail than the budget, a bad address raises no alert, every failed send logs its HTTP status, and a console with no bot check says so at startup and in doctor.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h3",
+          "text": "Each clause maps to at least one test that fails on main today.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c11",
+      "kind": "before_state",
+      "text": "On 2026-11-04 a scripted client submitted the sign-in form with a reserved address. The console called the mail provider, the send failed, and operators got an alert saying codes weren't being delivered, while delivery was fine. Nothing logged the status.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h4",
+          "text": "The scenario replays from the same input in a test: a reserved address no longer reaches the adapter or raises an alert.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "On 2026-11-04 a scripted client submitted the sign-in form with a reserved address. The console called Resend, the send failed, and operators got an alert saying codes weren't being delivered, while delivery was fine. Nothing logged the status, and the live console has no warning for a missing bot check.",
+          "kind": "before_state",
+          "reason": "the repo is public, so live configuration isn't described"
+        }
+      ]
+    },
+    {
+      "id": "c12",
+      "kind": "why_it_matters",
+      "text": "Guest mail is the one thing an anonymous visitor can make the console spend: enough rotating addresses can use up the quota, and that also stops approved users' sign-in codes. False alarms teach operators to ignore the alert that matters.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h5",
+          "text": "Approved mail really is exempt: with the budget used up, the approved sign-in path still calls the adapter.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c13",
+      "kind": "success_signal",
+      "text": "In a test driving 200 guest submissions with rotating addresses from one IP, no more than the configured hourly budget reach the mail adapter, 0 reserved-domain addresses reach it, 0 recipient errors raise an alert, and an approved user's sign-in code still sends with the budget at 0.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h6",
+          "text": "The test uses the real limit and budget code with a fake clock, not a mocked limiter.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "In a test driving 200 guest submissions with rotating addresses from one IP, at most the hourly budget (default 20) reach the mail adapter, 0 reserved-domain addresses reach it, 0 recipient errors raise an alert, and an approved user's sign-in code still sends with the budget at 0.",
+          "kind": "success_signal",
+          "reason": "owner chose a budget set from the provider quota, so the test can't fix one number"
+        }
+      ]
+    },
+    {
+      "id": "c14",
+      "kind": "decision",
+      "text": "Guest mail budget: the daily cap is a fraction of the Resend plan's quota and the hourly cap is 40% of the daily, fixed only once the quota is read.",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c15",
+      "kind": "decision",
+      "text": "Bot check: warn now, set keys, then block on a missing check only after a real browser test passes through the Worker.",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c16",
+      "kind": "decision",
+      "text": "No visitor IPs in the access log.",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c17",
+      "kind": "assumption",
+      "text": "Default guest budget is 50 mails a day and 20 an hour: half the average daily allowance of the operator's monthly plan at the time. Each deployment sets its own values in config, and live values stay out of the repo.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "The owner gave the Resend quota as 3000 in total on 2026-11-04. Read as 3000 a month, about 100 a day, this gives a guest budget of 50 a day and 20 an hour: half the average daily allowance, at most 1500 a month, leaving at least 1500 for approved users' mail.",
+          "kind": "assumption",
+          "reason": "the repo is public, so plan figures stay private"
+        }
+      ]
+    },
+    {
+      "id": "c18",
+      "kind": "requirement",
+      "text": "Clef is a layer in the console's threat detection, across public traffic and not only sign-in: fixed rules watch counts of sign-in activity, mail spend, probed paths, 401 and 403 responses, and when a window crosses a trigger the console sends the decider (Clef, general domain) counts only and raises an operator alert with its threat verdict and the numbers. Clef detects and never enforces; the bot check, limits and budget do the blocking.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h14",
+          "text": "Sign-in never waits on or fails because of the decider: with the decider down, sign-in is unchanged and the numbers still reach the operator, marked as not assessed.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h15",
+          "text": "The decider receives derived counts only, never addresses, IPs, user agents, paths or any other visitor-supplied string, so a visitor can't write into its prompt or send personal data across the mesh.",
+          "status": "rejected",
+          "instruction": ""
+        },
+        {
+          "id": "h16",
+          "text": "Verdicts are checked against labelled windows, including a real group of guests behind one IP, before the alert is trusted, and its misses are recorded.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h17",
+          "text": "A budget hit or a burst always alerts, whatever the decider says, so a wrong 'genuine' can't hide abuse.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h35",
+          "text": "The threat detector's decider call receives derived counts only, never addresses, IPs, user agents, paths or any other visitor-supplied string; only the message validator in c30 sends a guest's line.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "The owner is told when sign-in traffic looks non-genuine: when a window of guest sign-in activity crosses a trigger, the console sends the decider (Clef, general domain) counts only and raises an operator alert with the verdict and the numbers. It informs and never blocks; limits and the budget do the blocking.",
+          "kind": "requirement",
+          "reason": "owner: include Clef in the protection stack for threat detection"
+        }
+      ]
+    },
+    {
+      "id": "c19",
+      "kind": "boundary",
+      "text": "Threat detection stays cheap and can't be driven by attackers. Counting per request is in memory, with no database write or network call. The detector's Clef call runs at most once per 15-minute window and at most 24 times a day, only after a rule triggers, with one call in flight and a 5 second timeout. The message validator in c30 has its own bounds.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h18",
+          "text": "A test driving 10000 requests in a window with a fake clock and fake decider sees at most 1 Clef call, a fixed-size counter state, and no added database writes on the request path.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h19",
+          "text": "With the decider hanging, request latency is unchanged and the event loop isn't blocked, because the call runs off the request path with the timeout enforced.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": [
+        {
+          "text": "Threat detection stays cheap and can't be driven by attackers. Counting per request is in memory, with no database write or network call. Clef runs at most once per 15-minute window and at most 24 times a day, only after a rule triggers, with one call in flight, a 5 second timeout and no retries or queue: a skipped call is dropped and the alert says not assessed. These caps are config defaults and hold under any traffic volume.",
+          "kind": "boundary",
+          "reason": "Owner added Clef message validation on 2026-11-06; scope the detector's call caps to the detector"
+        }
+      ]
+    },
+    {
+      "id": "c20",
+      "kind": "requirement",
+      "text": "All outgoing mail has a total ceiling below the provider quota, and set-password and delete-confirm mail get an hourly per-address limit. Today web/setpw.py post_password and web/deletion.py post_request allow 10 mails per minute per address with no bot check, to anyone who knows an approved or guest address.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h20",
+          "text": "With guest budget unused, a test driving set-password or delete requests for one known address can't exceed its hourly limit, and total sends can't exceed the ceiling.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c21",
+      "kind": "requirement",
+      "text": "The guest budget gets an hourly per-IP cap beside it, and exhausting the budget is treated as a denial of guest sign-in, not only as protection: 20 scripted posts an hour would stop real guests, who still see the normal code page because entry.py keeps responses identical.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h21",
+          "text": "A test shows one IP can't use the whole hourly budget, and the budget-hit alert says real guests may be getting no mail.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c22",
+      "kind": "requirement",
+      "text": "Operators can lift or reset the budget and turn off required bot check through config, with no code change, and the rollback steps are documented.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h22",
+          "text": "A rehearsal in a test environment restores guest mail with a config change and a restart.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c23",
+      "kind": "requirement",
+      "text": "Clef detection is optional and off by default: decider URL and credential come from config and an env var, and a deployment with no gateway, such as a standby host or an outside user of irc-lens, runs every other layer unchanged.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h23",
+          "text": "With no decider configured, startup is clean, rules still alert, and alerts say not assessed.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c24",
+      "kind": "assumption",
+      "text": "Starting triggers from 7 days of spark's access log: entry posts peak at 5 per 15 minutes, refused responses at 311 with only 2 windows at 20 or more, and all requests have p99 29. So refused responses at 50 or more plus entry posts at 10 or more, plus any reserved address or failed send, would have raised few alerts. The Nov 4 probe had 6 posts, so only the reserved-address rule catches it.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h24",
+          "text": "Thresholds are re-checked on real counters before alerts are trusted, since 7 days is a short sample.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c25",
+      "kind": "requirement",
+      "text": "Probe counting uses route matching in middleware, not status codes: anonymous requests to real and nonexistent paths both get 401, because auth runs first (auth.py:97 reads match_info), so status can't separate a probe from a mistake.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h25",
+          "text": "A test shows a nonexistent path counts as a probe and a real route's 401 doesn't.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c26",
+      "kind": "decision",
+      "text": "With Turnstile on, already-trusted approved browsers skip the verify, so approved access survives a Cloudflare outage. New browsers stay blocked until verify recovers.",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c27",
+      "kind": "decision",
+      "text": "Owner decision 2026-11-06: Clef validates each guest chat line before the demo agents see it. Approved users' lines and mesh lines are never sent.",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c28",
+      "kind": "decision",
+      "text": "Owner decision 2026-11-06: a line Clef rejects is blocked and flagged: it never reaches the agents, the guest sees a short refusal, and it is logged and counted for the alert rules.",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c29",
+      "kind": "decision",
+      "text": "Owner decision 2026-11-06: when Clef is down or takes longer than 5 seconds, the line goes through marked unchecked, so the demo keeps working.",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c30",
+      "kind": "requirement",
+      "text": "The message validator is a second Clef layer beside the counts-only detector in c18: it sends one guest line per call, takes its prompt and question from a config file outside the repo that the operator can change without a release, and turns the answer into allow or block only.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h26",
+          "text": "With the validator configured, a guest line reaches the sandbox server only after an allow verdict, a decider error, or the 5 second timeout; a blocked line never reaches it.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h27",
+          "text": "The prompt and question live only in the operator's config file: no prompt text is in the repo, the exported spec, or the logs, and editing the file changes the next call with no restart.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h28",
+          "text": "A line that tells Clef to allow it, or asks for prose, still yields only allow or block, because the request is a choice question with fixed keys; tested with injection lines.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h29",
+          "text": "Before blocking goes live, at least 40 labelled guest lines (benign, abusive, and injection attempts) are run through the configured prompt; benign lines blocked and abusive lines allowed are recorded, and the owner accepts the rates.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h30",
+          "text": "Load stays bounded: one call per guest line, lines already capped by the guest message rate and guest limit, one call in flight per guest, a 5 second timeout, and a daily call cap in config after which lines go through marked unchecked.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h31",
+          "text": "Blocked lines are kept with the guest's flags and erased by guest deletion; alerts carry counts only.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c31",
+      "kind": "requirement",
+      "text": "Red-team audit RT-01: a single address can't hold guest seats with pending reservations: a per-IP cap on open reservations, with the guest limit and message rate shown beside the other published limits (RT-08).",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h32",
+          "text": "A test opening reservations from one address past the cap gets the busy response, while a second address still gets a seat.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c32",
+      "kind": "requirement",
+      "text": "Red-team audit RT-14: any failure while opening or reopening a guest session answers with the shaped 503 warming-up or busy response, never a bare 500.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h33",
+          "text": "A test that makes session opening raise an unexpected error gets a shaped 503, not a 500, and the error is logged.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c33",
+      "kind": "boundary",
+      "text": "Not in this frame, from the red-team audit: HSTS and Cloudflare Access settings (owner's Cloudflare changes), the 0.0.0.0 IRC bind on thor (ops), webhook secret and read-loop bound (agentirc), per-principal media eviction and MCP resource metadata (later lens hygiene). Dependency currency (RT-02) was already met on spark on 2026-11-06.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h34",
+          "text": "Each excluded audit item is either an owner step listed in the rollout task or a follow-up issue filed when this plan is approved.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    }
+  ],
+  "open_vagueness": [
+    {
+      "id": "v1",
+      "text": "HTTP 403 can mean our sender config or Cloudflare's agent block (mail.py USER_AGENT comment), so 403 can't be classified on status alone",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v2",
+      "text": "Whether Turnstile works through the edge Worker: siteverify gets client_ip, and CF-Connecting-IP across the Worker-to-tunnel hop is unverified",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v3",
+      "text": "The Resend plan's daily and monthly quota, and the fraction to use, are still to come from the owner; the build can't fix budget defaults without them",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v4",
+      "text": "The measured load of a Clef call on orin's shared lane and whether 24 calls a day needs lowering; two calls here took about 2.5 s each but load wasn't measured",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    },
+    {
+      "id": "v5",
+      "text": "Bounces from rotating addresses may hurt the sending reputation even under budget; src has no bounce or complaint handling, and Resend's policy wasn't read",
+      "kind": "unknown_nonblocking",
+      "claim_id": null,
+      "resolved": false,
+      "resolution": "",
+      "resolution_claim_id": null
+    }
+  ],
+  "scope_entries": [
+    {
+      "id": "s1",
+      "surface": "web/entry.py + guest_store.py mail paths",
+      "finding": "Guest mail is limited only per email and per IP at 10 per 60 s (TOKEN_REQUEST_WINDOW_S). No global cap exists. Attempts rows are kept a day and are attacker-keyed, so unbounded row growth is slow but real.",
+      "seeds": [
+        "c2"
+      ]
+    },
+    {
+      "id": "s2",
+      "surface": "web/setpw.py and approved sign-in",
+      "finding": "Approved-only mail shares the token counter at entry.py:633, so a budget must not count approved emails there.",
+      "seeds": [
+        "c3"
+      ]
+    },
+    {
+      "id": "s3",
+      "surface": "_plausible_email and its callers",
+      "finding": "Needs @, local part, dot in domain, no space or colon. Also used by deletion.py:151 and setpw.py:196, which need a known account, and by admin.py:184, where an operator adds a person: the reserved-domain check belongs in the guest paths at entry.py:658 and :989, not inside this shared helper.",
+      "seeds": [
+        "c4"
+      ]
+    },
+    {
+      "id": "s4",
+      "surface": "alerts.py, mail.py, cultureflare delivery-alert template",
+      "finding": "The template doesn't allow-list kinds, so a new kind won't break it; whether the deployed Worker matches wasn't checked. Alert text says codes are undeliverable even when a notice or delete mail failed. Throttle state is in memory and resets on restart.",
+      "seeds": [
+        "c5"
+      ]
+    },
+    {
+      "id": "s5",
+      "surface": "Turnstile wiring",
+      "finding": "Env IRC_LENS_TURNSTILE_SITE_KEY and _SECRET; the widget renders only on password and guest steps. /delete/request and /password never call the verifier (deletion.py, setpw.py).",
+      "seeds": [
+        "c6"
+      ]
+    },
+    {
+      "id": "s6",
+      "surface": "issue irc-lens#59",
+      "finding": "Shared NAT is a known cost of per-IP limits, so the global budget does the heavy lifting.",
+      "seeds": [
+        "c7"
+      ]
+    },
+    {
+      "id": "s7",
+      "surface": "issue irc-lens#69",
+      "finding": "Covers approved sign-in alerts and blocks; not repeated here.",
+      "seeds": [
+        "c8"
+      ]
+    },
+    {
+      "id": "s8",
+      "surface": "edge Worker (t8, unmerged)",
+      "finding": "Forwards every path to the active origin with no filter, so path blocks and /entry limits fit in handleRequest later. The lens reads neither edge header yet; t6 adds that. client_ip is defined twice (entry.py:291, auth.py:102), which t6 must keep in step. Turnstile through the Worker is unverified.",
+      "seeds": []
+    },
+    {
+      "id": "s9",
+      "surface": "access log, metrics, privacy",
+      "finding": "aiohttp default access log with no format set (serve.py:480); visitor IP needs a custom logger. Metrics live at /owner/metrics, approved only, and reset on restart. The privacy text is on the public site, outside this repo, and wasn't read.",
+      "seeds": []
+    },
+    {
+      "id": "s10",
+      "surface": "challenge pass / adjacent-systems lens: web/setpw.py, web/deletion.py",
+      "finding": "These paths bypass c2 and c3 exempts set-password, so a known address can drain the quota and flood that inbox. c17's claim of 1500 left for approved users doesn't hold until this is fixed.",
+      "seeds": [
+        "c20"
+      ]
+    },
+    {
+      "id": "s11",
+      "surface": "challenge pass / failure-modes lens: web/entry.py response path",
+      "finding": "The budget itself is a cheap denial lever, and over-budget guests are told a code is coming.",
+      "seeds": [
+        "c21"
+      ]
+    },
+    {
+      "id": "s12",
+      "surface": "challenge pass / recovery lens: guest_store.py attempts, web/retention.py",
+      "finding": "No reset path exists for a persistent budget; attempts rows otherwise age out over a day.",
+      "seeds": [
+        "c22"
+      ]
+    },
+    {
+      "id": "s13",
+      "surface": "challenge pass / adjacent-systems lens: assess script, lobes gateway",
+      "finding": "The decider is reached through a local gateway with its own key, which irc-lens doesn't depend on today.",
+      "seeds": [
+        "c23"
+      ]
+    },
+    {
+      "id": "s14",
+      "surface": "challenge pass / cheap probe: 7 days of access log, counts only",
+      "finding": "Measured baseline per 15 minutes; no addresses or IPs read.",
+      "seeds": [
+        "c24"
+      ]
+    },
+    {
+      "id": "s15",
+      "surface": "challenge pass / unstated-assumptions lens: web/auth.py and access log",
+      "finding": "The Nov 4 log shows a made-up path returning 401, the same as real routes.",
+      "seeds": [
+        "c25"
+      ]
+    },
+    {
+      "id": "s16",
+      "surface": "challenge pass / failure-modes lens: cultureflare delivery-alert template",
+      "finding": "Clean: alerts use Cloudflare's send_email binding, not Resend, so a used-up quota doesn't silence them. The template was read; the deployed Worker wasn't.",
+      "seeds": []
+    },
+    {
+      "id": "s17",
+      "surface": "challenge pass / lifecycle lens: web/standby.py",
+      "finding": "Clean: standby already refuses guest and account paths. Budget and counters are per host and not replicated; each host alerts on its own.",
+      "seeds": []
+    },
+    {
+      "id": "s18",
+      "surface": "challenge pass / security lens: web/entry.py verify and approved sign-in",
+      "finding": "correct = human and pw_ok, and TurnstileVerifier fails closed, so with keys set an approved user can't sign in during a Cloudflare siteverify outage. That conflicts with h11. Routed to a user decision.",
+      "seeds": []
+    }
+  ],
+  "lapses": [
+    {
+      "id": "l1",
+      "code": "assumption-for-measurement",
+      "what": "Stated that at least 1500 mails a month stay available for approved users without first checking the other mail paths; set-password and delete mail bypass the budget",
+      "skipped_check": "read every send_with_alert caller before stating the remainder",
+      "refs": [
+        "c17"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    },
+    {
+      "id": "l2",
+      "code": "n-below-claim",
+      "what": "Trial verdicts on Clef came from windows mostly written and labelled by the same agent, 7 at most, so accuracy isn't measured",
+      "skipped_check": "",
+      "refs": [
+        "c18"
+      ],
+      "origin": "llm",
+      "status": "proposed"
+    }
+  ],
+  "obligations": [
+    {
+      "id": "o1",
+      "claim_id": "c2",
+      "seam": "POST /entry/signin, guest path",
+      "behavior": "once the hourly or daily guest budget is reached, no further guest code reaches the mail adapter, and the count survives a console restart",
+      "source_text": "A persistent global budget caps guest code mail per hour and per day, counted before the send is scheduled because sends run in background tasks (web/entry.py:552,569), covering the guest-code paths at entry.py:668 and :989. It reuses the attempts table helpers (guest_store.py:565-592); retention there is one day (ATTEMPT_RETENTION_S), so a daily window needs margin added.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o2",
+      "claim_id": "c3",
+      "seam": "POST /entry/signin, approved path",
+      "behavior": "with the guest budget at 0, a correct password still sends the approved sign-in code",
+      "source_text": "Approved users' sign-in code, new-browser notice and set-password mail stay outside the budget (entry.py:663,732; setpw.py:196-205), so guests can never lock an owner out of signing in.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o3",
+      "claim_id": "c20",
+      "seam": "POST /password, POST /delete/request",
+      "behavior": "repeat requests for one address stop reaching the mail adapter at the hourly per-address limit",
+      "source_text": "All outgoing mail has a total ceiling below the provider quota, and set-password and delete-confirm mail get an hourly per-address limit. Today web/setpw.py post_password and web/deletion.py post_request allow 10 mails per minute per address with no bot check, to anyone who knows an approved or guest address.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o4",
+      "claim_id": "c20",
+      "seam": "mail adapter, all senders",
+      "behavior": "total sends in a window never exceed the mail ceiling, whichever path sent them",
+      "source_text": "All outgoing mail has a total ceiling below the provider quota, and set-password and delete-confirm mail get an hourly per-address limit. Today web/setpw.py post_password and web/deletion.py post_request allow 10 mails per minute per address with no bot check, to anyone who knows an approved or guest address.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o5",
+      "claim_id": "c21",
+      "seam": "POST /entry/signin, guest path",
+      "behavior": "one IP alone can't use the whole hourly guest budget; other IPs still get codes",
+      "source_text": "The guest budget gets an hourly per-IP cap beside it, and exhausting the budget is treated as a denial of guest sign-in, not only as protection: 20 scripted posts an hour would stop real guests, who still see the normal code page because entry.py keeps responses identical.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o6",
+      "claim_id": "c21",
+      "seam": "delivery alert",
+      "behavior": "a budget-hit alert fires and says real guests may be getting no mail",
+      "source_text": "The guest budget gets an hourly per-IP cap beside it, and exhausting the budget is treated as a denial of guest sign-in, not only as protection: 20 scripted posts an hour would stop real guests, who still see the normal code page because entry.py keeps responses identical.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o7",
+      "claim_id": "c4",
+      "seam": "POST /entry/signin, guest path",
+      "behavior": "a reserved-domain address never reaches the mail adapter, and status, body apart from the echoed address, cookie presence and timing floor match a normal guest submission",
+      "source_text": "Reserved domains are refused before any provider call, keeping the same status, page, pending cookie, pad floor, attempt counting and dummy verify as a normal submission (entry.py:653-678), so a refusal reveals nothing.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o8",
+      "claim_id": "c5",
+      "seam": "send_with_alert",
+      "behavior": "a recipient error raises no alert and doesn't use up the alert slot; a 5xx or network failure alerts",
+      "source_text": "Provider failures are classified so recipient errors don't alert, each failure logs its HTTP status but never the address or body, and failed sends are counted in metrics. classify (alerts.py:48) separates only 429 today; MailSendError.status exists; failures log the type alone (entry.py:549,571).",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o9",
+      "claim_id": "c5",
+      "seam": "console log on failed send",
+      "behavior": "the line includes the HTTP status and never the address, code or provider body",
+      "source_text": "Provider failures are classified so recipient errors don't alert, each failure logs its HTTP status but never the address or body, and failed sends are counted in metrics. classify (alerts.py:48) separates only 429 today; MailSendError.status exists; failures log the type alone (entry.py:549,571).",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o10",
+      "claim_id": "c6",
+      "seam": "console startup, doctor",
+      "behavior": "guest mode on with no Turnstile keys gives one startup warning and a doctor finding; with keys set, neither",
+      "source_text": "With guest mode on and no bot check configured, the console warns at startup and in doctor, and a setting can refuse guest codes in that state. make_bot_verifier silently returns NoopVerifier (entry.py:193-200), and doctor (cli/_meta.py:317) has no such check.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o11",
+      "claim_id": "c26",
+      "seam": "POST /entry/signin, approved path with Turnstile on",
+      "behavior": "a trusted browser signs in while verify is failing; an untrusted browser doesn't",
+      "source_text": "With Turnstile on, already-trusted approved browsers skip the verify, so approved access survives a Cloudflare outage. New browsers stay blocked until verify recovers.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o12",
+      "claim_id": "c22",
+      "seam": "console config",
+      "behavior": "changing config and restarting lifts the budget and required bot check, restoring guest mail with no code change",
+      "source_text": "Operators can lift or reset the budget and turn off required bot check through config, with no code change, and the rollback steps are documented.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o13",
+      "claim_id": "c8",
+      "seam": "approved sign-in",
+      "behavior": "the existing approved sign-in tests pass unchanged",
+      "source_text": "No change to the approved sign-in flow or its alerts; irc-lens#69 owns those.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o14",
+      "claim_id": "c18",
+      "seam": "threat detection rules",
+      "behavior": "a window crossing a trigger raises an alert with its counts, whatever Clef answers",
+      "source_text": "Clef is a layer in the console's threat detection, across public traffic and not only sign-in: fixed rules watch counts of sign-in activity, mail spend, probed paths, 401 and 403 responses, and when a window crosses a trigger the console sends the decider (Clef, general domain) counts only and raises an operator alert with its threat verdict and the numbers. Clef detects and never enforces; the bot check, limits and budget do the blocking.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o15",
+      "claim_id": "c18",
+      "seam": "decider request",
+      "behavior": "the request body holds derived counts only: no address, IP, user agent or path text",
+      "source_text": "Clef is a layer in the console's threat detection, across public traffic and not only sign-in: fixed rules watch counts of sign-in activity, mail spend, probed paths, 401 and 403 responses, and when a window crosses a trigger the console sends the decider (Clef, general domain) counts only and raises an operator alert with its threat verdict and the numbers. Clef detects and never enforces; the bot check, limits and budget do the blocking.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o16",
+      "claim_id": "c18",
+      "seam": "decider down or hanging",
+      "behavior": "sign-in behaves the same, and the alert still goes out marked not assessed",
+      "source_text": "Clef is a layer in the console's threat detection, across public traffic and not only sign-in: fixed rules watch counts of sign-in activity, mail spend, probed paths, 401 and 403 responses, and when a window crosses a trigger the console sends the decider (Clef, general domain) counts only and raises an operator alert with its threat verdict and the numbers. Clef detects and never enforces; the bot check, limits and budget do the blocking.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o17",
+      "claim_id": "c19",
+      "seam": "request path under load",
+      "behavior": "10000 requests in a window cause at most 1 decider call, fixed-size counter state and no added database writes",
+      "source_text": "Threat detection stays cheap and can't be driven by attackers. Counting per request is in memory, with no database write or network call. Clef runs at most once per 15-minute window and at most 24 times a day, only after a rule triggers, with one call in flight, a 5 second timeout and no retries or queue: a skipped call is dropped and the alert says not assessed. These caps are config defaults and hold under any traffic volume.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o18",
+      "claim_id": "c23",
+      "seam": "console with no decider configured",
+      "behavior": "startup is clean and every other layer works",
+      "source_text": "Clef detection is optional and off by default: decider URL and credential come from config and an env var, and a deployment with no gateway, such as a standby host or an outside user of irc-lens, runs every other layer unchanged.",
+      "origin": "llm",
+      "status": "approved"
+    },
+    {
+      "id": "o19",
+      "claim_id": "c25",
+      "seam": "probe counter",
+      "behavior": "an unrouted path counts as a probe, and a 401 on a real route doesn't",
+      "source_text": "Probe counting uses route matching in middleware, not status codes: anonymous requests to real and nonexistent paths both get 401, because auth runs first (auth.py:97 reads match_info), so status can't separate a probe from a mistake.",
+      "origin": "llm",
+      "status": "approved"
+    }
+  ]
+}

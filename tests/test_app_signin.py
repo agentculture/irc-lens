@@ -51,7 +51,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from _agentirc_server import AgentIRCTestServer
 from _jwks_server import FakeJWKS
-from irc_lens import guest_store, metrics
+from irc_lens import guest_store, metrics, threat
 from irc_lens.guest_store import GuestStore
 from irc_lens.mail import RecordingAdapter
 from irc_lens.session import Session
@@ -270,6 +270,78 @@ async def test_signin_four_cases_identical_and_floored(env: Env) -> None:
         (ALICE, "Your chat.culture.dev sign-in code"),
         (UNKNOWN, "Your chat.culture.dev code"),
     ]
+
+
+async def test_exhausted_guest_budget_blocks_adapter_but_not_approved_mail(
+    env: Env,
+) -> None:
+    env.state.config = dataclasses.replace(
+        env.state.config,
+        guest_mail_daily_budget=0,
+        guest_mail_hourly_budget=0,
+    )
+
+    await env.signin(UNKNOWN, WRONG_PW, ip="192.0.2.1")
+    await env.drain()
+    assert env.mail.sent == []
+    assert (
+        env.app[threat.THREAT_COUNTERS]
+        .snapshot()
+        .counts[threat.Signal.BUDGET_HITS]
+        == 1
+    )
+
+    await env.signin(ALICE, PW, ip="192.0.2.1")
+    await env.drain()
+    assert [recipient for recipient, _subject, _body in env.mail.sent] == [ALICE]
+
+
+async def test_one_ip_leaves_an_hourly_guest_mail_slot_for_another(
+    env: Env,
+) -> None:
+    env.state.config = dataclasses.replace(
+        env.state.config,
+        guest_mail_daily_budget=10,
+        guest_mail_hourly_budget=3,
+    )
+    same_ip = "192.0.2.10"
+    for local in ("one", "two", "three"):
+        await env.signin(f"{local}@example.org", WRONG_PW, ip=same_ip)
+    await env.drain()
+    assert len(env.mail.sent) == 2
+
+    await env.signin("four@example.org", WRONG_PW, ip="192.0.2.11")
+    await env.drain()
+    assert len(env.mail.sent) == 3
+
+    await env.signin("five@example.org", WRONG_PW, ip="192.0.2.12")
+    await env.drain()
+    assert len(env.mail.sent) == 3
+
+
+async def test_guest_budget_counts_before_background_send_runs(env: Env) -> None:
+    env.state.config = dataclasses.replace(
+        env.state.config,
+        guest_mail_daily_budget=1,
+        guest_mail_hourly_budget=2,
+    )
+    gated = GatedAdapter()
+    env.state.mailer = gated
+
+    first = await env.signin(UNKNOWN, WRONG_PW, ip="192.0.2.20")
+    assert first.status == 200
+    assert len(env.state.mail_tasks) == 1
+
+    # The budget is taken in the background task, before its send: the first
+    # task holds the only daily slot while its send is blocked, so the
+    # second sign-in's task finds the budget used up and sends nothing.
+    assert await asyncio.to_thread(gated.entered.wait, 5)
+    second = await env.signin("other@example.org", WRONG_PW, ip="192.0.2.21")
+    assert second.status == 200
+
+    gated.release.set()
+    await env.drain()
+    assert len(gated.sent) == 1
 
 
 async def test_signin_mail_is_sent_off_the_request_path(env: Env) -> None:

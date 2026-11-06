@@ -10,6 +10,9 @@ from irc_lens.cli._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import load_config
 
 
+DECIDER_URL = "http://127.0.0.1:8001/v1/systemone"
+
+
 def _write(tmp_path: Path, body: str) -> Path:
     p = tmp_path / "config.yaml"
     p.write_text(body)
@@ -41,9 +44,71 @@ def test_guest_mode_absent_uses_defaults(tmp_path: Path) -> None:
     assert cfg.guest_mail_provider == "none"
     assert cfg.guest_mail_from == ""
     assert cfg.guest_mail_api_key_env == "IRC_LENS_MAIL_API_KEY"
+    assert cfg.guest_mail_daily_budget == 50
+    assert cfg.guest_mail_hourly_budget == 20
     assert cfg.guest_rate_entry_per_min == 10
     assert cfg.guest_rate_messages_per_min == 20
     assert cfg.guest_rate_password_attempts_per_15min == 5
+    assert cfg.guest_max_pending_per_address == 1
+    assert cfg.threat_refused_responses_threshold == 50
+    assert cfg.threat_entry_posts_threshold == 10
+    assert cfg.threat_reserved_addresses_threshold == 1
+    assert cfg.threat_failed_sends_threshold == 1
+    assert cfg.threat_budget_hits_threshold == 1
+    assert cfg.threat_decider_url is None
+    assert cfg.threat_decider_credential_env is None
+
+
+def test_threat_rule_thresholds_are_configurable(tmp_path: Path) -> None:
+    cfg = load_config(
+        _write(
+            tmp_path,
+            _base("""
+threat_rules:
+  refused_responses: 60
+  entry_posts: 12
+  reserved_addresses: 2
+  failed_sends: 3
+  budget_hits: 4
+"""),
+        )
+    )
+    assert cfg.threat_refused_responses_threshold == 60
+    assert cfg.threat_entry_posts_threshold == 12
+    assert cfg.threat_reserved_addresses_threshold == 2
+    assert cfg.threat_failed_sends_threshold == 3
+    assert cfg.threat_budget_hits_threshold == 4
+
+
+def test_threat_decider_config_uses_url_and_credential_env_name(tmp_path: Path) -> None:
+    cfg = load_config(
+        _write(
+            tmp_path,
+            _base("""
+threat_rules:
+  decider_url: http://127.0.0.1:8001/v1/systemone
+  decider_credential_env: CLEF_GATEWAY_KEY
+"""),
+        )
+    )
+
+    assert cfg.threat_decider_url == DECIDER_URL
+    assert cfg.threat_decider_credential_env == "CLEF_GATEWAY_KEY"
+
+
+def test_threat_decider_config_requires_url_and_env_name_together(
+    tmp_path: Path,
+) -> None:
+    config_path = _write(
+        tmp_path,
+        _base("""
+threat_rules:
+  decider_url: http://127.0.0.1:8001/v1/systemone
+"""),
+    )
+
+    with pytest.raises(AfiError, match="must be set together"):
+        load_config(config_path)
 
 
 def test_guest_mode_with_all_fields(tmp_path: Path) -> None:
@@ -54,6 +119,7 @@ def test_guest_mode_with_all_fields(tmp_path: Path) -> None:
             _base("""
 guest_mode:
   enabled: true
+  max_pending_per_address: 2
   sandbox:
     name: sbx
     host: 127.0.0.1
@@ -64,6 +130,8 @@ guest_mode:
     provider: none
     from: ""
     api_key_env: IRC_LENS_MAIL_API_KEY
+    daily_budget: 75
+    hourly_budget: 25
   rate_limits:
     entry_per_min: 10
     messages_per_min: 20
@@ -80,9 +148,12 @@ guest_mode:
     assert cfg.guest_mail_provider == "none"
     assert cfg.guest_mail_from == ""
     assert cfg.guest_mail_api_key_env == "IRC_LENS_MAIL_API_KEY"
+    assert cfg.guest_mail_daily_budget == 75
+    assert cfg.guest_mail_hourly_budget == 25
     assert cfg.guest_rate_entry_per_min == 10
     assert cfg.guest_rate_messages_per_min == 20
     assert cfg.guest_rate_password_attempts_per_15min == 5
+    assert cfg.guest_max_pending_per_address == 2
 
 
 def test_guest_mode_partial_merges_defaults(tmp_path: Path) -> None:

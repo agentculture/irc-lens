@@ -18,6 +18,7 @@ Acceptance criteria / obligations covered:
 
 from __future__ import annotations
 
+import dataclasses
 import re
 import secrets
 import statistics
@@ -30,7 +31,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from _jwks_server import FakeJWKS
-from irc_lens import legal, metrics
+from irc_lens import legal, metrics, threat
 from irc_lens.config import LensConfig
 from irc_lens.guest_store import GuestStore
 from irc_lens.mail import RecordingAdapter, render_token_email
@@ -185,6 +186,17 @@ async def _request_token(h: Harness, email=GUEST, nickname="maya", ip="203.0.113
         {"email": email, "nickname": nickname, "consent": "on"},
         ip=ip,
     )
+
+
+async def test_legacy_guest_code_respects_zero_mail_budget(h: Harness) -> None:
+    h.state.config = dataclasses.replace(
+        h.state.config,
+        guest_mail_daily_budget=0,
+        guest_mail_hourly_budget=0,
+    )
+    response = await _request_token(h)
+    assert response.status == 200
+    assert h.mail.sent == []
 
 
 # ---------------------------------------------------------------------------
@@ -562,6 +574,40 @@ async def test_consent_required(h):
     assert r.status == 400
     assert h.mail.sent == []
     assert 'name="consent"' in await r.text()
+
+
+@pytest.mark.reserved_domains
+@pytest.mark.parametrize(
+    "address,reserved",
+    [
+        ("a@example.com", True),
+        ("a@mail.example.org", True),
+        ("a@example.net", True),
+        ("a@host.test", True),
+        ("a@x.invalid", True),
+        ("a@box.localhost", True),
+        ("a@docs.example", True),
+        ("a@gmail.com", False),
+        ("a@example.com.au", False),
+        ("a@notexample.com", False),
+        ("a@test.com", False),
+        ("a@example.com.", True),
+        ("a@foo.test.", True),
+        ("a@[127.0.0.1]", True),
+    ],
+)
+def test_reserved_address(address, reserved):
+    assert entry._reserved_address(address) is reserved
+
+
+@pytest.mark.reserved_domains
+async def test_guest_start_sends_nothing_to_a_reserved_address(h):
+    real = await _request_token(h, email="someone@culture-guest.net", nickname="maya")
+    reserved = await _request_token(h, email="probe@example.com", nickname="zed")
+    assert reserved.status == real.status == 200
+    assert [to for to, _s, _b in h.mail.sent] == ["someone@culture-guest.net"]
+    counts = h.client.app[threat.THREAT_COUNTERS].snapshot().counts
+    assert counts[threat.Signal.RESERVED_ADDRESSES] == 1
 
 
 async def test_guest_start_bot_check(h):

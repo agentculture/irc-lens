@@ -115,6 +115,7 @@ def test_new_counters() -> None:
         "sessions_ended",
         "guest_busy",
         "delivery_alerts",
+        "failed_sends",
     ):
         assert snap[key] == 0
     m.signin_code_sent()
@@ -123,9 +124,11 @@ def test_new_counters() -> None:
     m.session_ended()
     m.guest_busy()
     m.delivery_alert()
+    m.failed_send()
     snap = m.snapshot()
     assert snap["signin_codes_sent"] == 1
     assert snap["sessions_started"] == 2
     assert snap["sessions_ended"] == 1
     assert snap["guest_busy"] == 1
     assert snap["delivery_alerts"] == 1
+    assert snap["failed_sends"] == 1

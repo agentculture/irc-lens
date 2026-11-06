@@ -16,6 +16,8 @@ guest_mode:
     flag_log: ~/.culture/sandbox/flags.jsonl  # deletion purges it
   idle_close_s: 900         # sign off a guest after this long with no action
   max_guests: 1             # concurrent guests allowed (Guest view never counts)
+  max_pending_per_address: 1 # unopened seat reservations per client address
+  require_bot_check: false  # set true only after both Turnstile keys are live
   retention_days: 90        # erase guests inactive this many days
   store_path: ~/.local/share/irc-lens/guests.db   # default: $XDG_DATA_HOME/irc-lens/guests.db
   legal_version_url: https://culture.dev/legal/version.json
@@ -23,6 +25,10 @@ guest_mode:
     provider: none
     from: "CULTURE.DEV <no-reply@culture.dev>"
     api_key_env: IRC_LENS_MAIL_API_KEY            # env var holding the provider key
+    daily_budget: 50          # guest code mail across all visitors per 24 hours
+    hourly_budget: 20         # guest code mail across all visitors per hour
+    ip_hourly_budget: 5       # guest code mail from one IP per hour
+    total_daily_ceiling: 90   # all mail, every path, per rolling day
     alert_url: ""             # optional delivery-alert webhook (https; http only for 127.0.0.1/localhost)
     alert_secret_env: ""      # env var holding the alert webhook secret
   rate_limits:
@@ -41,12 +47,18 @@ guest_mode:
 | `sandbox.flag_log` | `guest_sandbox_flag_log` | unset (required for full deletion) |
 | `idle_close_s` | `guest_idle_close_s` | `900` |
 | `max_guests` | `guest_max_guests` | `1` |
+| `max_pending_per_address` | `guest_max_pending_per_address` | `1` |
+| `require_bot_check` | `guest_require_bot_check` | `false` |
 | `retention_days` | `guest_retention_days` | `90` |
 | `store_path` | `guest_store_path` | `$XDG_DATA_HOME/irc-lens/guests.db` |
 | `legal_version_url` | `guest_legal_version_url` | `https://culture.dev/legal/version.json` |
 | `mail.provider` | `guest_mail_provider` | `none` |
 | `mail.from` | `guest_mail_from` | `""` |
 | `mail.api_key_env` | `guest_mail_api_key_env` | `IRC_LENS_MAIL_API_KEY` |
+| `mail.daily_budget` | `guest_mail_daily_budget` | `50` |
+| `mail.hourly_budget` | `guest_mail_hourly_budget` | `20` |
+| `mail.ip_hourly_budget` | `guest_mail_ip_hourly_budget` | `5` |
+| `mail.total_daily_ceiling` | `guest_mail_total_daily_ceiling` | `90` |
 | `mail.alert_url` | `guest_mail_alert_url` | unset (alerts off) |
 | `mail.alert_secret_env` | `guest_mail_alert_secret_env` | unset |
 | `rate_limits.entry_per_min` | `guest_rate_entry_per_min` | `10` |
@@ -56,10 +68,120 @@ guest_mode:
 Validation: every sub-section must be a mapping; unknown keys anywhere in the
 section are rejected (typo guard); `enabled` must be a boolean, ports go
 through the shared port check, `legal_version_url` must be an `http(s)` URL
-with a host, rate limits must be integers, and `idle_close_s` and
-`retention_days` must be positive integers, as must `max_guests`.
+with a host, mail budgets must be non-negative integers, rate limits must be
+integers, and `idle_close_s` and
+`retention_days`, `max_guests`, and `max_pending_per_address` must be positive
+integers.
 `mail.alert_url`, when set, must be an `https` URL (plain `http` is accepted
 only for `127.0.0.1` / `localhost`).
+
+## Bot check: enable, verify, then require
+
+Guest mode starts without a bot check unless both
+`IRC_LENS_TURNSTILE_SITE_KEY` and `IRC_LENS_TURNSTILE_SECRET` are present in
+the service environment. With either key missing, startup logs this warning:
+
+```text
+guest mode is on with no bot check: set IRC_LENS_TURNSTILE_SITE_KEY and IRC_LENS_TURNSTILE_SECRET to turn on Turnstile (docs/guest-mode-config.md)
+```
+
+Leave `require_bot_check: false` while first deploying the keys. Verify a real
+guest sign-in through every public ingress, run `irc-lens doctor`, then set the
+switch to `true` and restart. If the switch is true but the keys are absent,
+guest mail is refused; approved sign-in remains available. For rollback, set
+the switch back to false and restart. Removing the keys also disables the
+widget, but it is not the preferred rollback because it makes the deployment
+state less explicit.
+
+## Operator view and logs
+
+An approved operator can open `GET /owner/metrics` (an admin when email-keyed
+permissions are enabled); anonymous and guest users cannot. The existing
+`counters`, `access`, and `agent` objects are unchanged.
+Two additional objects expose the hardening state without reading
+`guests.db`:
+
+- `bot_check` has `configured`, `required`, `status`, and `warning`. Status is
+  `disabled`, `off`, `optional`, `required`, or `missing` (required but not
+  configured). When guest mode is enabled with no check configured, `warning`
+  is the same text emitted at startup.
+- `threat` is the current 15-minute window. It contains only fixed-name
+  integer `counts`, `distinct_sources`, `source_count_capped`, and
+  `window_seconds`. It contains no address, path, user agent, email, or source
+  hash. The counter window resets in memory; this is operational telemetry,
+  not an audit log.
+
+The threat count names are `requests`, `probes`, `refused_responses`,
+`entry_posts`, `mail_sends`, `reserved_addresses`, `failed_sends`,
+`budget_hits`, `messages_blocked`, `messages_flagged`, and
+`messages_unchecked`. `budget_hits` means a guest request reached a mail
+budget with no slot left; `mail_sends` means a guest slot was reserved before
+the background adapter call, not that the provider delivered it.
+
+Process counters such as `delivery_alerts` and `failed_sends` reset on
+restart. Guest budget attempts remain persistent in the configured guest
+store. A provider failure logs `mail send failed: HTTP <status>` (or
+`network error`) without logging the recipient, code, provider response, or
+remediation. Recipient-specific 400/404/422 failures increment
+`failed_sends` but do not send delivery alerts. Review service logs with the
+deployment's normal journal tooling, for example:
+
+```sh
+journalctl -u irc-lens --since today | grep -E 'no bot check|mail send failed|fixed threat rule'
+```
+
+Opening the database is neither required nor recommended during incident
+triage: use the startup/doctor warning, service logs, and `/owner/metrics`.
+
+## Advisory threat verdicts
+
+Fixed threat rules work without Clef and are unchanged when this section is
+absent. To add a counts-only advisory verdict to rule alerts, configure the
+gateway URL and name the environment variable holding its credential:
+
+```yaml
+threat_rules:
+  decider_url: http://127.0.0.1:8001/v1/systemone
+  decider_credential_env: CLEF_GATEWAY_KEY
+```
+
+Both keys are required together. Plain HTTP is accepted only for a loopback
+gateway. Clef receives aggregate 15-minute counts, never addresses, paths,
+user agents, or other visitor strings. It never blocks traffic: rule alerts
+remain urgent regardless of its advisory `genuine`, `abusive`, or `unclear`
+verdict. Calls time out after five seconds, are never retried or queued, and
+are capped at one per counter window and 24 per rolling day. With Clef off,
+unavailable, busy, or capped, the alert says `not assessed`.
+
+## Guest mail budget and rollback
+
+Every mail the console sends, from every path (guest codes, approved sign-in
+codes and notices, set-password links and deletion codes), passes one ceiling
+of `mail.total_daily_ceiling` per rolling day, set below the provider's
+100-a-day limit. The last quarter of it is kept for approved users' sign-in
+codes and new-browser notices, so set-password, deletion and guest mail can
+never starve them. A refusal logs `mail send refused`, counts in
+`failed_sends` and raises a `ceiling` alert. It is counted in memory, so a
+restart starts it again; the guest budget below is the persistent limit. Set-password and deletion mail are
+also limited to 5 per address per hour, beside the usual per-IP limit.
+
+Guest code mail has a persistent global budget of `mail.daily_budget` per
+rolling 24 hours and `mail.hourly_budget` per rolling hour. One source IP may
+use at most `mail.ip_hourly_budget` of those per hour, and never more than one
+less than the hourly budget, so a slot always remains for another guest; an
+hourly budget of one therefore permits no source to send guest code mail.
+Counts are stored in the guest database before a send is scheduled, so they
+survive restarts and cannot be bypassed by slow background sends. Approved
+sign-in codes, new-browser notices and set-password mail do not use this guest
+budget. Setting either budget to `0` stops guest code mail while approved mail
+continues.
+
+To restore guest mail after a budget was deliberately lowered or exhausted,
+raise `guest_mode.mail.daily_budget` and/or
+`guest_mode.mail.hourly_budget` in the private config, then restart
+`irc-lens serve`. The existing rolling counts remain in the guest database;
+the newly loaded limits take effect immediately after that restart. Keep live
+deployment values in the private config rather than in this public document.
 
 ## App sign-in switch
 
@@ -218,18 +340,116 @@ flow (`/entry/guest*`, `/entry/verify`) again.
 
 ## Delivery alerts
 
-When the Resend adapter fails to send (any HTTP error, including 429 quota
-exhaustion, or a network error) and `guest_mode.mail.alert_url` is set, the
-lens posts `{"kind": "quota" | "send_failed", "message": ...}` as JSON to that
-URL with `Authorization: Bearer <secret>`, the secret read from the env var
-named by `guest_mode.mail.alert_secret_env`. The receiver is a small
-Cloudflare email Worker that mails the approved users; the message says
-sign-in and guest codes are not being delivered and that approved users can
-still sign in at `/login`. At most one alert per kind per hour; the post runs
-on a daemon thread and any failure is logged and swallowed. The payload never
-contains a recipient address, a code or the provider's response. With
-`alert_url` unset (default) alerts are off. Each alert increments
-`delivery_alerts`.
+When a send fails in a way that means mail isn't flowing, and
+`guest_mode.mail.alert_url` is set, the lens posts `{"kind": ..., "message": ...}`
+as JSON to that URL with `Authorization: Bearer <secret>`, the secret read from
+the env var named by `guest_mode.mail.alert_secret_env`. The kinds:
+
+| Kind | Cause |
+| --- | --- |
+| `authentication` | HTTP 401: the API key is wrong or revoked |
+| `forbidden` | HTTP 403: the sender is rejected, or Cloudflare blocked the lens's requests |
+| `quota` | HTTP 429: the quota is used up, or the short per-second rate limit |
+| `provider` | HTTP 5xx from the provider |
+| `network` | No HTTP answer |
+
+Other statuses, such as 400, 404 and 422, are about one recipient. They don't
+alert and don't use up a kind's hourly slot, so a bad address can't hide a real
+outage. The receiver is a small Cloudflare email Worker that mails the approved
+users. The message says which mail isn't being delivered (guest and sign-in
+codes, sign-in notices, set-password links and deletion codes) and that
+approved users can still sign in at `/login`. At most one alert per kind per
+hour; the post runs on a daemon thread and any failure is logged and swallowed.
+The payload never contains a recipient address, a code or the provider's
+response. With `alert_url` unset (default) alerts are off.
+
+Every failed send logs `mail send failed: HTTP <status>` (or `network error`)
+and nothing else about the send, and increments `failed_sends`. Each alert
+posted increments `delivery_alerts`.
+
+## Threat rules
+
+The console counts request signals in memory in 15-minute windows: requests,
+probes of unrouted paths, refused (401 and 403) responses, entry posts, guest
+mail sends, reserved-address refusals, outage send failures (not recipient
+errors) and budget hits. It keeps
+counts and hashed source addresses only, never paths, addresses or user
+agents. A check every 5 seconds, off the request path, compares the counts
+with fixed triggers and posts one alert per window through the delivery-alert
+URL, within the usual one-per-kind-per-hour limit. The alert carries counts
+only; a budget-hit alert adds that real guests may be getting no mail.
+
+The triggers are a top-level `threat_rules:` section, each a positive count
+per window:
+
+```yaml
+threat_rules:
+  refused_responses: 50
+  entry_posts: 10
+  reserved_addresses: 1
+  failed_sends: 1
+  budget_hits: 1
+```
+
+Alert kinds: `rule-budget-hit`, `rule-failed-send`, `rule-reserved-address`
+and `rule-burst` (refused responses or entry posts).
+
+## Message validation (Clef)
+
+With `guest_mode.sandbox.validator` set, each chat or `/me` line a guest types
+in the sandbox is sent to the Clef decider before the demo agents see it.
+Approved users' lines, mesh lines and a guest's personal-agent lines are never
+sent. Clef answers a fixed choice question whose only keys are `allow` and
+`block`, so a line that asks Clef to allow it, or to answer in prose, can only
+produce one of those two keys; any other answer counts as no verdict.
+
+```yaml
+guest_mode:
+  sandbox:
+    validator:
+      url: http://127.0.0.1:8001/v1/systemone
+      credential_env: CLEF_GATEWAY_KEY   # the env var holding the credential
+      prompt_file: /path/outside/the/repo/clef-prompt.yaml
+      mode: flag                         # flag (default) or block
+      daily_cap: 500                     # calls per rolling day
+```
+
+`url`, `credential_env` and `prompt_file` are set together or not at all.
+The prompt file stays outside the repo and is never logged; edits take effect
+on the next line, with no restart. Its shape:
+
+```yaml
+state: <facts about the demo and what the agents may be asked>
+instructions: <the question Clef answers>
+criteria:
+  allow: <what an acceptable line looks like>
+  block: <what should never reach the agents>
+```
+
+The guest's line is appended to `state` as data. One call runs at a time per
+guest, with a 5-second timeout, in the validator's own small thread pool so a
+slow Clef can't hold up sign-in. One guest may use at most a tenth of
+`daily_cap`, so a single guest can't use it up for everyone. When Clef errs,
+times out, the prompt file is missing or invalid, or the cap or the guest's
+share is used up, the line is sent and counted as unchecked
+(`messages_unchecked`).
+
+In `flag` mode, a `block` answer is recorded and counted (`messages_flagged`)
+but the line is still sent, stored once as a review record. In `block` mode the
+line is refused with "Message not sent" (HTTP 422, which the refused-responses
+rule doesn't count) and never reaches the sandbox (`messages_blocked`). Flagged and
+blocked lines are stored with the guest's inputs, so deleting the guest
+erases them, and alerts carry counts only. Start in `flag` mode, measure the
+prompt on labelled lines (false blocks and misses), and switch to `block` only
+after the owner accepts the rates.
+
+`scripts/clef_lines.py` runs a labelled set (at least 40 lines labelled
+`benign`, `abusive` and `injection`, kept beside the prompt file and out of
+prompt tuning) through the validator exactly as the console would, and prints
+the false blocks and misses per label. First run, 2026-11-06, with a draft
+prompt on 48 held-out lines: 1 of 20 benign lines blocked, 12 of 12 abusive
+lines blocked, and 13 of 16 injection lines blocked (the 3 misses were polite
+requests for the prompt or a key, which tool-less agents can't act on).
 
 ## Set or reset password
 
@@ -255,7 +475,8 @@ replaces `/password/<token>` with `/password/[redacted]`.
 
 `/owner/metrics` also reports `signin_codes_sent` (app sign-in codes mailed),
 `sessions_started` / `sessions_ended` (app sessions), `guest_busy` (busy
-pages shown) and `delivery_alerts` (alerts posted). Counts only: no code,
+pages shown), `delivery_alerts` (alerts posted) and `failed_sends` (every
+failed send, alerted or not). Counts only: no code,
 session id, token or password is ever logged (`tests/test_log_hygiene.py`
 runs the sign-in, set-password, guest and deletion flows and checks every log
 record).
@@ -332,7 +553,20 @@ on startup (`ALTER TABLE ... ADD COLUMN`, guarded by `PRAGMA table_info`).
 Set both **`IRC_LENS_TURNSTILE_SITE_KEY`** and **`IRC_LENS_TURNSTILE_SECRET`**
 in the environment to put a Turnstile widget on the password and guest steps
 (verified server-side on sign-in and token request; a failed check is the
-generic error). Unset, the check is a no-op. Only responses that render the
+generic error). Unset, the check is a no-op, and with guest mode on
+`irc-lens serve` logs one warning at startup and `irc-lens doctor` reports a
+`guest bot check` warning. Doctor reads the keys from its own environment, so
+when they're injected only at serve time (for example by `grant run`), run
+doctor the same way.
+
+With `require_bot_check: true` and no keys, guest codes are refused (the
+sign-in page looks the same; the Guest mode start form shows the bot-check
+error). Approved sign-in still works. Leave it off until Turnstile is proven
+through the edge, then turn it on.
+
+A browser trusted for an approved email (`lens_device`) skips the widget on
+app sign-in, so a failing or missing widget never locks an approved user out.
+Untrusted browsers still need it. Only responses that render the
 widget get a CSP widened to `https://challenges.cloudflare.com`
 (`script-src`, `frame-src`, `connect-src`); every other page keeps
 `script-src 'self'`. Entry pages send `Referrer-Policy: same-origin` (not
@@ -363,7 +597,11 @@ with no open browser tab.
 
 At most `max_guests` guests are active at once: a guest with an open sandbox
 session, or one whose code was just verified (the slot is held for 120 s until
-the browser opens the chat). With app sign-in on, a guest is mailed a code
+the browser opens the chat). One client address may hold at most
+`max_pending_per_address` of those unopened reservations (default `1`); a
+different address can still reserve another available seat. Guest messages
+are limited to `rate_limits.messages_per_min` per minute (default `20`). With
+app sign-in on, a guest is mailed a code
 even while the sandbox is full (the browser can't be told it's a guest
 before the code) and sees `The sandbox is busy. Try again in a few minutes.`
 after a right code; the code stays usable. With the rollback switch off, a
@@ -404,8 +642,8 @@ shutdown):
   their consents) is older than `retention_days` (default 90) are erased by
   the same path as a self-service deletion — store rows, uploads and
   flag-log lines — and logged by hash;
-- tokens issued more than a day ago and rate-limit attempts older than a day
-  are removed;
+- tokens issued more than a day ago are removed; rate-limit attempts are kept
+  for 25 hours, giving the 24-hour guest-mail window a one-hour sweep margin;
 - bans older than 365 days are lifted.
 
 The agent state badge (`agent online` / `agent is warming up`) reflects whether the

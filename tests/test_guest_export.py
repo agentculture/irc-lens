@@ -166,3 +166,11 @@ def test_scrub_ipv6_forms_and_not_times() -> None:
     assert scrub_text("addr 2001:db8::ff00:42:8329.") == "addr [ip]."
     assert scrub_text("mapped ::ffff:192.0.2.1 x") == "mapped [ip] x"
     assert scrub_text("at 10:30:45 today") == "at 10:30:45 today"
+
+
+def test_lines_clef_blocked_or_flagged_are_not_training_data(store: GuestStore) -> None:
+    store.record_input("alice.wonder@example.com", kind="blocked", payload="BLOCKED-LINE")
+    store.record_input("alice.wonder@example.com", kind="flagged", payload="FLAGGED-LINE")
+    out = export_redacted(store)
+    assert "BLOCKED-LINE" not in out
+    assert "FLAGGED-LINE" not in out

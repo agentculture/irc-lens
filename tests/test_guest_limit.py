@@ -43,6 +43,7 @@ BUSY = "The sandbox is busy. Try again in a few minutes."
 APPROVED = "alice@example.com"
 ANN = "ann@example.org"
 BOB = "bob@example.org"
+CAL = "cal@example.org"
 IDLE_S = 900
 _SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 
@@ -128,9 +129,13 @@ class Env:
             "/entry/guest/start", {"email": email, "nickname": nick, "consent": "on"}
         )
 
-    async def verify(self, email: str, nick: str, code: str):
+    async def verify(
+        self, email: str, nick: str, code: str, headers: dict | None = None
+    ):
         resp = await self.post(
-            "/entry/verify", {"email": email, "nickname": nick, "code": code}
+            "/entry/verify",
+            {"email": email, "nickname": nick, "code": code},
+            headers,
         )
         if csrf.GUEST_COOKIE_NAME in resp.cookies:
             self.cookies[email] = resp.cookies[csrf.GUEST_COOKIE_NAME].value
@@ -242,6 +247,29 @@ async def test_simultaneous_verifies_admit_exactly_one(env: Env) -> None:
     assert page.status == 200
     assert env.registry.active_guest_count() == 1
     assert env.registry.has(f"guest:{winner}", "sandbox")
+
+
+async def test_pending_reservations_are_capped_per_address(env: Env) -> None:
+    """h32: one address cannot hold every seat with unopened reservations."""
+    object.__setattr__(env.app["config"], "guest_max_guests", 3)
+    for email, nick in ((ANN, "ann"), (BOB, "bob"), (CAL, "cal")):
+        await env.request_code(email, nick)
+
+    first = await env.verify(
+        ANN, "ann", env.code_for(ANN), {"CF-Connecting-IP": "192.0.2.1"}
+    )
+    capped = await env.verify(
+        BOB, "bob", env.code_for(BOB), {"CF-Connecting-IP": "192.0.2.1"}
+    )
+    other = await env.verify(
+        CAL, "cal", env.code_for(CAL), {"CF-Connecting-IP": "192.0.2.2"}
+    )
+
+    assert first.status == 303
+    assert capped.status == 200
+    assert BUSY in await capped.text()
+    assert other.status == 303
+    assert env.registry.active_guests() == {f"guest:{ANN}", f"guest:{CAL}"}
 
 
 async def test_verified_but_unopened_slot_expires(env: Env) -> None:
@@ -431,3 +459,29 @@ async def test_guest_sees_warming_up_until_sandbox_returns(env: Env) -> None:
     back = await env.client.get("/", headers=env.guest_headers(ANN))
     assert back.status == 200
     assert WARMING_UP not in await back.text()
+
+
+async def test_unexpected_open_failure_is_a_shaped_503(env: Env, monkeypatch, caplog) -> None:
+    """RT-14: a failure other than busy or a dead server never becomes a bare 500."""
+    await env.enter(ANN, "ann")
+    await env.registry.close(f"guest:{ANN}", "sandbox")
+
+    async def broken(*_args, **_kwargs):
+        raise RuntimeError("store busy")
+
+    monkeypatch.setattr(env.registry, "get_or_open", broken)
+
+    page = await env.client.get("/", headers=env.guest_headers(ANN))
+    assert page.status == 503
+    assert WARMING_UP in await page.text()
+
+    sent = await env.say(ANN)
+    assert sent.status == 503
+    assert sent.headers["HX-Redirect"] == "/"
+
+    logged = [r for r in caplog.records if r.getMessage().startswith("opening the session")]
+    assert {r.getMessage() for r in logged} == {
+        "opening the session for GET / failed",
+        "opening the session for /input failed",
+    }
+    assert all(r.exc_info and r.exc_info[0] is RuntimeError for r in logged)

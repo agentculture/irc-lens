@@ -38,7 +38,7 @@ from collections.abc import AsyncIterator
 import aiohttp
 from aiohttp import web
 
-from irc_lens import metrics
+from irc_lens import metrics, threat
 from irc_lens.commands import (
     DELETE_PAGE,
     SANDBOX_COMMAND,
@@ -47,9 +47,9 @@ from irc_lens.commands import (
     parse_command,
 )
 from irc_lens.session import LensConnectionLost, Session
-from irc_lens.web import app_session, input_gate
+from irc_lens.web import app_session, input_gate, message_check
 from irc_lens.web.auth import allows_anonymous
-from irc_lens.web.entry import client_ip
+from irc_lens.web.entry import ENTRY_STATE, NO_BOT_CHECK_WARNING, client_ip
 from irc_lens.web.events import format_sse
 from irc_lens.web.identity import TIER_ANONYMOUS, TIER_GUEST, Identity
 from irc_lens.web.render import (
@@ -669,6 +669,13 @@ async def get_index(request: web.Request) -> web.Response:
         from irc_lens.web import entry
 
         return entry.warming_up_page(request.app[entry.ENTRY_STATE])
+    except web.HTTPException:
+        raise
+    except Exception:  # noqa: BLE001 -- shaped 503 instead of a bare 500 (RT-14)
+        logger.exception("opening the session for GET / failed")
+        from irc_lens.web import entry
+
+        return entry.warming_up_page(request.app[entry.ENTRY_STATE])
     # Apply revoked grants before anything renders: prune channels the
     # viewer may no longer list and clear an unreadable current channel,
     # so neither the sidebar nor the chat log can name or show them.
@@ -762,6 +769,27 @@ async def _extract_text(request: web.Request) -> tuple[str | None, web.Response 
     return str(form.get("text", "")), None
 
 
+async def _input_session(request: web.Request):
+    """The sender's session, or the shaped response when it can't open."""
+    try:
+        return await _resolve_session(request), None
+    except GuestBusy:
+        # The page reloads into the busy message (c35).
+        return None, _json_error(
+            503,
+            "sandbox busy",
+            "The sandbox is busy. Try again in a few minutes.",
+            headers={"HX-Redirect": "/"},
+        )
+    except ConnectionError:
+        return None, _warming_up()
+    except web.HTTPException:
+        raise
+    except Exception:  # noqa: BLE001 -- shaped 503 instead of a bare 500 (RT-14)
+        logger.exception("opening the session for /input failed")
+        return None, _warming_up()
+
+
 @allows_anonymous
 async def post_input(request: web.Request) -> web.Response:
     """Parse one user input line and dispatch it through the session."""
@@ -780,18 +808,9 @@ async def post_input(request: web.Request) -> web.Response:
     if gated is not None:
         return gated
 
-    try:
-        session = await _resolve_session(request)
-    except GuestBusy:
-        # The page reloads into the busy message (c35).
-        return _json_error(
-            503,
-            "sandbox busy",
-            "The sandbox is busy. Try again in a few minutes.",
-            headers={"HX-Redirect": "/"},
-        )
-    except ConnectionError:
-        return _warming_up()
+    session, refusal = await _input_session(request)
+    if refusal is not None:
+        return refusal
     # Health gate before parsing: once the AgentIRC pipe is gone, the
     # spec mandates 503 on subsequent input rather than silently
     # no-oping (which is what `IRCTransport.send_raw` would do — its
@@ -814,13 +833,60 @@ async def post_input(request: web.Request) -> web.Response:
     if _is_sandbox_enter(request, parsed, text):
         request.app["sandbox_toggle"].add(request["identity"].principal)
         return web.Response(status=204, headers={"HX-Refresh": "true"})
+    outcome = await _check_guest_line(request, parsed, text)
+    if outcome == message_check.OUTCOME_BLOCK:
+        return _json_error(422, "Message not sent", "This message was flagged and not sent.")
     try:
         await session.execute(parsed)
     except LensConnectionLost as exc:
         return _session_lost(request, str(exc))
-    # The input log (shared gate): the export task reads these back.
-    input_gate.record(request.app, _input_actor(request), parsed, text)
+    # The input log (shared gate): the export task reads these back. A line
+    # Clef flagged is already stored once, as kind "flagged", so it stays a
+    # review record and out of the training export.
+    if outcome != message_check.OUTCOME_FLAG:
+        input_gate.record(request.app, _input_actor(request), parsed, text)
     return web.Response(status=204)
+
+
+#: Guest commands whose text the demo agents read (t15).
+_VALIDATED_TYPES = frozenset({CommandType.CHAT, CommandType.ME})
+_SIGNAL_FOR_OUTCOME = {
+    message_check.OUTCOME_BLOCK: threat.Signal.MESSAGES_BLOCKED,
+    message_check.OUTCOME_FLAG: threat.Signal.MESSAGES_FLAGGED,
+    message_check.OUTCOME_UNCHECKED: threat.Signal.MESSAGES_UNCHECKED,
+}
+_KIND_FOR_OUTCOME = {
+    message_check.OUTCOME_BLOCK: message_check.INPUT_KIND_BLOCKED,
+    message_check.OUTCOME_FLAG: message_check.INPUT_KIND_FLAGGED,
+}
+
+
+async def _check_guest_line(
+    request: web.Request, parsed: ParsedCommand, text: str
+) -> str | None:
+    """Clef's verdict on a guest's chat line before the agents see it (t15).
+
+    Only a human guest's lines on the sandbox go to Clef (c27). A block is
+    stored with the guest's inputs, so deleting the guest erases it (h31);
+    the threat counters see counts only.
+    """
+    validator = message_check.validator_for(request.app)
+    actor = _input_actor(request)
+    if (
+        validator is None
+        or actor.tier != TIER_GUEST
+        or actor.backend != BACKEND_SANDBOX
+        or parsed.type not in _VALIDATED_TYPES
+    ):
+        return None
+    outcome = await validator.check(actor.email, parsed.text or text)
+    signal = _SIGNAL_FOR_OUTCOME.get(outcome)
+    if signal is not None:
+        request.app[threat.THREAT_COUNTERS].increment(signal)
+    kind = _KIND_FOR_OUTCOME.get(outcome)
+    if kind is not None:
+        request.app["guest_store"].record_input(actor.email, kind=kind, payload=text)
+    return outcome
 
 
 def _touch(request: web.Request) -> None:
@@ -1021,6 +1087,13 @@ async def get_events(request: web.Request) -> web.StreamResponse:
         session = await _resolve_session(request, may_open_guest=False)
     except (GuestBusy, GuestSignedOff):
         return web.Response(status=204)
+    except ConnectionError:
+        return _warming_up()
+    except web.HTTPException:
+        raise
+    except Exception:  # noqa: BLE001 -- shaped 503 instead of a bare 500 (RT-14)
+        logger.exception("opening the session for the event stream failed")
+        return _warming_up()
     sub = session.event_bus.subscribe()
     # Re-send the member list once this stream is live: a roster update
     # published before the browser connected (e.g. the agent joining a
@@ -1196,8 +1269,41 @@ async def get_healthz(_request: web.Request) -> web.Response:  # NOSONAR S7503
     return web.json_response({"ok": True})
 
 
+def _owner_operational_state(app: web.Application) -> dict:
+    """Counts-only threat window and the effective guest bot-check state."""
+    snapshot = app[threat.THREAT_COUNTERS].snapshot()
+    entry_state = app[ENTRY_STATE]
+    enabled = entry_state.config.guest_enabled
+    configured = entry_state.verifier.site_key is not None
+    required = entry_state.config.guest_require_bot_check
+    if not enabled:
+        status = "disabled"
+    elif configured:
+        status = "required" if required else "optional"
+    else:
+        status = "missing" if required else "off"
+    return {
+        "threat": {
+            "window_seconds": threat.WINDOW_SECONDS,
+            "counts": {
+                signal.value: snapshot.counts[signal] for signal in threat.Signal
+            },
+            "distinct_sources": snapshot.distinct_sources,
+            "source_count_capped": snapshot.source_count_capped,
+        },
+        "bot_check": {
+            "configured": configured,
+            "required": required,
+            "status": status,
+            "warning": (
+                NO_BOT_CHECK_WARNING if enabled and not configured else None
+            ),
+        },
+    }
+
+
 async def get_owner_metrics(request: web.Request) -> web.Response:
-    """Owner-only guest-mode counters + sandbox-agent presence (JSON).
+    """Owner-only counters, bot-check state and sandbox-agent presence.
 
     Approved tier only. Deliberately NOT ``allows_anonymous``: the auth
     middleware already 401s anonymous requests; the tier check here also
@@ -1218,5 +1324,6 @@ async def get_owner_metrics(request: web.Request) -> web.Response:
             "counters": metrics.get_metrics().snapshot(),
             "access": access_counts,
             "agent": _owner_agent_state(request.app["registry"]),
+            **_owner_operational_state(request.app),
         }
     )

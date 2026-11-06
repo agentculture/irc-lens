@@ -15,6 +15,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from irc_lens import rules, threat
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig, resolve_access
 from irc_lens.web import (
@@ -25,6 +26,7 @@ from irc_lens.web import (
     csrf,
     deletion,
     entry,
+    message_check,
     nickname,
     retention,
     routes,
@@ -252,6 +254,7 @@ def make_app(
         client_max_size=config.media_max_file_bytes + _CLIENT_MAX_SIZE_MEDIA_HEADROOM,
         middlewares=[
             _security_headers_middleware,
+            threat.threat_middleware,
             standby.standby_middleware,
             csrf.csrf_middleware,
             middleware,
@@ -260,6 +263,7 @@ def make_app(
             nickname.nickname_gate,
         ],
     )
+    threat.install(app)
 
     csrf.install(app)
 
@@ -313,6 +317,8 @@ def make_app(
         agent_auth.install(app, sweep_interval_s=ban_sweep_interval_s)
     # Guest-mode entry card (/entry, /entry/*): 404 while guest mode is off.
     entry.install(app, config)
+    rules.install(app, app[entry.ENTRY_STATE].alerter, config)
+    message_check.install(app, config)
     if config.guest_enabled:
         deletion.install(app)
         if config.app_signin_enabled:

@@ -24,6 +24,8 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+from collections.abc import Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from irc_lens.cli._errors import EXIT_USER_ERROR, AfiError
@@ -307,9 +309,9 @@ def _render_doctor_text(subject: str, payload: dict[str, Any]) -> str:
     status = "healthy" if payload["healthy"] else "unhealthy"
     lines = [f"# doctor: {subject} — {status}", ""]
     for check in payload["checks"]:
-        mark = "ok" if check["passed"] else "FAIL"
+        mark = {"ok": "ok", "warn": "WARN"}.get(check["status"], "FAIL")
         lines.append(f"[{mark}] {check['name']}: {check['status']}")
-        if not check["passed"] and check["remediation"]:
+        if check["status"] != "ok" and check["remediation"]:
             lines.append(f"  hint: {check['remediation']}")
     return "\n".join(lines).rstrip() + "\n"
 
@@ -328,8 +330,33 @@ def build_doctor(app: "App") -> _DualView:
     sink = io.StringIO()
     with contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
         checks = run_doctor(app)
+    checks.append(bot_check_doctor())
     payload = _doctor_payload(subject, checks)
     return _DualView(payload, _render_doctor_text(subject, payload))
+
+
+def bot_check_doctor(
+    config_path: Path | None = None, env: Mapping[str, str] | None = None
+) -> "Check":
+    """Warn when guest mode is on with no bot check (t5, c6).
+
+    A warning, not a failure: the console still runs. Keys injected only at
+    serve time (``grant run``) need doctor run the same way to be seen.
+    """
+    from agentfront.doctor_live import Check
+
+    from irc_lens.config import default_config_path, load_config
+    from irc_lens.web.entry import NO_BOT_CHECK_WARNING, bot_check_configured
+
+    name = "guest bot check"
+    path = config_path or default_config_path()
+    try:
+        guest_on = load_config(path).guest_enabled if path.exists() else False
+    except Exception:  # noqa: BLE001 -- config errors are reported elsewhere
+        guest_on = False
+    if not guest_on or bot_check_configured(env):
+        return Check(name=name, status="ok", remediation="")
+    return Check(name=name, status="warn", remediation=NO_BOT_CHECK_WARNING)
 
 
 def doctor_command(app: "App", rest: list[str]) -> int:

@@ -22,7 +22,7 @@ import pytest
 
 from irc_lens.config import load_config
 from irc_lens.export import export_redacted
-from irc_lens.guest_store import GuestStore, email_hash
+from irc_lens.guest_store import ATTEMPT_RETENTION_S, GuestStore, email_hash
 from irc_lens.web import entry, retention
 
 # Fixtures (env / legal_server) and helpers reused from the admin suite.
@@ -353,12 +353,12 @@ def test_sweep_expires_tokens_older_than_a_day(tmp_path) -> None:
         assert con.execute("SELECT COUNT(*) FROM tokens").fetchone() == (1,)
 
 
-def test_sweep_expires_attempts_older_than_a_day(tmp_path) -> None:
+def test_sweep_expires_attempts_after_daily_window_margin(tmp_path) -> None:
     s, clock = _clocked(tmp_path)
     s.record_attempt("token", "i:10.0.0.1")
     clock[0] += DAY - 10
     s.record_attempt("token", "i:10.0.0.1")
-    counts = s.sweep(now=clock[0] + 20)
+    counts = s.sweep(now=clock[0] + ATTEMPT_RETENTION_S - DAY + 20)
     assert counts["attempts"] == 1
     with sqlite3.connect(s.path) as con:
         assert con.execute("SELECT COUNT(*) FROM attempts").fetchone() == (1,)

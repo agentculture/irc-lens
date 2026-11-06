@@ -5,11 +5,13 @@ from __future__ import annotations
 import dataclasses
 import json
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
 from irc_lens import mail
 from irc_lens._errors import AfiError
+from irc_lens import metrics
 from irc_lens.config import LensConfig
 from helpers import DEV_CONFIG
 
@@ -67,6 +69,96 @@ def test_recording_adapter_records_and_no_network(monkeypatch):
     rec.send("a@b.c", "s", "b")
     assert rec.sent == [("a@b.c", "s", "b")]
     assert isinstance(rec, mail.MailAdapter)
+
+
+def test_total_ceiling_counts_every_mail_path_before_adapter(monkeypatch) -> None:
+    adapter = mail.RecordingAdapter()
+    ceiling = mail.SendCeiling(limit=2, clock=lambda: 100.0)
+    monkeypatch.setattr(adapter, "_irc_lens_send_ceiling", ceiling, raising=False)
+    mail.send_with_alert(adapter, None, "guest@x.test", "guest code", "one")
+    mail.send_with_alert(adapter, None, "owner@x.test", "sign-in code", "two")
+
+    with pytest.raises(mail.MailCeilingError):
+        mail.send_with_alert(adapter, None, "member@x.test", "set password", "three")
+
+    assert len(adapter.sent) == 2
+
+
+def test_total_ceiling_is_a_rolling_day() -> None:
+    now = {"value": 100.0}
+    ceiling = mail.SendCeiling(limit=1, clock=lambda: now["value"])
+    assert ceiling.take()
+    assert not ceiling.take()
+    now["value"] += mail.TOTAL_SEND_WINDOW_S + 1
+    assert ceiling.take()
+
+
+def test_total_ceiling_cannot_be_raced() -> None:
+    ceiling = mail.SendCeiling(limit=3, clock=lambda: 100.0)
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        results = list(pool.map(lambda _index: ceiling.take(), range(20)))
+    assert sum(results) == 3
+
+
+def test_default_total_ceiling_stays_below_provider_quota() -> None:
+    adapter = mail.RecordingAdapter()
+    assert mail.TOTAL_SEND_LIMIT < mail.RESEND_DAILY_QUOTA
+    open_share = mail.TOTAL_SEND_LIMIT - mail.TOTAL_SEND_LIMIT // 4
+    for index in range(open_share):
+        mail.send_with_alert(adapter, None, "a@x.test", "subject", str(index))
+
+    # Mail anyone can trigger stops at three quarters of the ceiling...
+    with pytest.raises(mail.MailCeilingError):
+        mail.send_with_alert(adapter, None, "a@x.test", "subject", "over")
+    # ...and approved sign-in mail can still use the reserved quarter.
+    for index in range(mail.TOTAL_SEND_LIMIT - open_share):
+        mail.send_with_alert(adapter, None, "o@x.test", "code", str(index), priority=True)
+    with pytest.raises(mail.MailCeilingError):
+        mail.send_with_alert(adapter, None, "o@x.test", "code", "over", priority=True)
+
+    assert len(adapter.sent) == mail.TOTAL_SEND_LIMIT
+
+
+def test_ceiling_refusal_counts_and_alerts() -> None:
+    class Alerter:
+        def __init__(self) -> None:
+            self.kinds: list[str] = []
+            self.failed = 0
+
+        def failed_send(self) -> None:
+            self.failed += 1
+
+        def notify(self, kind: str, message: str) -> bool:
+            self.kinds.append(kind)
+            return True
+
+    adapter = mail.RecordingAdapter()
+    setattr(adapter, mail._CEILING_ATTR, mail.SendCeiling(limit=1))
+    alerter = Alerter()
+    mail.send_with_alert(adapter, alerter, "a@x.test", "subject", "first")
+    before = metrics.get_metrics().snapshot()["failed_sends"]
+    with pytest.raises(mail.MailCeilingError):
+        mail.send_with_alert(adapter, alerter, "a@x.test", "subject", "body")
+    assert alerter.kinds == ["ceiling"]
+    # The ceiling has its own alert; it doesn't also feed the failed-send rule.
+    assert alerter.failed == 0
+    assert metrics.get_metrics().snapshot()["failed_sends"] == before + 1
+
+
+def test_configured_ceiling_rides_on_the_app_adapter() -> None:
+    # provider: none raises its own error on every send it is allowed to try.
+    adapter = mail.make_adapter(_cfg(guest_mail_total_daily_ceiling=2))
+    errors = []
+    for _ in range(3):
+        try:
+            mail.send_with_alert(adapter, None, "a@x.test", "subject", "body")
+        except AfiError as exc:
+            errors.append(type(exc))
+    assert errors == [AfiError, AfiError, mail.MailCeilingError]
+
+
+def test_ceiling_config_defaults_to_ninety() -> None:
+    assert _cfg().guest_mail_total_daily_ceiling == mail.TOTAL_SEND_LIMIT == 90
 
 
 def test_none_provider_fails_clearly():
