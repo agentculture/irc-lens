@@ -27,9 +27,9 @@
   - honesty: With guest mode on and keys absent, startup logs one warning and doctor reports it; with keys set, neither does; and approved sign-in works in every mode.
 - Clef is a layer in the console's threat detection, across public traffic and not only sign-in: fixed rules watch counts of sign-in activity, mail spend, probed paths, 401 and 403 responses, and when a window crosses a trigger the console sends the decider (Clef, general domain) counts only and raises an operator alert with its threat verdict and the numbers. Clef detects and never enforces; the bot check, limits and budget do the blocking.
   - honesty: Sign-in never waits on or fails because of the decider: with the decider down, sign-in is unchanged and the numbers still reach the operator, marked as not assessed.
-  - honesty: The decider receives derived counts only, never addresses, IPs, user agents, paths or any other visitor-supplied string, so a visitor can't write into its prompt or send personal data across the mesh.
   - honesty: Verdicts are checked against labelled windows, including a real group of guests behind one IP, before the alert is trusted, and its misses are recorded.
   - honesty: A budget hit or a burst always alerts, whatever the decider says, so a wrong 'genuine' can't hide abuse.
+  - honesty: The threat detector's decider call receives derived counts only, never addresses, IPs, user agents, paths or any other visitor-supplied string; only the message validator in c30 sends a guest's line.
 - All outgoing mail has a total ceiling below the provider quota, and set-password and delete-confirm mail get an hourly per-address limit. Today web/setpw.py `post_password` and web/deletion.py `post_request` allow 10 mails per minute per address with no bot check, to anyone who knows an approved or guest address.
   - honesty: With guest budget unused, a test driving set-password or delete requests for one known address can't exceed its hourly limit, and total sends can't exceed the ceiling.
 - The guest budget gets an hourly per-IP cap beside it, and exhausting the budget is treated as a denial of guest sign-in, not only as protection: 20 scripted posts an hour would stop real guests, who still see the normal code page because entry.py keeps responses identical.
@@ -40,6 +40,17 @@
   - honesty: With no decider configured, startup is clean, rules still alert, and alerts say not assessed.
 - Probe counting uses route matching in middleware, not status codes: anonymous requests to real and nonexistent paths both get 401, because auth runs first (auth.py:97 reads `match_info`), so status can't separate a probe from a mistake.
   - honesty: A test shows a nonexistent path counts as a probe and a real route's 401 doesn't.
+- The message validator is a second Clef layer beside the counts-only detector in c18: it sends one guest line per call, takes its prompt and question from a config file outside the repo that the operator can change without a release, and turns the answer into allow or block only.
+  - honesty: With the validator configured, a guest line reaches the sandbox server only after an allow verdict, a decider error, or the 5 second timeout; a blocked line never reaches it.
+  - honesty: The prompt and question live only in the operator's config file: no prompt text is in the repo, the exported spec, or the logs, and editing the file changes the next call with no restart.
+  - honesty: A line that tells Clef to allow it, or asks for prose, still yields only allow or block, because the request is a choice question with fixed keys; tested with injection lines.
+  - honesty: Before blocking goes live, at least 40 labelled guest lines (benign, abusive, and injection attempts) are run through the configured prompt; benign lines blocked and abusive lines allowed are recorded, and the owner accepts the rates.
+  - honesty: Load stays bounded: one call per guest line, lines already capped by the guest message rate and guest limit, one call in flight per guest, a 5 second timeout, and a daily call cap in config after which lines go through marked unchecked.
+  - honesty: Blocked lines are kept with the guest's flags and erased by guest deletion; alerts carry counts only.
+- Red-team audit RT-01: a single address can't hold guest seats with pending reservations: a per-IP cap on open reservations, with the guest limit and message rate shown beside the other published limits (RT-08).
+  - honesty: A test opening reservations from one address past the cap gets the busy response, while a second address still gets a seat.
+- Red-team audit RT-14: any failure while opening or reopening a guest session answers with the shaped 503 warming-up or busy response, never a bare 500.
+  - honesty: A test that makes session opening raise an unexpected error gets a shaped 503, not a 500, and the error is logged.
 
 ## Honesty conditions
 
@@ -54,6 +65,7 @@
 - A test driving 10000 requests in a window with a fake clock and fake decider sees at most 1 Clef call, a fixed-size counter state, and no added database writes on the request path.
 - With the decider hanging, request latency is unchanged and the event loop isn't blocked, because the call runs off the request path with the timeout enforced.
 - Thresholds are re-checked on real counters before alerts are trusted, since 7 days is a short sample.
+- Each excluded audit item is either an owner step listed in the rollout task or a follow-up issue filed when this plan is approved.
 
 ## Success signals
 
@@ -63,7 +75,8 @@
 
 - Approved users' sign-in code, new-browser notice and set-password mail stay outside the budget (entry.py:663,732; setpw.py:196-205), so guests can never lock an owner out of signing in.
 - No change to the approved sign-in flow or its alerts; irc-lens#69 owns those.
-- Threat detection stays cheap and can't be driven by attackers. Counting per request is in memory, with no database write or network call. Clef runs at most once per 15-minute window and at most 24 times a day, only after a rule triggers, with one call in flight, a 5 second timeout and no retries or queue: a skipped call is dropped and the alert says not assessed. These caps are config defaults and hold under any traffic volume.
+- Threat detection stays cheap and can't be driven by attackers. Counting per request is in memory, with no database write or network call. The detector's Clef call runs at most once per 15-minute window and at most 24 times a day, only after a rule triggers, with one call in flight and a 5 second timeout. The message validator in c30 has its own bounds.
+- Not in this frame, from the red-team audit: HSTS and Cloudflare Access settings (owner's Cloudflare changes), the 0.0.0.0 IRC bind on thor (ops), webhook secret and read-loop bound (agentirc), per-principal media eviction and MCP resource metadata (later lens hygiene). Dependency currency (RT-02) was already met on spark on 2026-11-06.
 
 ## Non-goals
 
@@ -114,6 +127,9 @@
 - Bot check: warn now, set keys, then block on a missing check only after a real browser test passes through the Worker.
 - No visitor IPs in the access log.
 - With Turnstile on, already-trusted approved browsers skip the verify, so approved access survives a Cloudflare outage. New browsers stay blocked until verify recovers.
+- Owner decision 2026-11-06: Clef validates each guest chat line before the demo agents see it. Approved users' lines and mesh lines are never sent.
+- Owner decision 2026-11-06: a line Clef rejects is blocked and flagged: it never reaches the agents, the guest sees a short refusal, and it is logged and counted for the alert rules.
+- Owner decision 2026-11-06: when Clef is down or takes longer than 5 seconds, the line goes through marked unchecked, so the demo keeps working.
 
 ## Open parks
 

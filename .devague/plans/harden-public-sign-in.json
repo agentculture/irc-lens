@@ -5,7 +5,7 @@
   "schema_version": 5,
   "status": "exported",
   "created": "2026-11-04T17:54:11Z",
-  "updated": "2026-11-04T17:56:34Z",
+  "updated": "2026-11-06T13:16:03Z",
   "targets": [
     {
       "id": "c1",
@@ -190,13 +190,6 @@
       "deferred_reason": ""
     },
     {
-      "id": "h15",
-      "kind": "honesty",
-      "text": "The decider receives derived counts only, never addresses, IPs, user agents, paths or any other visitor-supplied string, so a visitor can't write into its prompt or send personal data across the mesh.",
-      "deferred": false,
-      "deferred_reason": ""
-    },
-    {
       "id": "h16",
       "kind": "honesty",
       "text": "Verdicts are checked against labelled windows, including a real group of guests behind one IP, before the alert is trusted, and its misses are recorded.",
@@ -211,9 +204,16 @@
       "deferred_reason": ""
     },
     {
+      "id": "h35",
+      "kind": "honesty",
+      "text": "The threat detector's decider call receives derived counts only, never addresses, IPs, user agents, paths or any other visitor-supplied string; only the message validator in c30 sends a guest's line.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
       "id": "c19",
       "kind": "boundary",
-      "text": "Threat detection stays cheap and can't be driven by attackers. Counting per request is in memory, with no database write or network call. Clef runs at most once per 15-minute window and at most 24 times a day, only after a rule triggers, with one call in flight, a 5 second timeout and no retries or queue: a skipped call is dropped and the alert says not assessed. These caps are config defaults and hold under any traffic volume.",
+      "text": "Threat detection stays cheap and can't be driven by attackers. Counting per request is in memory, with no database write or network call. The detector's Clef call runs at most once per 15-minute window and at most 24 times a day, only after a rule triggers, with one call in flight and a 5 second timeout. The message validator in c30 has its own bounds.",
       "deferred": false,
       "deferred_reason": ""
     },
@@ -298,6 +298,97 @@
       "id": "h25",
       "kind": "honesty",
       "text": "A test shows a nonexistent path counts as a probe and a real route's 401 doesn't.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c30",
+      "kind": "requirement",
+      "text": "The message validator is a second Clef layer beside the counts-only detector in c18: it sends one guest line per call, takes its prompt and question from a config file outside the repo that the operator can change without a release, and turns the answer into allow or block only.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h26",
+      "kind": "honesty",
+      "text": "With the validator configured, a guest line reaches the sandbox server only after an allow verdict, a decider error, or the 5 second timeout; a blocked line never reaches it.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h27",
+      "kind": "honesty",
+      "text": "The prompt and question live only in the operator's config file: no prompt text is in the repo, the exported spec, or the logs, and editing the file changes the next call with no restart.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h28",
+      "kind": "honesty",
+      "text": "A line that tells Clef to allow it, or asks for prose, still yields only allow or block, because the request is a choice question with fixed keys; tested with injection lines.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h29",
+      "kind": "honesty",
+      "text": "Before blocking goes live, at least 40 labelled guest lines (benign, abusive, and injection attempts) are run through the configured prompt; benign lines blocked and abusive lines allowed are recorded, and the owner accepts the rates.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h30",
+      "kind": "honesty",
+      "text": "Load stays bounded: one call per guest line, lines already capped by the guest message rate and guest limit, one call in flight per guest, a 5 second timeout, and a daily call cap in config after which lines go through marked unchecked.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h31",
+      "kind": "honesty",
+      "text": "Blocked lines are kept with the guest's flags and erased by guest deletion; alerts carry counts only.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c31",
+      "kind": "requirement",
+      "text": "Red-team audit RT-01: a single address can't hold guest seats with pending reservations: a per-IP cap on open reservations, with the guest limit and message rate shown beside the other published limits (RT-08).",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h32",
+      "kind": "honesty",
+      "text": "A test opening reservations from one address past the cap gets the busy response, while a second address still gets a seat.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c32",
+      "kind": "requirement",
+      "text": "Red-team audit RT-14: any failure while opening or reopening a guest session answers with the shaped 503 warming-up or busy response, never a bare 500.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h33",
+      "kind": "honesty",
+      "text": "A test that makes session opening raise an unexpected error gets a shaped 503, not a 500, and the error is logged.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "c33",
+      "kind": "boundary",
+      "text": "Not in this frame, from the red-team audit: HSTS and Cloudflare Access settings (owner's Cloudflare changes), the 0.0.0.0 IRC bind on thor (ops), webhook secret and read-loop bound (agentirc), per-principal media eviction and MCP resource metadata (later lens hygiene). Dependency currency (RT-02) was already met on spark on 2026-11-06.",
+      "deferred": false,
+      "deferred_reason": ""
+    },
+    {
+      "id": "h34",
+      "kind": "honesty",
+      "text": "Each excluded audit item is either an owner step listed in the rollout task or a follow-up issue filed when this plan is approved.",
       "deferred": false,
       "deferred_reason": ""
     }
@@ -463,7 +554,8 @@
         "h15",
         "h19",
         "c23",
-        "h23"
+        "h23",
+        "h35"
       ],
       "instruction": "New src/irc_lens/decider.py, off by default, with URL in config and credential from an env var. Runs off the request path. At most 1 call per window and 24 a day, one in flight, 5 second timeout, no retries or queue. Build the request from counters so that no visitor string can reach it. The verdict is labelled advisory."
     },
@@ -498,7 +590,9 @@
       "deps": [
         "t4",
         "t5",
-        "t8"
+        "t8",
+        "t12",
+        "t15"
       ],
       "covers": [
         "c1",
@@ -523,13 +617,109 @@
         "Live values and bot check state aren't written to the public repo"
       ],
       "deps": [
-        "t10"
+        "t10",
+        "t16"
       ],
       "covers": [
         "c22",
         "h22"
       ],
       "instruction": "With the owner, after the chat edge work is live. Set Turnstile keys in grant and enable them. Pass a real browser test directly and through the Worker, checking siteverify's visitor IP. Only then turn on require_bot_check. Set budget values in private config. Rehearse lifting the budget and turning the bot check off."
+    },
+    {
+      "id": "t12",
+      "summary": "Cap pending guest seats per address and publish the guest limits",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "A test opening reservations from one address past the cap gets the busy response while a second address still gets a seat",
+        "docs/guest-mode-config.md lists guest limit, message rate and the per-address reservation cap"
+      ],
+      "deps": [
+        "t5"
+      ],
+      "covers": [
+        "c31",
+        "h32"
+      ],
+      "instruction": "Own the reservation path: try_reserve_guest in web/sessions.py and its caller in web/entry.py, using the client address entry.py already resolves. The cap is a config value, default 1 pending reservation per address. Show the guest limit, the message rate and the new cap in docs/guest-mode-config.md beside the other published limits."
+    },
+    {
+      "id": "t13",
+      "summary": "Answer every guest session-open failure with a shaped 503",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "A test that makes session opening raise an unexpected error gets a shaped 503 for GET / and POST /input, not a 500",
+        "The unexpected error is logged with its traceback"
+      ],
+      "deps": [],
+      "covers": [
+        "c32",
+        "h33"
+      ],
+      "instruction": "Own the _resolve_session call sites in web/routes.py: get_index, post_input, get_presence and the event stream. Catch unexpected exceptions after the existing GuestBusy, GuestSignedOff and ConnectionError handlers, log them with logger.exception, and return the warming-up 503 (page for GET /, JSON with HX-Redirect for input). Keep mesh sessions' current behavior except that a bare 500 becomes a shaped 503."
+    },
+    {
+      "id": "t14",
+      "summary": "File the audit items this plan leaves out",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "Every audit item named in c33 has a linked issue or an owner step in t11"
+      ],
+      "deps": [],
+      "covers": [
+        "c33",
+        "h34"
+      ],
+      "instruction": "When the owner approves the split: open follow-up issues for the agentirc webhook secret and read-loop bound, lens per-principal media eviction and MCP resource metadata, and the thor 0.0.0.0 bind. List HSTS and the Cloudflare Access settings as owner steps in t11. Keep live configuration details out of public issue text."
+    },
+    {
+      "id": "t15",
+      "summary": "Validate guest chat lines with Clef before the demo agents see them",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "A blocked line never reaches the sandbox IRC server, tested against a real test server",
+        "With the decider hanging, the line goes through after 5 s marked unchecked and the event loop stays responsive",
+        "Injection lines asking Clef to allow or to answer in prose still map only to allow or block",
+        "Approved users' lines and mesh lines never reach the decider",
+        "No prompt text appears in logs, alerts or test fixtures; editing the prompt file changes the next request with no restart",
+        "Deleting the guest erases their blocked lines; alerts carry counts only",
+        "Past daily_cap, lines go through unchecked and the cap hit is counted"
+      ],
+      "deps": [
+        "t8",
+        "t7",
+        "t13"
+      ],
+      "covers": [
+        "c30",
+        "h26",
+        "h27",
+        "h28",
+        "h30",
+        "h31"
+      ],
+      "instruction": "New src/irc_lens/web/message_check.py, hooked into post_input for guest principals on the sandbox backend only, after the existing policy checks and before session.execute. Reuse t8's decider HTTP client. Config under guest_mode.sandbox.validator: url, credential env var name, prompt_file, timeout 5 s, daily_cap, and mode flag or block (default flag until t16 is accepted). The prompt file is YAML holding the state preamble, question and criteria; read it on change, never log its text, and keep it out of the repo and docs (document its shape with a placeholder only). Send a choice question whose keys are allow and block; anything else counts as an error. On block: refuse with a short message, count it in t6's counters, and store the line with guest_store.record_input as kind blocked so delete_guest_inputs erases it. On error, timeout or cap: send the line and count it unchecked."
+    },
+    {
+      "id": "t16",
+      "summary": "Measure the message validator on labelled lines before it blocks",
+      "origin": "llm",
+      "status": "confirmed",
+      "acceptance_criteria": [
+        "The script reports false blocks and misses for a set of at least 40 labelled lines with three labels",
+        "The validator stays in flag mode until the owner has accepted the measured rates"
+      ],
+      "deps": [
+        "t15"
+      ],
+      "covers": [
+        "h29"
+      ],
+      "instruction": "A script under scripts/ that runs a labelled line set through the configured validator and prints false blocks and misses per label. Keep the labelled set outside the repo next to the prompt file, since it holds abusive text: at least 40 lines across benign, abusive and injection attempts, held out from prompt tuning. Record the rates in the delivery evidence and put them to the owner. Blocking turns on only after the owner accepts them."
     }
   ],
   "risks": [

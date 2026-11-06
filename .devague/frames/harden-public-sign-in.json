@@ -4,7 +4,7 @@
   "schema_version": 6,
   "status": "exported",
   "created": "2026-11-04T17:31:15Z",
-  "updated": "2026-11-04T17:56:34Z",
+  "updated": "2026-11-06T12:48:24Z",
   "claims": [
     {
       "id": "c1",
@@ -340,7 +340,7 @@
         {
           "id": "h15",
           "text": "The decider receives derived counts only, never addresses, IPs, user agents, paths or any other visitor-supplied string, so a visitor can't write into its prompt or send personal data across the mesh.",
-          "status": "confirmed",
+          "status": "rejected",
           "instruction": ""
         },
         {
@@ -352,6 +352,12 @@
         {
           "id": "h17",
           "text": "A budget hit or a burst always alerts, whatever the decider says, so a wrong 'genuine' can't hide abuse.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h35",
+          "text": "The threat detector's decider call receives derived counts only, never addresses, IPs, user agents, paths or any other visitor-supplied string; only the message validator in c30 sends a guest's line.",
           "status": "confirmed",
           "instruction": ""
         }
@@ -370,7 +376,7 @@
     {
       "id": "c19",
       "kind": "boundary",
-      "text": "Threat detection stays cheap and can't be driven by attackers. Counting per request is in memory, with no database write or network call. Clef runs at most once per 15-minute window and at most 24 times a day, only after a rule triggers, with one call in flight, a 5 second timeout and no retries or queue: a skipped call is dropped and the alert says not assessed. These caps are config defaults and hold under any traffic volume.",
+      "text": "Threat detection stays cheap and can't be driven by attackers. Counting per request is in memory, with no database write or network call. The detector's Clef call runs at most once per 15-minute window and at most 24 times a day, only after a rule triggers, with one call in flight and a 5 second timeout. The message validator in c30 has its own bounds.",
       "origin": "llm",
       "status": "confirmed",
       "honesty_conditions": [
@@ -390,7 +396,13 @@
       "hard_questions": [],
       "links": [],
       "instruction": "",
-      "revisions": []
+      "revisions": [
+        {
+          "text": "Threat detection stays cheap and can't be driven by attackers. Counting per request is in memory, with no database write or network call. Clef runs at most once per 15-minute window and at most 24 times a day, only after a rule triggers, with one call in flight, a 5 second timeout and no retries or queue: a skipped call is dropped and the alert says not assessed. These caps are config defaults and hold under any traffic volume.",
+          "kind": "boundary",
+          "reason": "Owner added Clef message validation on 2026-11-06; scope the detector's call caps to the detector"
+        }
+      ]
     },
     {
       "id": "c20",
@@ -513,6 +525,148 @@
       "origin": "user",
       "status": "confirmed",
       "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c27",
+      "kind": "decision",
+      "text": "Owner decision 2026-11-06: Clef validates each guest chat line before the demo agents see it. Approved users' lines and mesh lines are never sent.",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c28",
+      "kind": "decision",
+      "text": "Owner decision 2026-11-06: a line Clef rejects is blocked and flagged: it never reaches the agents, the guest sees a short refusal, and it is logged and counted for the alert rules.",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c29",
+      "kind": "decision",
+      "text": "Owner decision 2026-11-06: when Clef is down or takes longer than 5 seconds, the line goes through marked unchecked, so the demo keeps working.",
+      "origin": "user",
+      "status": "confirmed",
+      "honesty_conditions": [],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c30",
+      "kind": "requirement",
+      "text": "The message validator is a second Clef layer beside the counts-only detector in c18: it sends one guest line per call, takes its prompt and question from a config file outside the repo that the operator can change without a release, and turns the answer into allow or block only.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h26",
+          "text": "With the validator configured, a guest line reaches the sandbox server only after an allow verdict, a decider error, or the 5 second timeout; a blocked line never reaches it.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h27",
+          "text": "The prompt and question live only in the operator's config file: no prompt text is in the repo, the exported spec, or the logs, and editing the file changes the next call with no restart.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h28",
+          "text": "A line that tells Clef to allow it, or asks for prose, still yields only allow or block, because the request is a choice question with fixed keys; tested with injection lines.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h29",
+          "text": "Before blocking goes live, at least 40 labelled guest lines (benign, abusive, and injection attempts) are run through the configured prompt; benign lines blocked and abusive lines allowed are recorded, and the owner accepts the rates.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h30",
+          "text": "Load stays bounded: one call per guest line, lines already capped by the guest message rate and guest limit, one call in flight per guest, a 5 second timeout, and a daily call cap in config after which lines go through marked unchecked.",
+          "status": "confirmed",
+          "instruction": ""
+        },
+        {
+          "id": "h31",
+          "text": "Blocked lines are kept with the guest's flags and erased by guest deletion; alerts carry counts only.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c31",
+      "kind": "requirement",
+      "text": "Red-team audit RT-01: a single address can't hold guest seats with pending reservations: a per-IP cap on open reservations, with the guest limit and message rate shown beside the other published limits (RT-08).",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h32",
+          "text": "A test opening reservations from one address past the cap gets the busy response, while a second address still gets a seat.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c32",
+      "kind": "requirement",
+      "text": "Red-team audit RT-14: any failure while opening or reopening a guest session answers with the shaped 503 warming-up or busy response, never a bare 500.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h33",
+          "text": "A test that makes session opening raise an unexpected error gets a shaped 503, not a 500, and the error is logged.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
+      "hard_questions": [],
+      "links": [],
+      "instruction": "",
+      "revisions": []
+    },
+    {
+      "id": "c33",
+      "kind": "boundary",
+      "text": "Not in this frame, from the red-team audit: HSTS and Cloudflare Access settings (owner's Cloudflare changes), the 0.0.0.0 IRC bind on thor (ops), webhook secret and read-loop bound (agentirc), per-principal media eviction and MCP resource metadata (later lens hygiene). Dependency currency (RT-02) was already met on spark on 2026-11-06.",
+      "origin": "llm",
+      "status": "confirmed",
+      "honesty_conditions": [
+        {
+          "id": "h34",
+          "text": "Each excluded audit item is either an owner step listed in the rollout task or a follow-up issue filed when this plan is approved.",
+          "status": "confirmed",
+          "instruction": ""
+        }
+      ],
       "hard_questions": [],
       "links": [],
       "instruction": "",
