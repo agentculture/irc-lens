@@ -32,6 +32,10 @@ KIND_FORBIDDEN = "forbidden"
 KIND_QUOTA = "quota"
 KIND_PROVIDER = "provider"
 KIND_NETWORK = "network"
+KIND_RULE_BURST = "rule-burst"
+KIND_RULE_RESERVED_ADDRESS = "rule-reserved-address"
+KIND_RULE_FAILED_SEND = "rule-failed-send"
+KIND_RULE_BUDGET_HIT = "rule-budget-hit"
 # Backwards-compatible name for callers that only need an outage bucket.
 KIND_SEND_FAILED = KIND_PROVIDER
 
@@ -41,6 +45,10 @@ _TAIL = (
 )
 
 Poster = Callable[[str, str, dict], None]
+
+
+def _ignore_failed_send() -> None:
+    return None
 
 
 def message_for(kind: str, status: int | None) -> str:
@@ -102,16 +110,22 @@ class Alerter:
         clock: Callable[[], float] = time.monotonic,
         poster: Callable[[str, str, dict], None] = _http_post,
         interval_s: int = ALERT_INTERVAL_S,
+        failed_send_counter: Callable[[], None] = _ignore_failed_send,
     ) -> None:
         self._url = url or None
         self._secret = secret or None
         self._clock = clock
         self._poster = poster
         self._interval = interval_s
+        self._failed_send_counter = failed_send_counter
         self._last: dict[str, float] = {}
         self._lock = threading.Lock()
         self._threads: list[threading.Thread] = []
         self._warned_disabled = False
+
+    def failed_send(self) -> None:
+        """Feed the app's fixed-rule counter from the shared mail helper."""
+        self._failed_send_counter()
 
     @property
     def enabled(self) -> bool:
@@ -169,8 +183,14 @@ class Alerter:
             self._threads = [t for t in self._threads if t.is_alive()]
 
 
-def make_alerter(cfg: LensConfig) -> Alerter:
+def make_alerter(
+    cfg: LensConfig, *, failed_send_counter: Callable[[], None] = _ignore_failed_send
+) -> Alerter:
     """Build the app's alerter; the secret is read from the environment."""
     env = cfg.guest_mail_alert_secret_env
     secret = os.environ.get(env, "") if env else ""
-    return Alerter(cfg.guest_mail_alert_url, secret)
+    return Alerter(
+        cfg.guest_mail_alert_url,
+        secret,
+        failed_send_counter=failed_send_counter,
+    )

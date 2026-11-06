@@ -15,7 +15,7 @@ from pathlib import Path
 
 from aiohttp import web
 
-from irc_lens import threat
+from irc_lens import rules, threat
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig, resolve_access
 from irc_lens.web import (
@@ -316,6 +316,7 @@ def make_app(
         agent_auth.install(app, sweep_interval_s=ban_sweep_interval_s)
     # Guest-mode entry card (/entry, /entry/*): 404 while guest mode is off.
     entry.install(app, config)
+    rules.install(app, app[entry.ENTRY_STATE].alerter, config)
     if config.guest_enabled:
         deletion.install(app)
         if config.app_signin_enabled:

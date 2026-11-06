@@ -255,7 +255,12 @@ def install(app: web.Application, config: LensConfig) -> None:
     app[ENTRY_STATE] = EntryState(
         config=config,
         store=app.get("guest_store"),
-        alerter=make_alerter(config),
+        alerter=make_alerter(
+            config,
+            failed_send_counter=lambda: app[threat.THREAT_COUNTERS].increment(
+                threat.Signal.FAILED_SENDS
+            ),
+        ),
         verifier=make_bot_verifier(),
     )
     app.router.add_get("/entry", get_entry)
@@ -326,6 +331,14 @@ def _reserved_address(email: str) -> bool:
     if labels[-1] in RESERVED_MAIL_TLDS:
         return True
     return ".".join(labels[-2:]) in RESERVED_MAIL_DOMAINS
+
+
+def _reserved_address_refused(request: web.Request, email: str) -> bool:
+    """Count a guest-path reserved-address refusal without retaining it."""
+    reserved = _reserved_address(email)
+    if reserved:
+        request.app[threat.THREAT_COUNTERS].increment(threat.Signal.RESERVED_ADDRESSES)
+    return reserved
 
 
 def client_ip(request: web.Request) -> str:
@@ -706,7 +719,7 @@ async def _post_signin_app(request: web.Request) -> web.Response:
                 human
                 and not guest_capped
                 and _plausible_email(email)
-                and not _reserved_address(email)
+                and not _reserved_address_refused(request, email)
                 and not store.is_banned(email, ip)
             )
         correct = human and pw_ok
@@ -1039,7 +1052,7 @@ async def post_guest_start(request: web.Request) -> web.Response:
         metrics.get_metrics().rate_limited()
     elif (
         _plausible_email(email)
-        and not _reserved_address(email)
+        and not _reserved_address_refused(request, email)
         and not store.is_banned(email, ip)
         and await _take_guest_mail_budget(request, state, ip)
     ):

@@ -116,6 +116,12 @@ class LensConfig:
     guest_rate_entry_per_min: int = 10
     guest_rate_messages_per_min: int = 20
     guest_rate_password_attempts_per_15min: int = 5
+    # Counts-only fixed alert rules, evaluated against each 15-minute window.
+    threat_refused_responses_threshold: int = 50
+    threat_entry_posts_threshold: int = 10
+    threat_reserved_addresses_threshold: int = 1
+    threat_failed_sends_threshold: int = 1
+    threat_budget_hits_threshold: int = 1
     # web.mcp_path: where the remote MCP endpoint is mounted (web/mcp_http.py).
     mcp_path: str = "/mcp"
     # Worker-to-origin gate. The config stores only the environment-variable
@@ -543,6 +549,15 @@ _GUEST_MAIL_KEYS = frozenset(
 _GUEST_RATE_KEYS = frozenset(
     {"entry_per_min", "messages_per_min", "password_attempts_per_15min"}
 )
+_THREAT_RULE_KEYS = frozenset(
+    {
+        "refused_responses",
+        "entry_posts",
+        "reserved_addresses",
+        "failed_sends",
+        "budget_hits",
+    }
+)
 
 
 _APP_SIGNIN_KEYS = frozenset({"enabled", "base_url"})
@@ -849,6 +864,24 @@ def _validate_guest_mode_section(raw: dict) -> dict:
     }
 
 
+def _validate_threat_rules(raw: dict) -> dict[str, int]:
+    """Load positive trigger counts for the fixed 15-minute rules."""
+    section = _optional_mapping(
+        raw.get("threat_rules"), "threat_rules", _THREAT_RULE_KEYS
+    )
+
+    def threshold(name: str, default: int) -> int:
+        return _positive_int(section.get(name, default), f"threat_rules.{name}")
+
+    return {
+        "threat_refused_responses_threshold": threshold("refused_responses", 50),
+        "threat_entry_posts_threshold": threshold("entry_posts", 10),
+        "threat_reserved_addresses_threshold": threshold("reserved_addresses", 1),
+        "threat_failed_sends_threshold": threshold("failed_sends", 1),
+        "threat_budget_hits_threshold": threshold("budget_hits", 1),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Public loader — flat orchestrator, no nested conditionals beyond auth.mode
 # ---------------------------------------------------------------------------
@@ -968,6 +1001,7 @@ def load_config(path: Path) -> LensConfig:
     ) = _validate_media_section(raw)
     culture_residents_url, culture_overview_name = _validate_culture_section(raw)
     guest_fields = _validate_guest_mode_section(raw)
+    threat_rule_fields = _validate_threat_rules(raw)
     app_signin_enabled = _validate_app_signin(auth)
     if guest_fields.get("guest_mail_provider", "none") == "none":
         # Codes can't be mailed: keep the 0.12.2 path (303 /login) instead of
@@ -1012,6 +1046,7 @@ def load_config(path: Path) -> LensConfig:
         require_edge_credential=require_edge_credential,
         edge_credential_env=edge_credential_env,
         **guest_fields,
+        **threat_rule_fields,
     )
 
 

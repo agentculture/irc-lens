@@ -70,6 +70,7 @@ class ThreatCounters:
         self._counts = {signal: 0 for signal in Signal}
         self._source_hashes: set[bytes] = set()
         self._source_count_capped = False
+        self._completed_snapshot: ThreatSnapshot | None = None
         self._lock = threading.Lock()
 
     @property
@@ -117,13 +118,23 @@ class ThreatCounters:
         now = self._clock()
         with self._lock:
             self._roll_window(now)
-            counts = MappingProxyType(dict(self._counts))
-            return ThreatSnapshot(
-                window_started_at=self._window_started_at,
-                counts=counts,
-                distinct_sources=len(self._source_hashes),
-                source_count_capped=self._source_count_capped,
-            )
+            return self._snapshot_locked()
+
+    def snapshots(self) -> tuple[ThreatSnapshot | None, ThreatSnapshot]:
+        """Return the last completed window and the current window atomically."""
+        now = self._clock()
+        with self._lock:
+            self._roll_window(now)
+            return self._completed_snapshot, self._snapshot_locked()
+
+    def _snapshot_locked(self) -> ThreatSnapshot:
+        counts = MappingProxyType(dict(self._counts))
+        return ThreatSnapshot(
+            window_started_at=self._window_started_at,
+            counts=counts,
+            distinct_sources=len(self._source_hashes),
+            source_count_capped=self._source_count_capped,
+        )
 
     def _hash_source(self, source: str) -> bytes:
         return hashlib.blake2s(
@@ -143,6 +154,7 @@ class ThreatCounters:
     def _roll_window(self, now: float) -> None:
         if now - self._window_started_at < WINDOW_SECONDS:
             return
+        self._completed_snapshot = self._snapshot_locked()
         self._window_started_at = now
         self._counts = {signal: 0 for signal in Signal}
         self._source_hashes.clear()
