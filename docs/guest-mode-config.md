@@ -44,6 +44,7 @@ guest_mode:
 | `sandbox.flag_log` | `guest_sandbox_flag_log` | unset (required for full deletion) |
 | `idle_close_s` | `guest_idle_close_s` | `900` |
 | `max_guests` | `guest_max_guests` | `1` |
+| `require_bot_check` | `guest_require_bot_check` | `false` |
 | `retention_days` | `guest_retention_days` | `90` |
 | `store_path` | `guest_store_path` | `$XDG_DATA_HOME/irc-lens/guests.db` |
 | `legal_version_url` | `guest_legal_version_url` | `https://culture.dev/legal/version.json` |
@@ -374,7 +375,20 @@ on startup (`ALTER TABLE ... ADD COLUMN`, guarded by `PRAGMA table_info`).
 Set both **`IRC_LENS_TURNSTILE_SITE_KEY`** and **`IRC_LENS_TURNSTILE_SECRET`**
 in the environment to put a Turnstile widget on the password and guest steps
 (verified server-side on sign-in and token request; a failed check is the
-generic error). Unset, the check is a no-op. Only responses that render the
+generic error). Unset, the check is a no-op, and with guest mode on
+`irc-lens serve` logs one warning at startup and `irc-lens doctor` reports a
+`guest bot check` warning. Doctor reads the keys from its own environment, so
+when they're injected only at serve time (for example by `grant run`), run
+doctor the same way.
+
+With `require_bot_check: true` and no keys, guest codes are refused (the
+sign-in page looks the same; the Guest mode start form shows the bot-check
+error). Approved sign-in still works. Leave it off until Turnstile is proven
+through the edge, then turn it on.
+
+A browser trusted for an approved email (`lens_device`) skips the widget on
+app sign-in, so a failing or missing widget never locks an approved user out.
+Untrusted browsers still need it. Only responses that render the
 widget get a CSP widened to `https://challenges.cloudflare.com`
 (`script-src`, `frame-src`, `connect-src`); every other page keeps
 `script-src 'self'`. Entry pages send `Referrer-Policy: same-origin` (not
