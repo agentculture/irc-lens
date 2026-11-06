@@ -130,28 +130,34 @@ No `devague deviate` records were filed for this plan. The decisions below were 
 
 ## Delivery Claims
 
-The evidence records `e1`-`e27` and deltas `b1`-`b6` are filed with origin `llm` and await the owner's confirmation. Until then, confidence is capped at `medium`. No lapse is approved yet; `l1`-`l4` are pending and are not counted as evidence.
+The owner confirmed evidence `e1`-`e27`, deltas `b1`-`b6`, obligations `o20`-`o22` and lapses `l1`-`l4` on 2026-11-06. Confidence follows from that:
+
+- **`high`:** the claim's confirmed evidence covers it and no approved lapse touches it.
+- **`medium`, capped by a lapse:** `l1` (approved mail headroom was assumed without checking the other mail paths) caps `c3` and `c20`. `l2` (Clef verdict trials too few and self-labelled) caps `c18`.
+- **`medium`, for a gap the row names.**
+
+`l3` (a merge made before reading one task's results) and `l4` (the false alert from the live baseline) are process lapses. They don't change whether a delivered behaviour holds.
 
 | Claim | Confidence | Evidence |
 | --- | --- | --- |
-| `c2` — persistent guest mail budget, surviving a restart | medium | `e1`, test `tests/test_mail_budget.py::test_budget_persists_and_lift_after_restart_restores_mail` |
-| `c3` — approved sign-in mail stays outside the guest budget | medium | `e2`, test `tests/test_app_signin.py::test_exhausted_guest_budget_blocks_adapter_but_not_approved_mail` |
+| `c2` — persistent guest mail budget, surviving a restart | high | `e1`, test `tests/test_mail_budget.py::test_budget_persists_and_lift_after_restart_restores_mail` |
+| `c3` — approved sign-in mail stays outside the guest budget | medium (capped by `l1`) | `e2`, test `tests/test_app_signin.py::test_exhausted_guest_budget_blocks_adapter_but_not_approved_mail` |
 | `c4` — reserved domains refused before any provider call, same page | medium | `e7`, `e20` (live); cookie and timing floor not asserted by a test |
-| `c5` — recipient errors don't alert, and the log has the status only | medium | `e8`, `e9`, test `tests/test_alerts.py::test_recipient_error_does_not_alert_or_take_outage_slot` |
-| `c6` — startup and doctor warning without a bot check, none with keys | medium | `e10`, `e21` (live, before the keys), `e26` (live, after) |
-| `c8` — approved sign-in unchanged | medium | `e13`, `tests/test_app_signin.py` |
-| `c18` — rule alerts with counts, Clef verdict advisory only | medium | `e14`, `e15`, `e16`, `docs/clef-threat-verdicts.md` |
-| `c19` — threat detection is cheap and bounded | medium | `e17`, test `tests/test_threat.py::test_ten_thousand_requests_keep_fixed_bounded_state` |
-| `c20` — per-address hourly limit and one all-mail ceiling | medium | `e3`, `e4`; the ceiling resets on restart (drift `t4`) |
-| `c21` — one address can't use the whole hourly budget; budget-hit alert wording | medium | `e5`, `e6` |
+| `c5` — recipient errors don't alert, and the log has the status only | high | `e8`, `e9`, test `tests/test_alerts.py::test_recipient_error_does_not_alert_or_take_outage_slot` |
+| `c6` — startup and doctor warning without a bot check, none with keys | high | `e10`, `e21` (live, before the keys), `e26` (live, after) |
+| `c8` — approved sign-in unchanged | high | `e13`, `tests/test_app_signin.py` |
+| `c18` — rule alerts with counts, Clef verdict advisory only | medium (capped by `l2`) | `e14`, `e15`, `e16`, `docs/clef-threat-verdicts.md` |
+| `c19` — threat detection is cheap and bounded | high | `e17`, test `tests/test_threat.py::test_ten_thousand_requests_keep_fixed_bounded_state` |
+| `c20` — per-address hourly limit and one all-mail ceiling | medium (capped by `l1`) | `e3`, `e4`; the ceiling resets on restart (drift `t4`) |
+| `c21` — one address can't use the whole hourly budget; budget-hit alert wording | high | `e5`, `e6` |
 | `c22` — the budget and the bot-check requirement lift through config | medium | `e12`; the rollback was not rehearsed live |
-| `c23` — Clef is optional, and with none configured every other layer works | medium | `e18` |
-| `c25` — probe counting by route matching | medium | `e19`, test `tests/test_threat.py::test_unrouted_401_is_a_probe_but_real_route_401_is_not` |
-| `c26` — a trusted approved browser skips a failing bot check | medium | `e11`, test `tests/test_bot_check.py::test_trusted_browser_signs_in_with_the_bot_check_failing` |
+| `c23` — Clef is optional, and with none configured every other layer works | high | `e18` |
+| `c25` — probe counting by route matching | high | `e19`, test `tests/test_threat.py::test_unrouted_401_is_a_probe_but_real_route_401_is_not` |
+| `c26` — a trusted approved browser skips a failing bot check | high | `e11`, test `tests/test_bot_check.py::test_trusted_browser_signs_in_with_the_bot_check_failing` |
 | `c30` — Clef validates guest lines; a blocked line never reaches the sandbox | medium | `e22`, `e23` (live, flag mode); block mode not live |
-| `c31` — pending seats capped per address | medium | `e24`, test `tests/test_guest_limit.py::test_pending_reservations_are_capped_per_address` |
-| `c32` — shaped 503 instead of a bare 500 | medium | `e25`, test `tests/test_guest_limit.py::test_unexpected_open_failure_is_a_shaped_503` |
-| `c33` — excluded audit items are tracked | medium | agentirc#69, irc-lens#99, culture#508 comment |
+| `c31` — pending seats capped per address | high | `e24`, test `tests/test_guest_limit.py::test_pending_reservations_are_capped_per_address` |
+| `c32` — shaped 503 instead of a bare 500 | high | `e25`, test `tests/test_guest_limit.py::test_unexpected_open_failure_is_a_shaped_503` |
+| `c33` — excluded audit items are tracked | high | agentirc#69, irc-lens#99, culture#508 comment |
 | `h29` — owner accepts the validator's measured rates before blocking | unverified | rates measured in `t16`, not yet accepted; not claimed done |
 | Turnstile live and `require_bot_check` on (part of `c22` and `t11`) | medium | `e27` (live, direct origin; filed against `o12`); not tested through the edge Worker |
 | Clef's threat verdict trusted beyond advisory | unverified | `docs/clef-threat-verdicts.md` records a missed mail-abuse window; it stays advisory |
@@ -169,5 +175,4 @@ pending approval (not yet evidence): `l1`, `l2`, `l3`, `l4`
 - **Set-password lockout** — the per-address hourly limit lets anyone delay one known address's set-password link by up to an hour. This is the `c20` tradeoff; exempting trusted browsers is a possible follow-up.
 - **The ceiling resets on restart** (drift `t4`) — persist it in the guest store if restarts turn out to matter.
 - **Clef's threat verdict** stays advisory; re-run `scripts/clef_windows.py` once production counters exist (`clef-windows.jsonl` on spark).
-- **Adjudication** — the owner confirms or rejects evidence `e1`-`e27`, deltas `b1`-`b6`, obligations `o20`-`o22` and lapses `l1`-`l4`.
 - **Follow-up issues** — agentirc#69, irc-lens#99, culture#508.
