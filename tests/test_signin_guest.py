@@ -34,6 +34,7 @@ import re
 from collections.abc import AsyncIterator
 
 import aiohttp
+import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
 
@@ -189,6 +190,17 @@ async def test_unknown_email_gets_a_guest_code_whatever_the_password(env: Env) -
         assert [(to, s) for to, s, _ in env.mail.sent if to == email] == [
             (email, _GUEST_SUBJECT)
         ]
+
+
+@pytest.mark.reserved_domains
+async def test_reserved_address_gets_the_code_page_and_no_mail(env: Env) -> None:
+    """The 2026-11-04 scenario: a scripted sign-in with a reserved address
+    reaches neither the mail adapter nor the alerter, and looks the same."""
+    for email in ("probe@example.com", "probe@mail.example.org", "probe@host.test"):
+        resp = await env.signin(email)
+        assert resp.status == 200
+        assert 'action="/entry/code"' in await resp.text()
+    assert env.mail.sent == []
 
 
 async def test_approved_wrong_password_and_banned_email_get_no_mail(env: Env) -> None:

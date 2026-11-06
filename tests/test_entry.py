@@ -564,6 +564,35 @@ async def test_consent_required(h):
     assert 'name="consent"' in await r.text()
 
 
+@pytest.mark.reserved_domains
+@pytest.mark.parametrize(
+    "address,reserved",
+    [
+        ("a@example.com", True),
+        ("a@mail.example.org", True),
+        ("a@example.net", True),
+        ("a@host.test", True),
+        ("a@x.invalid", True),
+        ("a@box.localhost", True),
+        ("a@docs.example", True),
+        ("a@gmail.com", False),
+        ("a@example.com.au", False),
+        ("a@notexample.com", False),
+        ("a@test.com", False),
+    ],
+)
+def test_reserved_address(address, reserved):
+    assert entry._reserved_address(address) is reserved
+
+
+@pytest.mark.reserved_domains
+async def test_guest_start_sends_nothing_to_a_reserved_address(h):
+    real = await _request_token(h, email="someone@culture-guest.net", nickname="maya")
+    reserved = await _request_token(h, email="probe@example.com", nickname="zed")
+    assert reserved.status == real.status == 200
+    assert [to for to, _s, _b in h.mail.sent] == ["someone@culture-guest.net"]
+
+
 async def test_guest_start_bot_check(h):
     h.verifier.ok = False
     r = await _request_token(h)

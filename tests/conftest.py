@@ -32,6 +32,18 @@ from _agentirc_server import AgentIRCTestServer
 _BASIC_SEED = Path(__file__).parent / "fixtures" / "basic.yaml"
 
 
+@pytest.fixture(autouse=True)
+def _allow_reserved_test_domains(request, monkeypatch):
+    """Most tests sign guests in at example.com, which the guest paths refuse
+    in production (t2). Tests marked ``reserved_domains`` keep the refusal."""
+    if request.node.get_closest_marker("reserved_domains"):
+        return
+    from irc_lens.web import entry
+
+    monkeypatch.setattr(entry, "RESERVED_MAIL_DOMAINS", frozenset())
+    monkeypatch.setattr(entry, "RESERVED_MAIL_TLDS", frozenset())
+
+
 def _dev_config(server_host: str, server_port: int, nick: str) -> LensConfig:
     """Build a minimal dev-mode LensConfig for tests.
 
