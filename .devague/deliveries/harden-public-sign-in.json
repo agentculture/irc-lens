@@ -2,7 +2,7 @@
   "plan_slug": "harden-public-sign-in",
   "schema_version": 2,
   "created": "2026-11-06T16:21:56Z",
-  "updated": "2026-11-06T16:22:36Z",
+  "updated": "2026-11-06T19:19:30Z",
   "deviations": [],
   "evidence": [
     {
@@ -479,6 +479,44 @@
       "status": "proposed",
       "superseded": false,
       "seq": 25
+    },
+    {
+      "id": "e26",
+      "obligation_ref": "o10",
+      "test_ref": "live: console restarted with Turnstile keys from grant (2026-11-06)",
+      "behavior_text": "no 'no bot check' warning at startup once both keys are injected; the password step renders the Turnstile widget",
+      "contract_text": "guest mode on with no Turnstile keys gives one startup warning and a doctor finding; with keys set, neither",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "observed on the live console after the keys were wired in",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T19:19:30",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 26
+    },
+    {
+      "id": "e27",
+      "obligation_ref": "o12",
+      "test_ref": "live: real browser sign-in for livetest@culture.dev with the widget, then require_bot_check: true and a restart",
+      "behavior_text": "the widget passed in a real browser, server-side verify passed (a guest-mail budget slot was taken), and turning require_bot_check on was a config change and restart with no code change",
+      "contract_text": "changing config and restarting lifts the budget and required bot check, restoring guest mail with no code change",
+      "evidence_type": "observation",
+      "strength": "execution",
+      "strength_basis": "observed on the live console; checked through the direct origin only, since the edge Worker isn't deployed",
+      "outcome": "pass",
+      "run": {
+        "timestamp": "2026-11-06T19:19:30",
+        "commit": "598f258"
+      },
+      "origin": "llm",
+      "status": "proposed",
+      "superseded": false,
+      "seq": 27
     }
   ],
   "deltas": [

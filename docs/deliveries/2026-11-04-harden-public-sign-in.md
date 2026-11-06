@@ -44,7 +44,7 @@ Quoted verbatim from the `devague summary` skeleton:
 | `t8` | delivered | `decider.py`: bounded Clef client and counts-only advisory verdict on rule alerts, at most 1 per window and 24 a day (Codex; response shape checked against the live gateway by Claude) |
 | `t9` | delivered | `scripts/clef_windows.py` and `docs/clef-threat-verdicts.md`: 45 labelled windows (35 real) against live Clef, misses recorded, orin load measured (Claude) |
 | `t10` | delivered | A 200-address whole-stack test, a `/owner/metrics` threat and bot-check view, and `docs/security-checklist.md` (Codex; an over-broad assertion fixed by Claude) |
-| `t11` | partial | Done 2026-11-06: 0.23.0 installed on spark, budgets and `threat_rules` in the private config, Clef verdict and validator (flag mode) enabled with the key from grant, console restarted, live tests passed. Not done: Turnstile keys, `require_bot_check`, a rehearsed rollback, HSTS and Access settings (owner steps), and switching the validator to block mode (needs owner acceptance) |
+| `t11` | partial | Done 2026-11-06: 0.23.0 installed on spark, budgets and `threat_rules` in the private config, Clef verdict and validator (flag mode) enabled with the key from grant, console restarted, live tests passed. Turnstile: a widget was created through the Cloudflare API by the owner's run of `cf_turnstile.py`, its keys went into grant and the console, a real browser passed it, server-side verify passed, and `require_bot_check: true` is on. Not done: a test through the edge Worker (not deployed), a rehearsed rollback, HSTS (needs the token's Zone Settings Edit permission), and switching the validator to block mode (needs owner acceptance) |
 | `t12` | delivered | `guest_mode.max_pending_per_address` (default 1), guest limits published together (Codex; call sites folded into helpers by Claude) |
 | `t13` | delivered | Shaped warming-up 503 for any guest session-open failure on `GET /`, `POST /input` and the event stream (pi edit, Claude test) |
 | `t14` | delivered | agentirc#69 (webhook secret), irc-lens#99 (read-loop bound, per-principal eviction, MCP resource metadata), comment on culture#508 (bind) |
@@ -92,7 +92,7 @@ No `devague deviate` records were filed for this plan. The decisions below were 
 | `t1` | Recipient errors and ceiling refusals don't feed the failed-send threat rule (`b3`); the plan didn't specify this. | acceptable |
 | `t15` | Additions beyond the plan: a per-guest share of the cap, an own thread pool, no overlapping calls, 422 for a block, flagged lines stored once (`b4`). | acceptable |
 | `t7` | The live `entry_posts` trigger is 20, not the plan's starting 10 (`b5`). | acceptable |
-| `t11` | The rollout is partial: Turnstile keys, `require_bot_check`, a rehearsed rollback, and HSTS and Access are not done, and the validator stays in flag mode. | needs-follow-up |
+| `t11` | The rollout is partial: Turnstile and `require_bot_check` are live, but they were tested only on the direct origin, not through the Worker. The rollback isn't rehearsed and HSTS isn't on. Access needed no change. The validator stays in flag mode. | needs-follow-up |
 | `t16` | The rates are measured but not yet accepted by the owner, so `h29` is unmet and blocking is not live. | needs-follow-up |
 
 ## Evidence
@@ -151,7 +151,7 @@ The evidence records `e1`-`e25` and deltas `b1`-`b6` are filed with origin `llm`
 | `c32` — shaped 503 instead of a bare 500 | medium | `e25`, test `tests/test_guest_limit.py::test_unexpected_open_failure_is_a_shaped_503` |
 | `c33` — excluded audit items are tracked | medium | agentirc#69, irc-lens#99, culture#508 comment |
 | `h29` — owner accepts the validator's measured rates before blocking | unverified | rates measured in `t16`, not yet accepted; not claimed done |
-| Turnstile live and `require_bot_check` on (part of `c22` and `t11`) | unverified | not done; owner steps |
+| Turnstile live and `require_bot_check` on (part of `c22` and `t11`) | medium | `e26`, `e27` (live, direct origin); not tested through the edge Worker |
 | Clef's threat verdict trusted beyond advisory | unverified | `docs/clef-threat-verdicts.md` records a missed mail-abuse window; it stays advisory |
 
 Lapse ledger evidence:
@@ -160,9 +160,9 @@ pending approval (not yet evidence): `l1`, `l2`, `l3`, `l4`
 
 ## Remaining Work / Follow-up
 
-- **`t11` Turnstile** — the owner creates Turnstile keys and stores them in grant; then a real browser test directly and through the Worker; then `guest_mode.require_bot_check: true`.
+- **`t11` Turnstile through the Worker** — the keys are live and `require_bot_check` is on; repeat the browser test through the edge Worker once it is deployed, including siteverify seeing the visitor IP.
 - **`t11` rollback rehearsal** — lift the budget and turn the bot check off through config, with the owner.
-- **`t11` HSTS and Access** — owner Cloudflare changes.
+- **`t11` HSTS** — add Zone › Zone Settings › Edit to the Cloudflare token, then run `~/.culture/ops/cf_hsts.sh` through `grant run`. Access needs no change: the chat app is protected by Access on `/login` only, by design.
 - **`t16`, `h29`** — the owner reviews the draft prompt (`~/.config/irc-lens/clef-prompt.yaml` on spark) and the measured rates; switch the validator to `mode: block` only after acceptance.
 - **A guest past their share of the validator cap** — their lines go through unchecked under `c29`. Whether block mode should refuse them instead is an owner decision.
 - **Set-password lockout** — the per-address hourly limit lets anyone delay one known address's set-password link by up to an hour. This is the `c20` tradeoff; exempting trusted browsers is a possible follow-up.
