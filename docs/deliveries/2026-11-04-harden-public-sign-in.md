@@ -1,13 +1,13 @@
 # Delivery Summary — Harden public sign-in
 
-plan: `harden-public-sign-in` · run: `partial` · date: `2026-11-04`
+plan: `harden-public-sign-in` · run: `partial` · date: `2026-11-04` (plan created; built, rolled out and validated 2026-11-06)
 baseline: `devague summary skeleton`
 
 ## Intent
 
 > The chat console's public sign-in can't be used to burn the mail quota, mail strangers or raise false alarms, and it warns when its bot check is off
 
-The plan (16 tasks, 7 waves) also adds the owner's 2026-11-06 decisions: Clef validates guest chat lines (c27-c30), and three red-team audit items (c31-c33). The workforce built 15 tasks and merged them as irc-lens#100 (0.23.0). The live rollout, `t11`, is partly done: some of its steps are the owner's.
+The plan (16 tasks, 7 waves) also adds the owner's 2026-11-06 decisions: Clef validates guest chat lines (c27-c30), and three red-team audit items (c31-c33). The workforce built 15 tasks (all but `t11`) and merged them as irc-lens#100 (0.23.0). The live rollout, `t11`, is partly done: some of its steps are the owner's.
 
 ## Planned Work
 
@@ -36,7 +36,7 @@ Quoted verbatim from the `devague summary` skeleton:
 | --- | --- | --- |
 | `t1` | delivered | Alerts only for outage statuses (401, 403, 429, 5xx, network), each under its own kind; recipient errors log their status and count in `failed_sends` (Codex; counter split from `delivery_alerts` by Claude) |
 | `t2` | delivered | Reserved test domains refused in both guest paths, with the same page; autouse conftest switch for tests at `example.com` (pi edit, Claude tests) |
-| `t3` | delivered | `mail_budget.py`: 50 a day, 20 an hour, 5 an hour per address, persisted in the guest store; 25-hour attempt retention (Codex; per-address cap made configurable by Claude) |
+| `t3` | delivered | `mail_budget.py`: 50 a day, 20 an hour, 5 an hour from one IP, persisted in the guest store; 25-hour attempt retention (Codex; per-address cap made configurable by Claude) |
 | `t4` | delivered | 5 per address per hour for set-password and deletion mail, beside the per-IP limit; one all-mail ceiling, 90 a day by default (Codex; made configurable by Claude) |
 | `t5` | delivered | Startup warning, doctor `guest bot check` warning, `guest_mode.require_bot_check` (default off), trusted-browser bypass for approved sign-in (Claude) |
 | `t6` | delivered | `threat.py`: 15-minute in-memory windows of counts and keyed source hashes, capped at 256 (Codex) |
@@ -57,7 +57,7 @@ No `devague deviate` records were filed for this plan. The decisions below were 
 
 - **Owner decisions captured on the frame, not as deviations (2026-11-06):** Clef validates guest chat lines (`c27`), a rejected line is blocked and flagged (`c28`), and a down or slow Clef lets the line through (`c29`). The plan was extended with `t12`-`t16` before the fan-out began.
 - **Reserved domains in tests:** most tests sign guests in at `example.com`, so `t2` added an autouse conftest switch and a `reserved_domains` marker instead of rewriting 359 test addresses.
-- **Mail budget per-address cap:** Codex's default let one address use 19 of 20 hourly codes. Changed to a configurable `ip_hourly_budget` of 5.
+- **Mail budget per-address cap:** Codex's default let one IP use 19 of 20 hourly codes. Changed to a configurable per-IP `ip_hourly_budget` of 5.
 - **Mail ceiling:** made configurable (`total_daily_ceiling`, default 90).
 - **Independent review fixes:**
   - the ceiling keeps a quarter for approved sign-in mail and alerts when it refuses;
@@ -71,7 +71,7 @@ No `devague deviate` records were filed for this plan. The decisions below were 
   - only outages feed the failed-send rule;
   - the validator has its own thread pool;
   - a blocked line answers 422.
-- **Qodo fixes:**
+- **Qodo fixes** (with the two already covered by the `/code-review` fixes above, 8 of 11):
   - malformed Clef answers fail open;
   - a timed-out call can't overlap the same guest's next one;
   - unmailed codes are revoked;
@@ -100,7 +100,7 @@ No `devague deviate` records were filed for this plan. The decisions below were 
 - **Merge commit:** `598f258` (squash of irc-lens#100, 40 commits).
 - **Full suite:** at `cfd4c39` (the last PR head), 2079 passed and 1 failed. The failure, `tests/test_guest_admin.py::test_passwd_stdin_sets_argon2id_hash`, is #89 and also fails on main.
 - **CI on `cfd4c39`:** `test`, `playwright`, `SonarCloud` (0 open issues), `GitGuardian` and `test-publish` all green.
-- **Obligation tests at `598f258` on 2026-11-06:** 84 passed and 0 failed. Evidence records `e1`-`e25` map them to obligations `o1`-`o22`. Examples:
+- **Obligation tests at `598f258` on 2026-11-06:** 84 passed and 0 failed. Evidence records `e1`-`e19`, `e22`, `e24` and `e25` map them to obligations `o1`-`o22`; `e20`, `e21`, `e23`, `e26` and `e27` are live observations. Examples:
   - `tests/test_mail_budget.py::test_budget_persists_and_lift_after_restart_restores_mail` — pass
   - `tests/test_signin_guest.py::test_200_rotating_addresses_cannot_spend_guest_mail_or_block_approved` — pass
   - `tests/test_signin_guest.py::test_reserved_address_gets_the_code_page_and_no_mail` — pass
@@ -113,22 +113,24 @@ No `devague deviate` records were filed for this plan. The decisions below were 
 - **Live, after the 0.23.0 restart (2026-11-06):**
   - `/`, `/readyz`, `/entry` and `/healthz` answer 200, and an unrouted path answers 401.
   - A reserved-address sign-in got 200 with the code page and no send (`e20`).
-  - The startup warning about the missing bot check is in the log, and doctor reports `warn` (`e21`).
+  - Before the Turnstile keys were added, the startup warning about the missing bot check was in the log and doctor reported `warn` (`e21`, a point-in-time observation). After the keys were wired in, the warning was gone (`e26`), which is the other half of `o10`.
   - The validator, built from the live config and grant key, allowed a normal question and flagged an injection line (`e23`).
   - The demo agent answered a real question in 11.6 s.
   - The health ping succeeded.
   - All console, IRC server and demo agent units were active.
+  - Turnstile, after the keys were added: the widget passed in a real browser, server-side verify passed (a guest-mail budget slot was taken), and `require_bot_check: true` went on through config and a restart (`e27`).
+  - HSTS: `chat`, `rules`, `library` and `gwen.culture.dev` send `strict-transport-security: max-age=15552000`, and the sites still load.
   - The home page rendered in a real browser.
 - **Clef evaluations:** `docs/clef-threat-verdicts.md` covers the threat verdict; the 48-line validator run is in `docs/guest-mode-config.md`.
 - **Reviews:**
   - an independent review agent (5 findings fixed);
   - `/code-review` medium (5 fixed; the rest answered on the PR);
-  - Qodo (11 comments: 8 fixed, 3 pushed back with reasons, all resolved).
+  - Qodo (11 comments: 6 fixed in `9528981`, 2 already fixed in `5d89744`, 3 pushed back with reasons, all resolved).
 - **Issues and PRs:** irc-lens#94, irc-lens#100, irc-lens#99, agentirc#69, culture#508, culture#524 (red-team authorization).
 
 ## Delivery Claims
 
-The evidence records `e1`-`e25` and deltas `b1`-`b6` are filed with origin `llm` and await the owner's confirmation. Until then, confidence is capped at `medium`. No lapse is approved yet; `l1`-`l4` are pending and are not counted as evidence.
+The evidence records `e1`-`e27` and deltas `b1`-`b6` are filed with origin `llm` and await the owner's confirmation. Until then, confidence is capped at `medium`. No lapse is approved yet; `l1`-`l4` are pending and are not counted as evidence.
 
 | Claim | Confidence | Evidence |
 | --- | --- | --- |
@@ -136,7 +138,7 @@ The evidence records `e1`-`e25` and deltas `b1`-`b6` are filed with origin `llm`
 | `c3` — approved sign-in mail stays outside the guest budget | medium | `e2`, test `tests/test_app_signin.py::test_exhausted_guest_budget_blocks_adapter_but_not_approved_mail` |
 | `c4` — reserved domains refused before any provider call, same page | medium | `e7`, `e20` (live); cookie and timing floor not asserted by a test |
 | `c5` — recipient errors don't alert, and the log has the status only | medium | `e8`, `e9`, test `tests/test_alerts.py::test_recipient_error_does_not_alert_or_take_outage_slot` |
-| `c6` — startup and doctor warning without a bot check | medium | `e10`, `e21` (live) |
+| `c6` — startup and doctor warning without a bot check, none with keys | medium | `e10`, `e21` (live, before the keys), `e26` (live, after) |
 | `c8` — approved sign-in unchanged | medium | `e13`, `tests/test_app_signin.py` |
 | `c18` — rule alerts with counts, Clef verdict advisory only | medium | `e14`, `e15`, `e16`, `docs/clef-threat-verdicts.md` |
 | `c19` — threat detection is cheap and bounded | medium | `e17`, test `tests/test_threat.py::test_ten_thousand_requests_keep_fixed_bounded_state` |
@@ -151,7 +153,7 @@ The evidence records `e1`-`e25` and deltas `b1`-`b6` are filed with origin `llm`
 | `c32` — shaped 503 instead of a bare 500 | medium | `e25`, test `tests/test_guest_limit.py::test_unexpected_open_failure_is_a_shaped_503` |
 | `c33` — excluded audit items are tracked | medium | agentirc#69, irc-lens#99, culture#508 comment |
 | `h29` — owner accepts the validator's measured rates before blocking | unverified | rates measured in `t16`, not yet accepted; not claimed done |
-| Turnstile live and `require_bot_check` on (part of `c22` and `t11`) | medium | `e26`, `e27` (live, direct origin); not tested through the edge Worker |
+| Turnstile live and `require_bot_check` on (part of `c22` and `t11`) | medium | `e27` (live, direct origin; filed against `o12`); not tested through the edge Worker |
 | Clef's threat verdict trusted beyond advisory | unverified | `docs/clef-threat-verdicts.md` records a missed mail-abuse window; it stays advisory |
 
 Lapse ledger evidence:
@@ -167,5 +169,5 @@ pending approval (not yet evidence): `l1`, `l2`, `l3`, `l4`
 - **Set-password lockout** — the per-address hourly limit lets anyone delay one known address's set-password link by up to an hour. This is the `c20` tradeoff; exempting trusted browsers is a possible follow-up.
 - **The ceiling resets on restart** (drift `t4`) — persist it in the guest store if restarts turn out to matter.
 - **Clef's threat verdict** stays advisory; re-run `scripts/clef_windows.py` once production counters exist (`clef-windows.jsonl` on spark).
-- **Adjudication** — the owner confirms or rejects evidence `e1`-`e25`, deltas `b1`-`b6`, obligations `o20`-`o22` and lapses `l1`-`l4`.
+- **Adjudication** — the owner confirms or rejects evidence `e1`-`e27`, deltas `b1`-`b6`, obligations `o20`-`o22` and lapses `l1`-`l4`.
 - **Follow-up issues** — agentirc#69, irc-lens#99, culture#508.
