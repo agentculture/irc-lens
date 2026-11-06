@@ -42,6 +42,7 @@ def test_counters_and_snapshot() -> None:
         "sessions_ended": 0,
         "guest_busy": 0,
         "delivery_alerts": 0,
+        "failed_sends": 0,
     }
     m.entry()
     m.entry()
@@ -164,6 +165,7 @@ async def test_route_approved_gets_snapshot_and_agent(
         "sessions_ended",
         "guest_busy",
         "delivery_alerts",
+        "failed_sends",
     }
     # No sandbox session open: nothing to measure room membership against
     # (online/offline: test_chat_ui::test_owner_metrics_agent_state_*).
