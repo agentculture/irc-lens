@@ -376,6 +376,14 @@ erases them, and alerts carry counts only. Start in `flag` mode, measure the
 prompt on labelled lines (false blocks and misses), and switch to `block` only
 after the owner accepts the rates.
 
+`scripts/clef_lines.py` runs a labelled set (at least 40 lines labelled
+`benign`, `abusive` and `injection`, kept beside the prompt file and out of
+prompt tuning) through the validator exactly as the console would, and prints
+the false blocks and misses per label. First run, 2026-11-06, with a draft
+prompt on 48 held-out lines: 1 of 20 benign lines blocked, 12 of 12 abusive
+lines blocked, and 13 of 16 injection lines blocked (the 3 misses were polite
+requests for the prompt or a key, which tool-less agents can't act on).
+
 ## Set or reset password
 
 With guest mode and app sign-in on, `src/irc_lens/web/setpw.py`
