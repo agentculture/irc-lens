@@ -188,6 +188,21 @@ def test_failed_sends_are_counted_when_alert_is_rate_limited():
     assert after["delivery_alerts"] == before["delivery_alerts"] + 1
 
 
+def test_failed_send_calls_the_threat_counter_hook():
+    counted = []
+    rec = Rec()
+    a = alerts.Alerter(
+        "https://w.example/a",
+        SECRET,
+        poster=rec,
+        failed_send_counter=lambda: counted.append(True),
+    )
+
+    _send(Failing(422), a)
+
+    assert counted == [True]
+
+
 def test_poster_raising_is_swallowed(caplog):
     a, rec, _ = _alerter(rec=Rec(raises=True))
     _send(Failing(500), a)  # only MailSendError escapes

@@ -46,6 +46,32 @@ def test_guest_mode_absent_uses_defaults(tmp_path: Path) -> None:
     assert cfg.guest_rate_entry_per_min == 10
     assert cfg.guest_rate_messages_per_min == 20
     assert cfg.guest_rate_password_attempts_per_15min == 5
+    assert cfg.threat_refused_responses_threshold == 50
+    assert cfg.threat_entry_posts_threshold == 10
+    assert cfg.threat_reserved_addresses_threshold == 1
+    assert cfg.threat_failed_sends_threshold == 1
+    assert cfg.threat_budget_hits_threshold == 1
+
+
+def test_threat_rule_thresholds_are_configurable(tmp_path: Path) -> None:
+    cfg = load_config(
+        _write(
+            tmp_path,
+            _base("""
+threat_rules:
+  refused_responses: 60
+  entry_posts: 12
+  reserved_addresses: 2
+  failed_sends: 3
+  budget_hits: 4
+"""),
+        )
+    )
+    assert cfg.threat_refused_responses_threshold == 60
+    assert cfg.threat_entry_posts_threshold == 12
+    assert cfg.threat_reserved_addresses_threshold == 2
+    assert cfg.threat_failed_sends_threshold == 3
+    assert cfg.threat_budget_hits_threshold == 4
 
 
 def test_guest_mode_with_all_fields(tmp_path: Path) -> None:

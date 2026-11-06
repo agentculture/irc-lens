@@ -40,6 +40,7 @@ from aiohttp.test_utils import TestClient, TestServer
 
 from _agentirc_server import AgentIRCTestServer
 from _jwks_server import FakeJWKS
+from irc_lens import threat
 from irc_lens.mail import RecordingAdapter
 from irc_lens.session import Session
 from irc_lens.web import app_session, csrf, entry, make_app
@@ -201,6 +202,8 @@ async def test_reserved_address_gets_the_code_page_and_no_mail(env: Env) -> None
         assert resp.status == 200
         assert 'action="/entry/code"' in await resp.text()
     assert env.mail.sent == []
+    counts = env.app[threat.THREAT_COUNTERS].snapshot().counts
+    assert counts[threat.Signal.RESERVED_ADDRESSES] == 3
 
 
 async def test_approved_wrong_password_and_banned_email_get_no_mail(env: Env) -> None:

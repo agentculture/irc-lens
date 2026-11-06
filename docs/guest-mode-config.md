@@ -282,6 +282,32 @@ Every failed send logs `mail send failed: HTTP <status>` (or `network error`)
 and nothing else about the send, and increments `failed_sends`. Each alert
 posted increments `delivery_alerts`.
 
+## Threat rules
+
+The console counts request signals in memory in 15-minute windows: requests,
+probes of unrouted paths, refused (401 and 403) responses, entry posts, guest
+mail sends, reserved-address refusals, failed sends and budget hits. It keeps
+counts and hashed source addresses only, never paths, addresses or user
+agents. A check every 5 seconds, off the request path, compares the counts
+with fixed triggers and posts one alert per window through the delivery-alert
+URL, within the usual one-per-kind-per-hour limit. The alert carries counts
+only; a budget-hit alert adds that real guests may be getting no mail.
+
+The triggers are a top-level `threat_rules:` section, each a positive count
+per window:
+
+```yaml
+threat_rules:
+  refused_responses: 50
+  entry_posts: 10
+  reserved_addresses: 1
+  failed_sends: 1
+  budget_hits: 1
+```
+
+Alert kinds: `rule-budget-hit`, `rule-failed-send`, `rule-reserved-address`
+and `rule-burst` (refused responses or entry posts).
+
 ## Set or reset password
 
 With guest mode and app sign-in on, `src/irc_lens/web/setpw.py`

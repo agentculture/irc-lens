@@ -460,6 +460,7 @@ def send_with_alert(
         status = f"HTTP {exc.status}" if exc.status is not None else "network error"
         logger.warning("mail send failed: %s", status)
         if alerter is not None:
+            alerter.failed_send()
             from irc_lens.alerts import classify, message_for
 
             kind = classify(exc.status)

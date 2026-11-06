@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import socket
 import sqlite3
+from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
@@ -11,6 +12,7 @@ from aiohttp import web
 from aiohttp.test_utils import make_mocked_request
 
 from irc_lens import threat
+from irc_lens.web import entry
 
 
 REAL_PATH = "/real"
@@ -122,3 +124,16 @@ async def test_entry_posts_and_http_exceptions_are_counted() -> None:
     snapshot = app[threat.THREAT_COUNTERS].snapshot()
     assert snapshot.counts[threat.Signal.ENTRY_POSTS] == 1
     assert snapshot.counts[threat.Signal.REFUSED_RESPONSES] == 1
+
+
+@pytest.mark.reserved_domains
+def test_reserved_address_refusal_feeds_the_fixed_rule_counter() -> None:
+    app = web.Application()
+    counters = threat.install(app)
+    request = SimpleNamespace(app=app)
+
+    assert entry._reserved_address_refused(request, "probe@example.com") is True
+    assert entry._reserved_address_refused(request, "guest@culture.dev") is False
+
+    snapshot = counters.snapshot()
+    assert snapshot.counts[threat.Signal.RESERVED_ADDRESSES] == 1

@@ -31,7 +31,7 @@ from aiohttp import web
 from aiohttp.test_utils import TestClient, TestServer
 
 from _jwks_server import FakeJWKS
-from irc_lens import legal, metrics
+from irc_lens import legal, metrics, threat
 from irc_lens.config import LensConfig
 from irc_lens.guest_store import GuestStore
 from irc_lens.mail import RecordingAdapter, render_token_email
@@ -603,6 +603,8 @@ async def test_guest_start_sends_nothing_to_a_reserved_address(h):
     reserved = await _request_token(h, email="probe@example.com", nickname="zed")
     assert reserved.status == real.status == 200
     assert [to for to, _s, _b in h.mail.sent] == ["someone@culture-guest.net"]
+    counts = h.client.app[threat.THREAT_COUNTERS].snapshot().counts
+    assert counts[threat.Signal.RESERVED_ADDRESSES] == 1
 
 
 async def test_guest_start_bot_check(h):
