@@ -70,6 +70,9 @@ def test_threat_request_contains_only_fixed_questions_and_derived_counts() -> No
             "reserved_addresses=6\n"
             "failed_sends=7\n"
             "budget_hits=8\n"
+            "messages_blocked=9\n"
+            "messages_flagged=10\n"
+            "messages_unchecked=11\n"
             "distinct_sources=9\n"
             "source_count_capped=true"
         ),
