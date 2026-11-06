@@ -15,6 +15,7 @@ from pathlib import Path
 
 from aiohttp import web
 
+from irc_lens import threat
 from irc_lens._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import LensConfig, resolve_access
 from irc_lens.web import (
@@ -252,6 +253,7 @@ def make_app(
         client_max_size=config.media_max_file_bytes + _CLIENT_MAX_SIZE_MEDIA_HEADROOM,
         middlewares=[
             _security_headers_middleware,
+            threat.threat_middleware,
             standby.standby_middleware,
             csrf.csrf_middleware,
             middleware,
@@ -260,6 +262,7 @@ def make_app(
             nickname.nickname_gate,
         ],
     )
+    threat.install(app)
 
     csrf.install(app)
 
