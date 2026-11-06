@@ -127,6 +127,9 @@ class LensConfig:
     threat_reserved_addresses_threshold: int = 1
     threat_failed_sends_threshold: int = 1
     threat_budget_hits_threshold: int = 1
+    # Optional counts-only Clef verdict. The credential itself stays in env.
+    threat_decider_url: str | None = None
+    threat_decider_credential_env: str | None = None
     # web.mcp_path: where the remote MCP endpoint is mounted (web/mcp_http.py).
     mcp_path: str = "/mcp"
     # Worker-to-origin gate. The config stores only the environment-variable
@@ -563,6 +566,8 @@ _THREAT_RULE_KEYS = frozenset(
         "reserved_addresses",
         "failed_sends",
         "budget_hits",
+        "decider_url",
+        "decider_credential_env",
     }
 )
 
@@ -715,6 +720,28 @@ def _alert_url(value: object) -> str | None:
             f"guest_mode.mail.alert_url must be an https:// URL "
             f"(http:// only for 127.0.0.1/localhost), got {url!r}",
             "set `guest_mode.mail.alert_url:` to an https URL, or remove the key",
+        )
+    return url
+
+
+def _optional_service_url(value: object, where: str) -> str | None:
+    if value is None:
+        return None
+    url = _coerce_str(value, where)
+    try:
+        parsed = urlsplit(url)
+        host = parsed.hostname
+    except ValueError:
+        parsed, host = None, None
+    valid = bool(host) and (
+        parsed.scheme == "https"
+        or (parsed.scheme == "http" and host in _LOOPBACK_HOSTS)
+    )
+    if not valid:
+        raise _err(
+            f"{where} must be an https:// URL "
+            f"(http:// only for 127.0.0.1/localhost), got {url!r}",
+            f"set `{where}:` to the full Clef gateway URL, or remove it",
         )
     return url
 
@@ -877,7 +904,7 @@ def _validate_guest_mode_section(raw: dict) -> dict:
     }
 
 
-def _validate_threat_rules(raw: dict) -> dict[str, int]:
+def _validate_threat_rules(raw: dict) -> dict[str, object]:
     """Load positive trigger counts for the fixed 15-minute rules."""
     section = _optional_mapping(
         raw.get("threat_rules"), "threat_rules", _THREAT_RULE_KEYS
@@ -886,12 +913,25 @@ def _validate_threat_rules(raw: dict) -> dict[str, int]:
     def threshold(name: str, default: int) -> int:
         return _positive_int(section.get(name, default), f"threat_rules.{name}")
 
+    url = _optional_service_url(section.get("decider_url"), "threat_rules.decider_url")
+    credential_env = _optional_str(
+        section.get("decider_credential_env"),
+        "threat_rules.decider_credential_env",
+    )
+    if bool(url) != bool(credential_env and credential_env.strip()):
+        raise _err(
+            "threat_rules.decider_url and decider_credential_env must be set together",
+            "set both threat_rules decider keys, or remove both to disable Clef",
+        )
+
     return {
         "threat_refused_responses_threshold": threshold("refused_responses", 50),
         "threat_entry_posts_threshold": threshold("entry_posts", 10),
         "threat_reserved_addresses_threshold": threshold("reserved_addresses", 1),
         "threat_failed_sends_threshold": threshold("failed_sends", 1),
         "threat_budget_hits_threshold": threshold("budget_hits", 1),
+        "threat_decider_url": url,
+        "threat_decider_credential_env": credential_env,
     }
 
 

@@ -71,6 +71,26 @@ integers, and `idle_close_s` and
 `mail.alert_url`, when set, must be an `https` URL (plain `http` is accepted
 only for `127.0.0.1` / `localhost`).
 
+## Advisory threat verdicts
+
+Fixed threat rules work without Clef and are unchanged when this section is
+absent. To add a counts-only advisory verdict to rule alerts, configure the
+gateway URL and name the environment variable holding its credential:
+
+```yaml
+threat_rules:
+  decider_url: http://127.0.0.1:8001/v1/systemone
+  decider_credential_env: CLEF_GATEWAY_KEY
+```
+
+Both keys are required together. Plain HTTP is accepted only for a loopback
+gateway. Clef receives aggregate 15-minute counts, never addresses, paths,
+user agents, or other visitor strings. It never blocks traffic: rule alerts
+remain urgent regardless of its advisory `genuine`, `abusive`, or `unclear`
+verdict. Calls time out after five seconds, are never retried or queued, and
+are capped at one per counter window and 24 per rolling day. With Clef off,
+unavailable, busy, or capped, the alert says `not assessed`.
+
 ## Guest mail budget and rollback
 
 Every mail the console sends, from every path (guest codes, approved sign-in

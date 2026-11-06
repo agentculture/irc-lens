@@ -10,6 +10,9 @@ from irc_lens.cli._errors import EXIT_USER_ERROR, AfiError
 from irc_lens.config import load_config
 
 
+DECIDER_URL = "http://127.0.0.1:8001/v1/systemone"
+
+
 def _write(tmp_path: Path, body: str) -> Path:
     p = tmp_path / "config.yaml"
     p.write_text(body)
@@ -51,6 +54,8 @@ def test_guest_mode_absent_uses_defaults(tmp_path: Path) -> None:
     assert cfg.threat_reserved_addresses_threshold == 1
     assert cfg.threat_failed_sends_threshold == 1
     assert cfg.threat_budget_hits_threshold == 1
+    assert cfg.threat_decider_url is None
+    assert cfg.threat_decider_credential_env is None
 
 
 def test_threat_rule_thresholds_are_configurable(tmp_path: Path) -> None:
@@ -72,6 +77,37 @@ threat_rules:
     assert cfg.threat_reserved_addresses_threshold == 2
     assert cfg.threat_failed_sends_threshold == 3
     assert cfg.threat_budget_hits_threshold == 4
+
+
+def test_threat_decider_config_uses_url_and_credential_env_name(tmp_path: Path) -> None:
+    cfg = load_config(
+        _write(
+            tmp_path,
+            _base("""
+threat_rules:
+  decider_url: http://127.0.0.1:8001/v1/systemone
+  decider_credential_env: CLEF_GATEWAY_KEY
+"""),
+        )
+    )
+
+    assert cfg.threat_decider_url == DECIDER_URL
+    assert cfg.threat_decider_credential_env == "CLEF_GATEWAY_KEY"
+
+
+def test_threat_decider_config_requires_url_and_env_name_together(
+    tmp_path: Path,
+) -> None:
+    config_path = _write(
+        tmp_path,
+        _base("""
+threat_rules:
+  decider_url: http://127.0.0.1:8001/v1/systemone
+"""),
+    )
+
+    with pytest.raises(AfiError, match="must be set together"):
+        load_config(config_path)
 
 
 def test_guest_mode_with_all_fields(tmp_path: Path) -> None:

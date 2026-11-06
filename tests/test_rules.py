@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import threading
 from dataclasses import replace
 
 import pytest
 from aiohttp import web
 
 from helpers import DEV_CONFIG
-from irc_lens import alerts, rules, threat
+from irc_lens import alerts, decider, rules, threat
 
 
 class Clock:
@@ -29,12 +30,18 @@ class RecordingAlerter:
         return True
 
 
-def _monitor(**config_changes):
+def _monitor(*, threat_decider=None, **config_changes):
     clock = Clock()
     counters = threat.ThreatCounters(clock=clock)
     alerter = RecordingAlerter()
     config = replace(DEV_CONFIG, **config_changes)
-    return rules.RuleMonitor(counters, alerter, config), counters, alerter, clock
+    monitor = rules.RuleMonitor(
+        counters,
+        alerter,
+        config,
+        threat_decider=threat_decider,
+    )
+    return monitor, counters, alerter, clock
 
 
 @pytest.mark.parametrize(
@@ -60,6 +67,47 @@ def test_each_trigger_alerts_once_with_counts(
     alert_kind, message = alerter.notifications[0]
     assert alert_kind == kind
     assert f"{signal.value}={amount}" in message
+    assert "Clef advisory verdict: not assessed" in message
+
+
+def test_rule_alert_has_labelled_advisory_verdict() -> None:
+    class Assessor:
+        def assess(self, _snapshot, callback) -> bool:
+            callback(decider.Verdict("abusive", 0.75, {"abusive": 0.75}))
+            return True
+
+    monitor, counters, alerter, _ = _monitor(threat_decider=Assessor())
+    counters.increment(threat.Signal.ENTRY_POSTS, 10)
+
+    assert monitor.check() is True
+    assert "Clef advisory verdict: abusive" in alerter.notifications[0][1]
+
+
+def test_hanging_decider_does_not_block_and_timeout_alerts_not_assessed() -> None:
+    entered = threading.Event()
+    release = threading.Event()
+
+    def hanging_post(_url, _credential, _body, _timeout):
+        entered.set()
+        release.wait(1)
+        raise TimeoutError
+
+    client = decider.DeciderClient(
+        "http://127.0.0.1:8001/v1/systemone",
+        "key",
+        poster=hanging_post,
+    )
+    assessor = decider.ThreatVerdictCaller(client)
+    monitor, counters, alerter, _ = _monitor(threat_decider=assessor)
+    counters.increment(threat.Signal.ENTRY_POSTS, 10)
+
+    assert monitor.check() is True
+    assert entered.wait(1)
+    assert alerter.notifications == []
+
+    release.set()
+    client.wait()
+    assert "Clef advisory verdict: not assessed" in alerter.notifications[0][1]
 
 
 def test_budget_hit_warns_that_real_guests_may_get_no_mail() -> None:

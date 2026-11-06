@@ -10,7 +10,7 @@ from typing import Protocol
 
 from aiohttp import web
 
-from irc_lens import alerts, threat
+from irc_lens import alerts, decider, threat
 from irc_lens.config import LensConfig
 
 logger = logging.getLogger(__name__)
@@ -21,6 +21,14 @@ _BUDGET_WARNING = "real guests may be getting no mail"
 
 class AlertSink(Protocol):
     def notify(self, kind: str, message: str) -> bool: ...
+
+
+class ThreatDecider(Protocol):
+    def assess(
+        self,
+        snapshot: threat.ThreatSnapshot,
+        callback: decider.VerdictCallback,
+    ) -> bool: ...
 
 
 @dataclass
@@ -39,18 +47,23 @@ class RuleMonitor:
         counters: threat.ThreatCounters,
         alerter: AlertSink,
         config: LensConfig,
+        *,
+        threat_decider: ThreatDecider | None = None,
     ) -> None:
         self._counters = counters
         self._alerter = alerter
         self._thresholds = {
             threat.Signal.REFUSED_RESPONSES: config.threat_refused_responses_threshold,
             threat.Signal.ENTRY_POSTS: config.threat_entry_posts_threshold,
-            threat.Signal.RESERVED_ADDRESSES: config.threat_reserved_addresses_threshold,
+            threat.Signal.RESERVED_ADDRESSES: (
+                config.threat_reserved_addresses_threshold
+            ),
             threat.Signal.FAILED_SENDS: config.threat_failed_sends_threshold,
             threat.Signal.BUDGET_HITS: config.threat_budget_hits_threshold,
         }
         self._alerted_window: float | None = None
         self._checked_completed_window: float | None = None
+        self._threat_decider = threat_decider
 
     def check(self) -> bool:
         """Alert if the current, freshly-read counters cross a fixed rule."""
@@ -72,7 +85,39 @@ class RuleMonitor:
         if not self._triggered(snapshot):
             return False
         self._alerted_window = snapshot.window_started_at
-        return self._alerter.notify(self._kind(snapshot), self._message(snapshot))
+        return self._assess_and_alert(snapshot)
+
+    def _assess_and_alert(self, snapshot: threat.ThreatSnapshot) -> bool:
+        kind = self._kind(snapshot)
+        message = self._message(snapshot)
+        if self._threat_decider is None:
+            return self._notify(kind, message, None)
+        try:
+            started = self._threat_decider.assess(
+                snapshot,
+                lambda verdict: self._notify(kind, message, verdict),
+            )
+        except Exception:  # noqa: BLE001 -- an optional verdict cannot hide an alert
+            logger.exception("threat decider failed before starting")
+            return self._notify(kind, message, None)
+        if not started:
+            return self._notify(kind, message, None)
+        return True
+
+    def _notify(
+        self,
+        kind: str,
+        message: str,
+        verdict: decider.Verdict | None,
+    ) -> bool:
+        if verdict is None:
+            assessment = "Clef advisory verdict: not assessed."
+        else:
+            assessment = (
+                f"Clef advisory verdict: {verdict.choice} "
+                f"(confidence={verdict.confidence:.3f})."
+            )
+        return self._alerter.notify(kind, f"{message} {assessment}")
 
     def _triggered(self, snapshot: threat.ThreatSnapshot) -> bool:
         return any(
@@ -123,9 +168,20 @@ def install(
     config: LensConfig,
     *,
     interval: float = CHECK_INTERVAL_S,
+    threat_decider: ThreatDecider | None = None,
 ) -> RuleMonitor:
     """Start and stop one periodic fixed-rule monitor with the application."""
-    monitor = RuleMonitor(app[threat.THREAT_COUNTERS], alerter, config)
+    assessor = (
+        threat_decider
+        if threat_decider is not None
+        else decider.make_threat_verdict_caller(config)
+    )
+    monitor = RuleMonitor(
+        app[threat.THREAT_COUNTERS],
+        alerter,
+        config,
+        threat_decider=assessor,
+    )
     state = RuleState()
     app[RULE_STATE] = state
 
