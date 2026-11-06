@@ -371,7 +371,8 @@ posted increments `delivery_alerts`.
 
 The console counts request signals in memory in 15-minute windows: requests,
 probes of unrouted paths, refused (401 and 403) responses, entry posts, guest
-mail sends, reserved-address refusals, failed sends and budget hits. It keeps
+mail sends, reserved-address refusals, outage send failures (not recipient
+errors) and budget hits. It keeps
 counts and hashed source addresses only, never paths, addresses or user
 agents. A check every 5 seconds, off the request path, compares the counts
 with fixed triggers and posts one alert per window through the delivery-alert
@@ -426,13 +427,17 @@ criteria:
 ```
 
 The guest's line is appended to `state` as data. One call runs at a time per
-guest, with a 5-second timeout. When Clef errs, times out, the prompt file is
-missing or invalid, or `daily_cap` is used up, the line is sent and counted as
-unchecked (`messages_unchecked`).
+guest, with a 5-second timeout, in the validator's own small thread pool so a
+slow Clef can't hold up sign-in. One guest may use at most a tenth of
+`daily_cap`, so a single guest can't use it up for everyone. When Clef errs,
+times out, the prompt file is missing or invalid, or the cap or the guest's
+share is used up, the line is sent and counted as unchecked
+(`messages_unchecked`).
 
 In `flag` mode, a `block` answer is recorded and counted (`messages_flagged`)
-but the line is still sent. In `block` mode the line is refused with "Message
-not sent" and never reaches the sandbox (`messages_blocked`). Flagged and
+but the line is still sent, stored once as a review record. In `block` mode the
+line is refused with "Message not sent" (HTTP 422, which the refused-responses
+rule doesn't count) and never reaches the sandbox (`messages_blocked`). Flagged and
 blocked lines are stored with the guest's inputs, so deleting the guest
 erases them, and alerts carry counts only. Start in `flag` mode, measure the
 prompt on labelled lines (false blocks and misses), and switch to `block` only

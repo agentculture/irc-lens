@@ -140,7 +140,8 @@ def test_ceiling_refusal_counts_and_alerts() -> None:
     with pytest.raises(mail.MailCeilingError):
         mail.send_with_alert(adapter, alerter, "a@x.test", "subject", "body")
     assert alerter.kinds == ["ceiling"]
-    assert alerter.failed == 1
+    # The ceiling has its own alert; it doesn't also feed the failed-send rule.
+    assert alerter.failed == 0
     assert metrics.get_metrics().snapshot()["failed_sends"] == before + 1
 
 

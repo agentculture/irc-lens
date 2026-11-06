@@ -671,7 +671,7 @@ async def get_index(request: web.Request) -> web.Response:
         return entry.warming_up_page(request.app[entry.ENTRY_STATE])
     except web.HTTPException:
         raise
-    except Exception:  # noqa: BLE001 — shaped, never a bare 500 (RT-14)
+    except Exception:  # noqa: BLE001 -- shaped 503 instead of a bare 500 (RT-14)
         logger.exception("opening the session for GET / failed")
         from irc_lens.web import entry
 
@@ -801,7 +801,7 @@ async def post_input(request: web.Request) -> web.Response:
         return _warming_up()
     except web.HTTPException:
         raise
-    except Exception:  # noqa: BLE001 — shaped, never a bare 500 (RT-14)
+    except Exception:  # noqa: BLE001 -- shaped 503 instead of a bare 500 (RT-14)
         logger.exception("opening the session for /input failed")
         return _warming_up()
     # Health gate before parsing: once the AgentIRC pipe is gone, the
@@ -826,15 +826,18 @@ async def post_input(request: web.Request) -> web.Response:
     if _is_sandbox_enter(request, parsed, text):
         request.app["sandbox_toggle"].add(request["identity"].principal)
         return web.Response(status=204, headers={"HX-Refresh": "true"})
-    refused = await _check_guest_line(request, parsed, text)
-    if refused is not None:
-        return refused
+    outcome = await _check_guest_line(request, parsed, text)
+    if outcome == message_check.OUTCOME_BLOCK:
+        return _json_error(422, "Message not sent", "This message was flagged and not sent.")
     try:
         await session.execute(parsed)
     except LensConnectionLost as exc:
         return _session_lost(request, str(exc))
-    # The input log (shared gate): the export task reads these back.
-    input_gate.record(request.app, _input_actor(request), parsed, text)
+    # The input log (shared gate): the export task reads these back. A line
+    # Clef flagged is already stored once, as kind "flagged", so it stays a
+    # review record and out of the training export.
+    if outcome != message_check.OUTCOME_FLAG:
+        input_gate.record(request.app, _input_actor(request), parsed, text)
     return web.Response(status=204)
 
 
@@ -853,7 +856,7 @@ _KIND_FOR_OUTCOME = {
 
 async def _check_guest_line(
     request: web.Request, parsed: ParsedCommand, text: str
-) -> web.Response | None:
+) -> str | None:
     """Clef's verdict on a guest's chat line before the agents see it (t15).
 
     Only a human guest's lines on the sandbox go to Clef (c27). A block is
@@ -876,11 +879,7 @@ async def _check_guest_line(
     kind = _KIND_FOR_OUTCOME.get(outcome)
     if kind is not None:
         request.app["guest_store"].record_input(actor.email, kind=kind, payload=text)
-    if outcome != message_check.OUTCOME_BLOCK:
-        return None
-    return _json_error(
-        403, "Message not sent", "This message was flagged and not sent."
-    )
+    return outcome
 
 
 def _touch(request: web.Request) -> None:
@@ -1085,7 +1084,7 @@ async def get_events(request: web.Request) -> web.StreamResponse:
         return _warming_up()
     except web.HTTPException:
         raise
-    except Exception:  # noqa: BLE001 — shaped, never a bare 500 (RT-14)
+    except Exception:  # noqa: BLE001 -- shaped 503 instead of a bare 500 (RT-14)
         logger.exception("opening the session for the event stream failed")
         return _warming_up()
     sub = session.event_bus.subscribe()

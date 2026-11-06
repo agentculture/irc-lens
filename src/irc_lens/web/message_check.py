@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import collections
+import concurrent.futures
 import logging
 import os
 import threading
@@ -41,6 +42,12 @@ CHOICES = frozenset({ALLOW, BLOCK})
 MODE_BLOCK = "block"
 TIMEOUT_S = 5.0
 DAY_S = 24 * 60 * 60
+#: One guest may use at most this share of the daily cap, so a single guest
+#: can't use it up and leave every other guest's lines unchecked.
+GUEST_SHARE = 0.1
+#: Calls run in the validator's own small pool: a slow Clef can never fill the
+#: default executor that password checks, the store and mail rely on.
+POOL_WORKERS = 2
 
 #: Outcomes of one check.
 OUTCOME_ALLOW = "allow"
@@ -157,6 +164,11 @@ class MessageValidator:
         self._poster = poster
         self._clock = clock
         self._calls: collections.deque[float] = collections.deque()
+        self._guest_calls: dict[str, collections.deque[float]] = {}
+        self._guest_cap = max(1, int(daily_cap * GUEST_SHARE))
+        self._pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=POOL_WORKERS, thread_name_prefix="clef-validator"
+        )
         # principal -> (lock, users): one call in flight per guest; the entry
         # goes when its last user is done, so idle guests hold nothing.
         self._guest_locks: dict[str, tuple[asyncio.Lock, int]] = {}
@@ -169,7 +181,7 @@ class MessageValidator:
         self._guest_locks[principal] = (lock, users + 1)
         try:
             async with lock:
-                if not self._take_call():
+                if not self._take_call(principal):
                     return OUTCOME_UNCHECKED
                 verdict = await self._ask(build_request(prompt, line))
         finally:
@@ -184,24 +196,33 @@ class MessageValidator:
             return OUTCOME_ALLOW
         return OUTCOME_BLOCK if self._block else OUTCOME_FLAG
 
-    def _take_call(self) -> bool:
+    def _take_call(self, principal: str) -> bool:
         now = self._clock()
-        while self._calls and now - self._calls[0] >= DAY_S:
-            self._calls.popleft()
-        if len(self._calls) >= self._daily_cap:
+        mine = self._guest_calls.setdefault(principal, collections.deque())
+        for calls in (self._calls, mine):
+            while calls and now - calls[0] >= DAY_S:
+                calls.popleft()
+        if len(self._calls) >= self._daily_cap or len(mine) >= self._guest_cap:
             return False
         self._calls.append(now)
+        mine.append(now)
         return True
 
     async def _ask(self, request: dict) -> decider.Verdict | None:
         try:
+            loop = asyncio.get_running_loop()
             payload = await asyncio.wait_for(
-                asyncio.to_thread(
-                    self._poster, self._url, self._credential, request, self._timeout
+                loop.run_in_executor(
+                    self._pool,
+                    self._poster,
+                    self._url,
+                    self._credential,
+                    request,
+                    self._timeout,
                 ),
                 self._timeout,
             )
-        except Exception as exc:  # noqa: BLE001 -- fail open (c29), never log the line
+        except Exception as exc:  # noqa: BLE001 -- fail open (c29) and never log the line
             logger.warning("message validator call failed: %s", type(exc).__name__)
             return None
         return decider.validated_verdict(payload, QUESTION_KEY, CHOICES)

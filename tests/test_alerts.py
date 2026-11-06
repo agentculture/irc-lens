@@ -198,8 +198,10 @@ def test_failed_send_calls_the_threat_counter_hook():
         failed_send_counter=lambda: counted.append(True),
     )
 
+    # A recipient error is not an outage: it never feeds the threat rule.
     _send(Failing(422), a)
-
+    assert counted == []
+    _send(Failing(500), a)
     assert counted == [True]
 
 

@@ -156,9 +156,17 @@ async def test_hanging_clef_lets_the_line_through_without_blocking_the_loop(
 async def test_daily_cap_sends_lines_through_unchecked(prompt_path) -> None:
     clef = FakeClef(_answer("block"))
     validator = _validator(prompt_path, clef, cap=2)
-    outcomes = [await validator.check("guest:a@b.c", "hi") for _ in range(3)]
+    outcomes = [await validator.check(f"guest:{n}@b.c", "hi") for n in range(3)]
     assert outcomes == [OUTCOME_BLOCK, OUTCOME_BLOCK, OUTCOME_UNCHECKED]
     assert len(clef.requests) == 2
+
+
+async def test_one_guest_cannot_use_up_the_cap_for_others(prompt_path) -> None:
+    clef = FakeClef(_answer("block"))
+    validator = _validator(prompt_path, clef, cap=20)  # each guest's share: 2
+    flood = [await validator.check("guest:flood@b.c", "hi") for _ in range(5)]
+    assert flood == [OUTCOME_BLOCK, OUTCOME_BLOCK] + [OUTCOME_UNCHECKED] * 3
+    assert await validator.check("guest:other@b.c", "hi") == OUTCOME_BLOCK
 
 
 async def test_one_call_in_flight_per_guest(prompt_path) -> None:
@@ -224,7 +232,9 @@ async def test_blocked_line_never_reaches_the_sandbox(env: Env, monkeypatch, pro
     _use(monkeypatch, _validator(prompt_path, FakeClef(_answer("block"))))
 
     sent = await env.say(ANN, "a line Clef blocks")
-    assert sent.status == 403
+    # 422, not 403: a content refusal must not feed the refused-responses rule.
+    assert sent.status == 422
+    assert _count(env, threat.Signal.REFUSED_RESPONSES) == 0
     assert (await sent.json())["error"] == "Message not sent"
     await asyncio.sleep(0.2)
     assert _privmsgs(env, "a line Clef blocks") == []
@@ -243,6 +253,9 @@ async def test_allowed_and_flagged_lines_are_sent(env: Env, monkeypatch, prompt_
     await asyncio.sleep(0.2)
     assert _privmsgs(env, "flag mode sends this")
     assert _count(env, threat.Signal.MESSAGES_FLAGGED) == 1
+    # Stored once, as a review record: never also as a normal message.
+    kinds = [kind for kind, text, _ts in env.app["guest_store"].inputs_for(ANN) if text == "flag mode sends this"]
+    assert kinds == ["flagged"]
 
 
 async def test_hanging_clef_sends_the_line_marked_unchecked(

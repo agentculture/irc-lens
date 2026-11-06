@@ -464,7 +464,6 @@ def send_with_alert(
         metrics.get_metrics().failed_send()
         logger.warning("mail send refused: outgoing mail ceiling reached")
         if alerter is not None:
-            alerter.failed_send()
             from irc_lens.alerts import KIND_CEILING, message_for
 
             alerter.notify(KIND_CEILING, message_for(KIND_CEILING, None))
@@ -480,10 +479,11 @@ def send_with_alert(
         status = f"HTTP {exc.status}" if exc.status is not None else "network error"
         logger.warning("mail send failed: %s", status)
         if alerter is not None:
-            alerter.failed_send()
             from irc_lens.alerts import classify, message_for
 
             kind = classify(exc.status)
             if kind is not None:
+                # Only outages feed the threat rule: a bad recipient never alerts.
+                alerter.failed_send()
                 alerter.notify(kind, message_for(kind, exc.status))
         raise

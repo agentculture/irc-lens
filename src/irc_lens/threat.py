@@ -70,7 +70,7 @@ class ThreatCounters:
         self._source_cap = source_cap
         self._hash_key = hash_key or secrets.token_bytes(32)
         self._window_started_at = clock()
-        self._counts = {signal: 0 for signal in Signal}
+        self._counts = dict.fromkeys(Signal, 0)
         self._source_hashes: set[bytes] = set()
         self._source_count_capped = False
         self._completed_snapshot: ThreatSnapshot | None = None
@@ -159,7 +159,7 @@ class ThreatCounters:
             return
         self._completed_snapshot = self._snapshot_locked()
         self._window_started_at = now
-        self._counts = {signal: 0 for signal in Signal}
+        self._counts = dict.fromkeys(Signal, 0)
         self._source_hashes.clear()
         self._source_count_capped = False
 
