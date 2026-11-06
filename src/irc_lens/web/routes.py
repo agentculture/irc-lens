@@ -49,7 +49,7 @@ from irc_lens.commands import (
 from irc_lens.session import LensConnectionLost, Session
 from irc_lens.web import app_session, input_gate, message_check
 from irc_lens.web.auth import allows_anonymous
-from irc_lens.web.entry import client_ip
+from irc_lens.web.entry import ENTRY_STATE, NO_BOT_CHECK_WARNING, client_ip
 from irc_lens.web.events import format_sse
 from irc_lens.web.identity import TIER_ANONYMOUS, TIER_GUEST, Identity
 from irc_lens.web.render import (
@@ -1263,8 +1263,41 @@ async def get_healthz(_request: web.Request) -> web.Response:  # NOSONAR S7503
     return web.json_response({"ok": True})
 
 
+def _owner_operational_state(app: web.Application) -> dict:
+    """Counts-only threat window and the effective guest bot-check state."""
+    snapshot = app[threat.THREAT_COUNTERS].snapshot()
+    entry_state = app[ENTRY_STATE]
+    enabled = entry_state.config.guest_enabled
+    configured = entry_state.verifier.site_key is not None
+    required = entry_state.config.guest_require_bot_check
+    if not enabled:
+        status = "disabled"
+    elif configured:
+        status = "required" if required else "optional"
+    else:
+        status = "missing" if required else "off"
+    return {
+        "threat": {
+            "window_seconds": threat.WINDOW_SECONDS,
+            "counts": {
+                signal.value: snapshot.counts[signal] for signal in threat.Signal
+            },
+            "distinct_sources": snapshot.distinct_sources,
+            "source_count_capped": snapshot.source_count_capped,
+        },
+        "bot_check": {
+            "configured": configured,
+            "required": required,
+            "status": status,
+            "warning": (
+                NO_BOT_CHECK_WARNING if enabled and not configured else None
+            ),
+        },
+    }
+
+
 async def get_owner_metrics(request: web.Request) -> web.Response:
-    """Owner-only guest-mode counters + sandbox-agent presence (JSON).
+    """Owner-only counters, bot-check state and sandbox-agent presence.
 
     Approved tier only. Deliberately NOT ``allows_anonymous``: the auth
     middleware already 401s anonymous requests; the tier check here also
@@ -1285,5 +1318,6 @@ async def get_owner_metrics(request: web.Request) -> web.Response:
             "counters": metrics.get_metrics().snapshot(),
             "access": access_counts,
             "agent": _owner_agent_state(request.app["registry"]),
+            **_owner_operational_state(request.app),
         }
     )
