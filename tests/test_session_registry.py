@@ -29,6 +29,22 @@ def _fake_session_factory() -> tuple[Callable[[str], MagicMock], list[MagicMock]
     return factory, created
 
 
+def test_pending_guest_reservations_are_capped_per_address() -> None:
+    factory, _created = _fake_session_factory()
+    registry = SessionRegistry(factory=factory)
+    options = {"max_pending_per_address": 1}
+
+    assert registry.try_reserve_guest(
+        "guest:ann@example.org", 3, address="192.0.2.1", **options
+    )
+    assert not registry.try_reserve_guest(
+        "guest:bob@example.org", 3, address="192.0.2.1", **options
+    )
+    assert registry.try_reserve_guest(
+        "guest:cal@example.org", 3, address="192.0.2.2", **options
+    )
+
+
 @pytest.mark.asyncio
 async def test_first_request_opens_session() -> None:
     factory, created = _fake_session_factory()

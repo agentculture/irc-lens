@@ -43,6 +43,7 @@ BUSY = "The sandbox is busy. Try again in a few minutes."
 APPROVED = "alice@example.com"
 ANN = "ann@example.org"
 BOB = "bob@example.org"
+CAL = "cal@example.org"
 IDLE_S = 900
 _SAME_ORIGIN = {"Sec-Fetch-Site": "same-origin"}
 
@@ -128,9 +129,13 @@ class Env:
             "/entry/guest/start", {"email": email, "nickname": nick, "consent": "on"}
         )
 
-    async def verify(self, email: str, nick: str, code: str):
+    async def verify(
+        self, email: str, nick: str, code: str, headers: dict | None = None
+    ):
         resp = await self.post(
-            "/entry/verify", {"email": email, "nickname": nick, "code": code}
+            "/entry/verify",
+            {"email": email, "nickname": nick, "code": code},
+            headers,
         )
         if csrf.GUEST_COOKIE_NAME in resp.cookies:
             self.cookies[email] = resp.cookies[csrf.GUEST_COOKIE_NAME].value
@@ -242,6 +247,29 @@ async def test_simultaneous_verifies_admit_exactly_one(env: Env) -> None:
     assert page.status == 200
     assert env.registry.active_guest_count() == 1
     assert env.registry.has(f"guest:{winner}", "sandbox")
+
+
+async def test_pending_reservations_are_capped_per_address(env: Env) -> None:
+    """h32: one address cannot hold every seat with unopened reservations."""
+    object.__setattr__(env.app["config"], "guest_max_guests", 3)
+    for email, nick in ((ANN, "ann"), (BOB, "bob"), (CAL, "cal")):
+        await env.request_code(email, nick)
+
+    first = await env.verify(
+        ANN, "ann", env.code_for(ANN), {"CF-Connecting-IP": "192.0.2.1"}
+    )
+    capped = await env.verify(
+        BOB, "bob", env.code_for(BOB), {"CF-Connecting-IP": "192.0.2.1"}
+    )
+    other = await env.verify(
+        CAL, "cal", env.code_for(CAL), {"CF-Connecting-IP": "192.0.2.2"}
+    )
+
+    assert first.status == 303
+    assert capped.status == 200
+    assert BUSY in await capped.text()
+    assert other.status == 303
+    assert env.registry.active_guests() == {f"guest:{ANN}", f"guest:{CAL}"}
 
 
 async def test_verified_but_unopened_slot_expires(env: Env) -> None:

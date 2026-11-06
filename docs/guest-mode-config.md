@@ -16,6 +16,7 @@ guest_mode:
     flag_log: ~/.culture/sandbox/flags.jsonl  # deletion purges it
   idle_close_s: 900         # sign off a guest after this long with no action
   max_guests: 1             # concurrent guests allowed (Guest view never counts)
+  max_pending_per_address: 1 # unopened seat reservations per client address
   retention_days: 90        # erase guests inactive this many days
   store_path: ~/.local/share/irc-lens/guests.db   # default: $XDG_DATA_HOME/irc-lens/guests.db
   legal_version_url: https://culture.dev/legal/version.json
@@ -45,6 +46,7 @@ guest_mode:
 | `sandbox.flag_log` | `guest_sandbox_flag_log` | unset (required for full deletion) |
 | `idle_close_s` | `guest_idle_close_s` | `900` |
 | `max_guests` | `guest_max_guests` | `1` |
+| `max_pending_per_address` | `guest_max_pending_per_address` | `1` |
 | `require_bot_check` | `guest_require_bot_check` | `false` |
 | `retention_days` | `guest_retention_days` | `90` |
 | `store_path` | `guest_store_path` | `$XDG_DATA_HOME/irc-lens/guests.db` |
@@ -67,7 +69,8 @@ section are rejected (typo guard); `enabled` must be a boolean, ports go
 through the shared port check, `legal_version_url` must be an `http(s)` URL
 with a host, mail budgets must be non-negative integers, rate limits must be
 integers, and `idle_close_s` and
-`retention_days` must be positive integers, as must `max_guests`.
+`retention_days`, `max_guests`, and `max_pending_per_address` must be positive
+integers.
 `mail.alert_url`, when set, must be an `https` URL (plain `http` is accepted
 only for `127.0.0.1` / `localhost`).
 
@@ -474,7 +477,11 @@ with no open browser tab.
 
 At most `max_guests` guests are active at once: a guest with an open sandbox
 session, or one whose code was just verified (the slot is held for 120 s until
-the browser opens the chat). With app sign-in on, a guest is mailed a code
+the browser opens the chat). One client address may hold at most
+`max_pending_per_address` of those unopened reservations (default `1`); a
+different address can still reserve another available seat. Guest messages
+are limited to `rate_limits.messages_per_min` per minute (default `20`). With
+app sign-in on, a guest is mailed a code
 even while the sandbox is full (the browser can't be told it's a guest
 before the code) and sees `The sandbox is busy. Try again in a few minutes.`
 after a right code; the code stays usable. With the rollback switch off, a
