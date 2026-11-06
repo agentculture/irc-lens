@@ -68,7 +68,7 @@ integers, and `idle_close_s` and
 `mail.alert_url`, when set, must be an `https` URL (plain `http` is accepted
 only for `127.0.0.1` / `localhost`).
 
-### Guest mail budget and rollback
+## Guest mail budget and rollback
 
 Guest code mail has a persistent global budget of `mail.daily_budget` per
 rolling 24 hours and `mail.hourly_budget` per rolling hour. One source IP may
