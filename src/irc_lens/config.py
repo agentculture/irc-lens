@@ -87,6 +87,8 @@ class LensConfig:
     guest_mail_daily_budget: int = 50
     guest_mail_hourly_budget: int = 20
     guest_mail_ip_hourly_budget: int = 5
+    # All mail, every path: below the provider's 100-a-day limit (t4).
+    guest_mail_total_daily_ceiling: int = 90
     # Delivery-alert webhook (https; http only for loopback) and the env var
     # holding its shared secret.
     guest_mail_alert_url: str | None = None
@@ -538,6 +540,7 @@ _GUEST_MAIL_KEYS = frozenset(
         "daily_budget",
         "hourly_budget",
         "ip_hourly_budget",
+        "total_daily_ceiling",
     }
 )
 _GUEST_RATE_KEYS = frozenset(
@@ -833,6 +836,9 @@ def _validate_guest_mode_section(raw: dict) -> dict:
         ),
         "guest_mail_ip_hourly_budget": _nonnegative_int(
             mail.get("ip_hourly_budget", 5), "guest_mode.mail.ip_hourly_budget"
+        ),
+        "guest_mail_total_daily_ceiling": _nonnegative_int(
+            mail.get("total_daily_ceiling", 90), "guest_mode.mail.total_daily_ceiling"
         ),
         "guest_mail_alert_url": _alert_url(mail.get("alert_url")),
         "guest_mail_alert_secret_env": _optional_str(

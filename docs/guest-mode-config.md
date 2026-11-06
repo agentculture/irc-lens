@@ -26,6 +26,7 @@ guest_mode:
     daily_budget: 50          # guest code mail across all visitors per 24 hours
     hourly_budget: 20         # guest code mail across all visitors per hour
     ip_hourly_budget: 5       # guest code mail from one IP per hour
+    total_daily_ceiling: 90   # all mail, every path, per rolling day
     alert_url: ""             # optional delivery-alert webhook (https; http only for 127.0.0.1/localhost)
     alert_secret_env: ""      # env var holding the alert webhook secret
   rate_limits:
@@ -53,6 +54,7 @@ guest_mode:
 | `mail.daily_budget` | `guest_mail_daily_budget` | `50` |
 | `mail.hourly_budget` | `guest_mail_hourly_budget` | `20` |
 | `mail.ip_hourly_budget` | `guest_mail_ip_hourly_budget` | `5` |
+| `mail.total_daily_ceiling` | `guest_mail_total_daily_ceiling` | `90` |
 | `mail.alert_url` | `guest_mail_alert_url` | unset (alerts off) |
 | `mail.alert_secret_env` | `guest_mail_alert_secret_env` | unset |
 | `rate_limits.entry_per_min` | `guest_rate_entry_per_min` | `10` |
@@ -69,6 +71,13 @@ integers, and `idle_close_s` and
 only for `127.0.0.1` / `localhost`).
 
 ### Guest mail budget and rollback
+
+Every mail the console sends, from every path (guest codes, approved sign-in
+codes and notices, set-password links and deletion codes), passes one ceiling
+of `mail.total_daily_ceiling` per rolling day, set below the provider's
+100-a-day limit. It is counted in memory, so a restart starts it again; the
+guest budget below is the persistent limit. Set-password and deletion mail are
+also limited to 5 per address per hour.
 
 Guest code mail has a persistent global budget of `mail.daily_budget` per
 rolling 24 hours and `mail.hourly_budget` per rolling hour. One source IP may

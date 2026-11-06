@@ -199,13 +199,15 @@ async def test_only_allowed_email_gets_setpw_link(env: Env) -> None:
 
 
 async def test_request_rate_limited_per_email(env: Env) -> None:
-    limit = env.app["config"].guest_rate_entry_per_min
-    for i in range(limit):
+    limit = setpw.MAIL_ADDRESS_HOURLY_LIMIT
+    first = await env.request_link(ALICE, **{"CF-Connecting-IP": "10.0.0.0"})
+    first_html = await first.text()
+    for i in range(1, limit):
         r = await env.request_link(ALICE, **{"CF-Connecting-IP": f"10.0.0.{i}"})
         assert r.status == 200
     r = await env.request_link(ALICE, **{"CF-Connecting-IP": "10.0.1.1"})
     assert r.status == 429
-    assert SENT_TEXT in await r.text()
+    assert await r.text() == first_html
     assert len(env.mail.sent) == limit
 
 
