@@ -34,6 +34,7 @@ _COUNTERS = (
     "sessions_ended",
     "guest_busy",
     "delivery_alerts",
+    "failed_sends",
 )
 
 
@@ -76,6 +77,10 @@ class Metrics:
     def delivery_alert(self) -> None:
         self._bump("delivery_alerts")
 
+    def failed_send(self) -> None:
+        """Every failed send, alerted or not (t1): recipient errors included."""
+        self._bump("failed_sends")
+
     def session_opened(self) -> None:
         with self._lock:
             self._active += 1
@@ -98,6 +103,7 @@ class Metrics:
                 "sessions_ended": c["sessions_ended"],
                 "guest_busy": c["guest_busy"],
                 "delivery_alerts": c["delivery_alerts"],
+                "failed_sends": c["failed_sends"],
             }
 
 

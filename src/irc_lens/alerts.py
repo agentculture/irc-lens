@@ -1,7 +1,7 @@
 """Delivery alerts (task t7): tell the operators when mail stops flowing.
 
-When a Resend send fails (HTTP error including quota exhaustion, or a
-network error) the lens posts ``{"kind", "message"}`` as JSON to
+When a Resend send fails because delivery appears unavailable, the lens
+posts ``{"kind", "message"}`` as JSON to
 ``guest_mode.mail.alert_url`` -- a Cloudflare Worker that emails the
 approved users -- with ``Authorization: Bearer <secret>``. At most one
 alert per failure kind per hour. The payload never carries a recipient
@@ -27,10 +27,18 @@ logger = logging.getLogger(__name__)
 #: One alert per kind per this many seconds.
 ALERT_INTERVAL_S = 3600
 
+KIND_AUTHENTICATION = "authentication"
+KIND_FORBIDDEN = "forbidden"
 KIND_QUOTA = "quota"
-KIND_SEND_FAILED = "send_failed"
+KIND_PROVIDER = "provider"
+KIND_NETWORK = "network"
+# Backwards-compatible name for callers that only need an outage bucket.
+KIND_SEND_FAILED = KIND_PROVIDER
 
-_TAIL = "sign-in and guest codes are not being delivered. Approved users can still sign in at /login."
+_TAIL = (
+    "guest and sign-in codes, sign-in notices, set-password links, and deletion "
+    "codes are not being delivered. Approved users can still sign in at /login."
+)
 
 Poster = Callable[[str, str, dict], None]
 
@@ -41,12 +49,31 @@ def message_for(kind: str, status: int | None) -> str:
         # Resend answers 429 both for a used-up quota and for its short
         # per-second rate limit; the status alone can't tell them apart.
         return f"Resend quota used up or rate-limited (HTTP 429): {_TAIL}"
-    what = f"HTTP {status}" if status is not None else "network error"
-    return f"Resend send failed ({what}): {_TAIL}"
+    if kind == KIND_AUTHENTICATION:
+        return f"Resend authentication failed (HTTP 401): {_TAIL}"
+    if kind == KIND_FORBIDDEN:
+        return (
+            "Resend rejected the sender or Cloudflare blocked the irc-lens agent "
+            f"(HTTP 403): {_TAIL}"
+        )
+    if kind == KIND_PROVIDER:
+        return f"Resend service failed (HTTP {status}): {_TAIL}"
+    return f"Resend send failed (network error): {_TAIL}"
 
 
-def classify(status: int | None) -> str:
-    return KIND_QUOTA if status == 429 else KIND_SEND_FAILED
+def classify(status: int | None) -> str | None:
+    """Return an alert kind only when *status* indicates a delivery outage."""
+    if status is None:
+        return KIND_NETWORK
+    if status == 401:
+        return KIND_AUTHENTICATION
+    if status == 403:
+        return KIND_FORBIDDEN
+    if status == 429:
+        return KIND_QUOTA
+    if 500 <= status <= 599:
+        return KIND_PROVIDER
+    return None
 
 
 def _http_post(url: str, secret: str, payload: dict) -> None:

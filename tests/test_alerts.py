@@ -16,6 +16,8 @@ RECIPIENT = "victim@example.com"
 CODE = "SECRETCODE-9X"
 SECRET = secrets.token_urlsafe(8)
 API_KEY = secrets.token_urlsafe(8)
+PROVIDER_BODY = "provider echoed private payload"
+PROVIDER_REMEDIATION = "private provider remediation"
 
 
 class Clock:
@@ -43,7 +45,10 @@ class Failing:
 
     def send(self, to, subject, body):
         raise MailSendError(
-            code=EXIT_ENV_ERROR, message="x", remediation="y", status=self.status
+            code=EXIT_ENV_ERROR,
+            message=PROVIDER_BODY,
+            remediation=PROVIDER_REMEDIATION,
+            status=self.status,
         )
 
 
@@ -79,20 +84,54 @@ def test_429_is_quota_and_payload_is_clean():
     assert metrics.get_metrics().snapshot()["delivery_alerts"] == before + 1
 
 
-def test_500_is_send_failed():
+@pytest.mark.parametrize(
+    ("status", "kind"),
+    [
+        (400, None),
+        (401, "authentication"),
+        (403, "forbidden"),
+        (404, None),
+        (422, None),
+        (429, "quota"),
+        (500, "provider"),
+        (503, "provider"),
+        (None, "network"),
+    ],
+)
+def test_failure_classification(status, kind):
+    assert alerts.classify(status) == kind
+
+
+def test_500_is_provider_failure():
     a, rec, _ = _alerter()
     _send(Failing(500), a)
     p = rec.posts[0][2]
-    assert p["kind"] == "send_failed"
-    assert p["message"].startswith("Resend send failed (HTTP 500)")
+    assert p["kind"] == "provider"
+    assert p["message"].startswith("Resend service failed (HTTP 500)")
 
 
 def test_network_error_is_send_failed():
     a, rec, _ = _alerter()
     _send(Failing(None), a)
     p = rec.posts[0][2]
-    assert p["kind"] == "send_failed"
+    assert p["kind"] == "network"
     assert p["message"].startswith("Resend send failed (network error)")
+
+
+def test_403_mentions_sender_and_cloudflare_agent_block():
+    a, rec, _ = _alerter()
+    _send(Failing(403), a)
+    p = rec.posts[0][2]
+    assert p["kind"] == "forbidden"
+    assert "sender" in p["message"]
+    assert "Cloudflare" in p["message"]
+    assert "agent" in p["message"]
+
+
+def test_alert_wording_covers_every_mail_type():
+    message = alerts.message_for("network", None)
+    for text in ("guest", "sign-in", "notice", "set-password", "deletion"):
+        assert text in message
 
 
 def test_resend_adapter_surfaces_status(monkeypatch):
@@ -123,12 +162,30 @@ def test_rate_limit_per_kind_and_after_an_hour():
     assert len(rec.posts) == 3
 
 
-def test_counter_only_when_post_attempted():
+def test_recipient_error_does_not_alert_or_take_outage_slot(caplog):
+    a, rec, _ = _alerter()
+    before = metrics.get_metrics().snapshot()
+    _send(Failing(422), a)
+    _send(Failing(500), a)
+    assert len(rec.posts) == 1
+    assert rec.posts[0][2]["kind"] == "provider"
+    after = metrics.get_metrics().snapshot()
+    assert after["failed_sends"] == before["failed_sends"] + 2
+    assert after["delivery_alerts"] == before["delivery_alerts"] + 1
+    assert "mail send failed: HTTP 422" in caplog.text
+    assert "mail send failed: HTTP 500" in caplog.text
+    for secret in (RECIPIENT, CODE, PROVIDER_BODY, PROVIDER_REMEDIATION):
+        assert secret not in caplog.text
+
+
+def test_failed_sends_are_counted_when_alert_is_rate_limited():
     a, _, _ = _alerter()
-    before = metrics.get_metrics().snapshot()["delivery_alerts"]
+    before = metrics.get_metrics().snapshot()
     _send(Failing(500), a)
     _send(Failing(500), a)
-    assert metrics.get_metrics().snapshot()["delivery_alerts"] == before + 1
+    after = metrics.get_metrics().snapshot()
+    assert after["failed_sends"] == before["failed_sends"] + 2
+    assert after["delivery_alerts"] == before["delivery_alerts"] + 1
 
 
 def test_poster_raising_is_swallowed(caplog):
@@ -145,10 +202,12 @@ def test_poster_raising_is_swallowed(caplog):
 )
 def test_unset_url_or_secret_means_no_post(url, secret):
     a, rec, _ = _alerter(url=url, secret=secret)
-    before = metrics.get_metrics().snapshot()["delivery_alerts"]
+    before = metrics.get_metrics().snapshot()
     _send(Failing(500), a)
     assert rec.posts == []
-    assert metrics.get_metrics().snapshot()["delivery_alerts"] == before
+    after = metrics.get_metrics().snapshot()
+    assert after["failed_sends"] == before["failed_sends"] + 1
+    assert after["delivery_alerts"] == before["delivery_alerts"]
 
 
 def test_non_provider_errors_do_not_alert():

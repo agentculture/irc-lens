@@ -22,6 +22,7 @@ stored on the adapter, and neither the key nor the token is ever logged.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import time
 import urllib.error
@@ -30,10 +31,12 @@ from typing import Protocol, runtime_checkable
 
 from dataclasses import dataclass
 
-from irc_lens import __version__
+from irc_lens import __version__, metrics
 from irc_lens._errors import EXIT_ENV_ERROR, AfiError
 from irc_lens.config import LensConfig
 from irc_lens.guest_store import DEFAULT_TOKEN_TTL
+
+logger = logging.getLogger(__name__)
 
 #: POST target of Resend's transactional email API.
 RESEND_API_URL = "https://api.resend.com/emails"
@@ -369,9 +372,13 @@ def send_with_alert(
     try:
         adapter.send(to, subject, body)
     except MailSendError as exc:
+        metrics.get_metrics().failed_send()
+        status = f"HTTP {exc.status}" if exc.status is not None else "network error"
+        logger.warning("mail send failed: %s", status)
         if alerter is not None:
             from irc_lens.alerts import classify, message_for
 
             kind = classify(exc.status)
-            alerter.notify(kind, message_for(kind, exc.status))
+            if kind is not None:
+                alerter.notify(kind, message_for(kind, exc.status))
         raise

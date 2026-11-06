@@ -470,7 +470,7 @@ config key and default, in [guest-mode-config.md](guest-mode-config.md).
   password goes back to `303 /login` (0.12.2 behavior), and `/entry/code`,
   `/logout` and `/password` are not served.
 - **Metrics.** `/owner/metrics` adds `signin_codes_sent`, `sessions_started`,
-  `sessions_ended`, `guest_busy` and `delivery_alerts`. No log line contains
+  `sessions_ended`, `guest_busy`, `delivery_alerts` and `failed_sends`. No log line contains
   a code, a session id or a password.
 
 ## Guest data deletion (`/delete`)
