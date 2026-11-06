@@ -616,5 +616,6 @@ async def test_an_unmailed_guest_code_is_revoked(env: Env) -> None:
     rows = env.store._connect().execute(
         "SELECT used FROM tokens WHERE purpose=?", (entry.TOKEN_PURPOSE,)
     ).fetchall()
-    assert rows and all(used == 1 for (used,) in rows)
+    assert rows
+    assert all(used == 1 for (used,) in rows)
     assert pending
