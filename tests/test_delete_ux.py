@@ -10,6 +10,7 @@ import pytest
 
 from irc_lens._errors import AfiError
 from irc_lens.mail import PURPOSE_DELETE, render_token_email
+from irc_lens.web import deletion
 
 from test_guest_admin import EMAIL, IP, _env, env, legal_server  # noqa: F401
 
@@ -55,6 +56,32 @@ async def test_deletion_request_sends_the_deletion_email(env):
     assert subject == "Your chat.culture.dev deletion code"
     assert "delete your guest data" in body
     assert "guest seat" not in body
+
+
+async def test_deletion_request_is_limited_per_address_for_an_hour(env):
+    env.store.record_consent(EMAIL, IP, tos_version="t", privacy_version="p")
+    first = await env.client.post(
+        "/delete/request",
+        data={"email": EMAIL},
+        headers={"CF-Connecting-IP": "10.0.0.0"},
+    )
+    first_html = await first.text()
+    for index in range(1, deletion.MAIL_ADDRESS_HOURLY_LIMIT):
+        response = await env.client.post(
+            "/delete/request",
+            data={"email": EMAIL},
+            headers={"CF-Connecting-IP": f"10.0.0.{index}"},
+        )
+        assert response.status == 200
+
+    limited = await env.client.post(
+        "/delete/request",
+        data={"email": EMAIL},
+        headers={"CF-Connecting-IP": "10.0.1.1"},
+    )
+    assert limited.status == 429
+    assert await limited.text() == first_html
+    assert len(env.mail.sent) == deletion.MAIL_ADDRESS_HOURLY_LIMIT
 
 
 def test_delete_mail_states_permanence_and_safe_ignore():

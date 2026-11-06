@@ -24,12 +24,14 @@ from __future__ import annotations
 import json
 import logging
 import os
+import threading
 import time
 import urllib.error
 import urllib.request
-from typing import Protocol, runtime_checkable
-
+from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 from irc_lens import __version__, metrics
 from irc_lens._errors import EXIT_ENV_ERROR, AfiError
@@ -59,6 +61,17 @@ _SETPW_SUBJECT = "Set your chat.culture.dev password"
 #: Default lifetime of a sign-in code (10 minutes) and a set-password link.
 SIGNIN_TOKEN_TTL = 600
 SETPW_LINK_TTL = 1800
+
+# Resend's provider allowance is 100 messages a day. Keep headroom for
+# provider-side accounting differences while bounding every mail path here.
+RESEND_DAILY_QUOTA = 100
+TOTAL_SEND_LIMIT = 90
+TOTAL_SEND_WINDOW_S = 24 * 60 * 60
+
+# Password-link and deletion-code requests do not use the guest budget, so
+# each known inbox gets its own slower abuse bound.
+MAIL_ADDRESS_HOURLY_LIMIT = 5
+MAIL_ADDRESS_WINDOW_S = 60 * 60
 
 
 def _human_duration(seconds: int) -> str:
@@ -239,6 +252,60 @@ class MailSendError(AfiError):
     status: int | None = None
 
 
+class MailCeilingError(AfiError):
+    """The local all-mail ceiling was reached before a provider call."""
+
+
+class SendCeiling:
+    """Thread-safe rolling-window ceiling shared by every outgoing mail."""
+
+    def __init__(
+        self,
+        *,
+        limit: int = TOTAL_SEND_LIMIT,
+        window_s: int = TOTAL_SEND_WINDOW_S,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._limit = limit
+        self._window_s = window_s
+        self._clock = clock
+        self._sent_at: deque[float] = deque()
+        self._lock = threading.Lock()
+
+    def take(self) -> bool:
+        """Reserve one provider attempt, or return false when capped."""
+        now = self._clock()
+        cutoff = now - self._window_s
+        with self._lock:
+            while self._sent_at and self._sent_at[0] <= cutoff:
+                self._sent_at.popleft()
+            if len(self._sent_at) >= self._limit:
+                return False
+            self._sent_at.append(now)
+            return True
+
+
+_TOTAL_SEND_CEILING = SendCeiling()
+_CEILING_ATTR = "_irc_lens_send_ceiling"
+_CEILING_INSTALL_LOCK = threading.Lock()
+
+
+def _ceiling_for(adapter: MailAdapter) -> SendCeiling:
+    """Return the ceiling shared by every path through one app mailer."""
+    ceiling = getattr(adapter, _CEILING_ATTR, None)
+    if ceiling is not None:
+        return ceiling
+    with _CEILING_INSTALL_LOCK:
+        ceiling = getattr(adapter, _CEILING_ATTR, None)
+        if ceiling is None:
+            ceiling = SendCeiling()
+            try:
+                setattr(adapter, _CEILING_ATTR, ceiling)
+            except (AttributeError, TypeError):
+                return _TOTAL_SEND_CEILING
+        return ceiling
+
+
 @runtime_checkable
 class MailAdapter(Protocol):
     """A provider that delivers one plain-text email."""
@@ -347,13 +414,24 @@ class ResendAdapter:
 
 
 def make_adapter(cfg: LensConfig) -> MailAdapter:
-    """Select the provider adapter from ``cfg.guest_mail_provider``."""
+    """Select the provider adapter from ``cfg.guest_mail_provider``.
+
+    The adapter carries the all-mail ceiling from
+    ``guest_mode.mail.total_daily_ceiling``, shared by every send path.
+    """
     provider = cfg.guest_mail_provider.lower()
     if provider == "none":
-        return NoneAdapter()
-    if provider == "resend":
-        return ResendAdapter(cfg.guest_mail_from, cfg.guest_mail_api_key_env)
-    raise AfiError(
+        adapter: MailAdapter = NoneAdapter()
+    elif provider == "resend":
+        adapter = ResendAdapter(cfg.guest_mail_from, cfg.guest_mail_api_key_env)
+    else:
+        raise _unknown_provider(cfg)
+    setattr(adapter, _CEILING_ATTR, SendCeiling(limit=cfg.guest_mail_total_daily_ceiling))
+    return adapter
+
+
+def _unknown_provider(cfg: LensConfig) -> AfiError:
+    return AfiError(
         code=EXIT_ENV_ERROR,
         message=f"unknown guest mail provider {cfg.guest_mail_provider!r}",
         remediation=("set `guest_mode.mail.provider:` to one of: none, resend"),
@@ -369,6 +447,12 @@ def send_with_alert(
     text carries the status code only -- never *to*, the code, or the
     provider's response.
     """
+    if not _ceiling_for(adapter).take():
+        raise MailCeilingError(
+            code=EXIT_ENV_ERROR,
+            message="outgoing mail ceiling reached",
+            remediation="wait for the rolling mail window to reopen",
+        )
     try:
         adapter.send(to, subject, body)
     except MailSendError as exc:

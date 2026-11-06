@@ -25,13 +25,18 @@ from pathlib import Path
 from aiohttp import web
 
 from irc_lens import metrics
-from irc_lens.mail import PURPOSE_DELETE, render_token_email, send_with_alert
+from irc_lens.mail import (
+    MAIL_ADDRESS_HOURLY_LIMIT,
+    MAIL_ADDRESS_WINDOW_S,
+    PURPOSE_DELETE,
+    render_token_email,
+    send_with_alert,
+)
 from irc_lens.web import csrf
 from irc_lens.web.auth import allows_anonymous
 from irc_lens.web.entry import (
     ENTRY_PAGE_MARKER,
     ERR_CODE,
-    TOKEN_REQUEST_WINDOW_S,
     TOKEN_VERIFY_WINDOW_S,
     _norm_email,
     _over_limit,
@@ -133,7 +138,6 @@ async def get_delete(request: web.Request) -> web.Response:  # NOSONAR S7503
 @allows_anonymous
 async def post_request(request: web.Request) -> web.Response:
     state = _state(request)
-    cfg = state.config
     form = await request.post()
     email = _norm_email(form.get("email"))
     ip = client_ip(request)
@@ -143,8 +147,8 @@ async def post_request(request: web.Request) -> web.Response:
         "delete",
         email,
         ip,
-        limit=cfg.guest_rate_entry_per_min,
-        window=TOKEN_REQUEST_WINDOW_S,
+        limit=MAIL_ADDRESS_HOURLY_LIMIT,
+        window=MAIL_ADDRESS_WINDOW_S,
     )
     if limited:
         metrics.get_metrics().rate_limited()
